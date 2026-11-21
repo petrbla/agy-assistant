@@ -21,25 +21,116 @@ except ImportError:  # Windows nemá POSIX pty/fcntl/termios
     termios = None  # type: ignore[assignment]
 
 _ANSI_RE = re.compile(r"\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_CURSOR_NEWLINE_RE = re.compile(r"\x1B\[(?:[0-9;]*[HfE]|2J)")
+_CURSOR_RIGHT_RE = re.compile(r"\x1B\[(\d*)C")
+_OSC8_URL_RE = re.compile(r"\x1B\]8;[^;\x07\x1B]*;(https?://[^\x07\x1B]+)(?:\x07|\x1B\\)")
 _URL_RE = re.compile(r"https?://[^\s<>\"'\)\]]+")
+_URL_CHAR_RE = re.compile(r"^[A-Za-z0-9\-._~:/?#@!$&'*+,;=%]+$")
+_TRAILING_URL_SEP_RE = re.compile(r"(?:%[0-9A-Fa-f]?|[&=+/\-_.:~])$")
+_BOX_BORDER_RE = re.compile(r"^[│|┃║\s]+$")
+_GOOGLE_OAUTH_PREFIX = "https://accounts.google.com/o/oauth2/auth"
 
 
 def clean_terminal_output(raw: str) -> str:
-    """Odstraní ANSI sekvence z výstupu terminálu."""
-    cleaned = _ANSI_RE.sub("", raw)
+    """Odstraní ANSI sekvence z výstupu terminálu se zachováním řádkování kurzoru."""
+    normalized = _CURSOR_NEWLINE_RE.sub("\n", raw)
+    normalized = _CURSOR_RIGHT_RE.sub(lambda m: " " * min(int(m.group(1) or 1), 8), normalized)
+    cleaned = _ANSI_RE.sub("", normalized)
     return cleaned.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _merge_unique_urls(candidates: list[str]) -> list[str]:
+    """Sloučí URL při zachování pořadí a nahradí kratší/duplicitní Google OAuth URL plnou URL."""
+    kept: list[str] = []
+    for raw_url in candidates:
+        url = raw_url.strip().rstrip(".,;:!?")
+        if not url:
+            continue
+        if any(existing == url or existing.startswith(url) for existing in kept):
+            continue
+        replaced = False
+        for idx, existing in enumerate(kept):
+            if url.startswith(existing) and len(url) > len(existing):
+                kept[idx] = url
+                replaced = True
+                break
+        if not replaced:
+            kept.append(url)
+    google_idxs = [idx for idx, u in enumerate(kept) if u.startswith(_GOOGLE_OAUTH_PREFIX)]
+    if len(google_idxs) > 1:
+        longest_google = max((kept[idx] for idx in google_idxs), key=len)
+        first_idx = google_idxs[0]
+        kept = [
+            longest_google if idx == first_idx else u
+            for idx, u in enumerate(kept)
+            if idx == first_idx or idx not in google_idxs
+        ]
+    return kept
+
+
+def extract_osc8_urls(raw: str) -> list[str]:
+    """Extrahuje plné hyperlinky z ANSI OSC-8 sekvencí ještě před očištěním terminálu."""
+    return _merge_unique_urls([match for match in _OSC8_URL_RE.findall(raw)])
+
+
+def _strip_box_line(line: str) -> str:
+    """Očistí řádek terminálu o okrajové mezery a případný jeden rámečkový znak zleva/zprava."""
+    s = line.strip()
+    if s and s[0] in "│|┃║":
+        s = s[1:].lstrip()
+    if s and s[-1] in "│|┃║":
+        s = s[:-1].rstrip()
+    return s.strip()
+
+
+def _is_url_continuation(current_url: str, cont: str, prev_visible_len: int) -> bool:
+    """Rozpozná, zda další řádek terminálu navazuje na zalomenou URL z předchozího řádku."""
+    if not cont or cont.lower().startswith(("http://", "https://")) or cont.endswith(":"):
+        return False
+    if not _URL_CHAR_RE.fullmatch(cont):
+        return False
+    if _TRAILING_URL_SEP_RE.search(current_url):
+        return True
+    if any(ch in cont for ch in "%=&/+~"):
+        return True
+    if len(cont) >= 16 and any(ch.isdigit() or ch in "-_." for ch in cont):
+        return True
+    if prev_visible_len >= 60 and (
+        any(ch.isdigit() for ch in cont)
+        or any(not ch.isalnum() for ch in cont)
+        or any(ch.isupper() for ch in cont[1:])
+    ):
+        return True
+    return False
+
+
 def extract_urls(text: str) -> list[str]:
-    """Najde unikátní URL odkazy v textu při zachování pořadí."""
-    seen: set[str] = set()
-    urls: list[str] = []
-    for match in _URL_RE.findall(text):
-        url = match.rstrip(".,;:!?")
-        if url not in seen:
-            seen.add(url)
-            urls.append(url)
-    return urls
+    """Najde unikátní URL odkazy v textu a spojí dlouhé URL zalomené na více řádků terminálu."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    raw_urls: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        matches = list(_URL_RE.finditer(line))
+        if not matches:
+            i += 1
+            continue
+        prev_len = len(_strip_box_line(line))
+        for m_idx, match in enumerate(matches):
+            url = match.group(0)
+            is_last_on_line = m_idx == len(matches) - 1
+            trailing = line[match.end() :]
+            reaches_end = is_last_on_line and (trailing == "" or bool(_BOX_BORDER_RE.fullmatch(trailing)))
+            while reaches_end and i + 1 < len(lines):
+                cont = _strip_box_line(lines[i + 1])
+                if not _is_url_continuation(url, cont, prev_len):
+                    break
+                url += cont
+                i += 1
+                prev_len = len(cont)
+            raw_urls.append(url)
+        i += 1
+    return _merge_unique_urls(raw_urls)
 
 
 @dataclass
@@ -60,6 +151,7 @@ class AgyAuthManager:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._state = AuthSessionState()
+        self._raw_output = ""
         self._proc: subprocess.Popen[bytes] | None = None
         self._master_fd: int | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -98,9 +190,11 @@ class AgyAuthManager:
         master_fd, slave_fd = pty.openpty()
         if fcntl is not None and termios is not None:
             with contextlib.suppress(OSError):
-                fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 400, 0, 0))
+                fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 2000, 0, 0))
         env = self.settings.subprocess_env(gemini_api_key="", home_dir=eff_home)
         env.setdefault("TERM", "xterm-256color")
+        env["COLUMNS"] = "2000"
+        env["LINES"] = "40"
 
         try:
             proc = subprocess.Popen(
@@ -124,6 +218,7 @@ class AgyAuthManager:
         os.close(slave_fd)
         self._proc = proc
         self._master_fd = master_fd
+        self._raw_output = ""
         self._state = AuthSessionState(running=True, command=" ".join(args))
         self._reader_task = asyncio.create_task(self._read_loop())
         return self.get_state()
@@ -141,9 +236,13 @@ class AgyAuthManager:
                     break
                 if not chunk:
                     break
-                text = clean_terminal_output(chunk.decode("utf-8", errors="replace"))
+                raw_text = chunk.decode("utf-8", errors="replace")
+                self._raw_output = (self._raw_output + raw_text)[-32000:]
+                text = clean_terminal_output(raw_text)
                 self._state.output = (self._state.output + text)[-16000:]
-                self._state.urls = extract_urls(self._state.output)
+                self._state.urls = _merge_unique_urls(
+                    [*extract_osc8_urls(self._raw_output), *extract_urls(self._state.output)]
+                )
                 if self._proc.poll() is not None:
                     await asyncio.sleep(0.1)
         except asyncio.CancelledError:
@@ -184,4 +283,5 @@ class AgyAuthManager:
         self._close_fd()
         self._proc = None
         self._reader_task = None
+        self._raw_output = ""
         self._state.running = False

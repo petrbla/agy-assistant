@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-from app.auth_session import AgyAuthManager, AuthSessionState, clean_terminal_output, extract_urls
+from app.auth_session import (
+    AgyAuthManager,
+    AuthSessionState,
+    _merge_unique_urls,
+    clean_terminal_output,
+    extract_osc8_urls,
+    extract_urls,
+)
 from app.config import Settings
 from app.db import AssistantDB
 from app.memory import WorkspaceMemory
@@ -68,6 +75,61 @@ def test_clean_terminal_output_and_extract_urls() -> None:
     cleaned = clean_terminal_output(raw)
     assert "\x1b" not in cleaned
     assert extract_urls(cleaned) == ["https://accounts.google.com/o/oauth2/auth?code=123"]
+
+
+def test_extract_urls_reassembles_wrapped_oauth_and_osc8() -> None:
+    # 1. Přesný případ uříznutí za `%` na okraji řádku
+    wrapped_percent = (
+        "Please visit the URL to log in:\n"
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071006060591-abc.apps.googleusercontent.com"
+        "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%\n"
+        "3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=xyz123.\n"
+        "Enter authorization code:\n"
+    )
+    assert extract_urls(wrapped_percent) == [
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071006060591-abc.apps.googleusercontent.com"
+        "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=xyz123"
+    ]
+
+    # 2. Víceřádkové 80-znakové zalomení i uvnitř TUI rámečku `│ ... │`
+    boxed = (
+        "│ https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071 │\n"
+        "│ 006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com&code_c │\n"
+        "│ hallenge=kU8V4Jpwtf1OIIPDod794eP2IZvwb5rh1T_8w5bBlUo&redirect_uri=https%3A │\n"
+        "│ %2F%2Fantigravity.google%2Foauth-callback&response_type=code                 │\n"
+        "│ Enter code:                                                                  │\n"
+    )
+    assert extract_urls(boxed) == [
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071"
+        "006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com&code_c"
+        "hallenge=kU8V4Jpwtf1OIIPDod794eP2IZvwb5rh1T_8w5bBlUo&redirect_uri=https%3A"
+        "%2F%2Fantigravity.google%2Foauth-callback&response_type=code"
+    ]
+
+    # 3. OSC-8 hyperlink v raw ANSI výstupu před očištěním
+    raw_osc8 = "\x1b]8;;https://accounts.google.com/o/oauth2/auth?a=1&b=2\x07Sign in\x1b]8;;\x07\n"
+    assert extract_osc8_urls(raw_osc8) == ["https://accounts.google.com/o/oauth2/auth?a=1&b=2"]
+
+    # 4. Kurzorové skoky TUI nesmí slepit následující text (`Click here...`) na konec URL
+    raw_cursor = (
+        "\x1b[10;1Hhttps://accounts.google.com/o/oauth2/auth?a=1"
+        "\x1b[12;1HClick here to authenticate\n"
+    )
+    assert extract_urls(clean_terminal_output(raw_cursor)) == [
+        "https://accounts.google.com/o/oauth2/auth?a=1"
+    ]
+
+    # 5. Sloučení uříznuté Google OAuth URL a kompletní OSC-8 URL do jediné URL
+    short_broken = (
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline"
+        "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%"
+    )
+    full_oauth = (
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline"
+        "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform"
+        "+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=ok"
+    )
+    assert _merge_unique_urls([short_broken, full_oauth]) == [full_oauth]
 
 
 def test_runtime_overrides_persist_and_sync_settings(tmp_path: Path) -> None:
