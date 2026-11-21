@@ -41,6 +41,10 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert home_res.status_code == 200
     assert "agyOnboardingCard" in home_res.text
     assert "chatAgyAuthBanner" in home_res.text
+    assert "/static/favicon.svg" in home_res.text
+    fav_svg = client.get("/static/favicon.svg")
+    assert fav_svg.status_code == 200 and "<svg" in fav_svg.text
+    assert client.get("/favicon.ico").status_code == 200
     assert client.get("/static/styles.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
     assert client.get("/api/health").status_code == 200

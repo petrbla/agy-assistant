@@ -313,6 +313,13 @@ def create_app(
             return FileResponse(index_file)
         return {"status": "ok", "message": "Asistent Antigravity API běží."}
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        icon_file = STATIC_DIR / "favicon.svg"
+        if icon_file.is_file():
+            return FileResponse(icon_file, media_type="image/svg+xml")
+        raise HTTPException(status_code=404, detail="Favicon nenalezen.")
+
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
