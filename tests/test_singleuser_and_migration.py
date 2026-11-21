@@ -11,7 +11,7 @@ from app.config import Settings
 from app.db import AssistantDB
 from app.memory import WorkspaceMemory
 from app.security import generate_totp_code
-from app.user_env import has_agy_oauth, migrate_legacy_home_if_needed
+from app.user_env import clear_agy_oauth, has_agy_oauth, migrate_legacy_home_if_needed
 from app.web import create_app
 
 
@@ -143,7 +143,10 @@ def test_singleuser_password_and_2fa_flow(tmp_path: Path) -> None:
     hdr = {"Authorization": f"Bearer {tok}"}
 
     assert client.get("/api/status").status_code == 401
-    assert client.get("/api/status", headers=hdr).status_code == 200
+    st_res = client.get("/api/status", headers=hdr)
+    assert st_res.status_code == 200
+    assert st_res.json()["has_agy_oauth"] is False
+    assert st_res.json()["agy_authenticated"] is False
 
     # Nastavení a zapnutí 2FA
     tfa = client.post("/api/2fa/setup", headers=hdr).json()
@@ -169,3 +172,58 @@ def test_singleuser_password_and_2fa_flow(tmp_path: Path) -> None:
     # Staré multi-user endpointy již neexistují
     assert client.get("/api/users", headers=hdr).status_code == 404
     assert client.get("/api/invites", headers=hdr).status_code == 404
+
+
+def test_has_agy_oauth_ignores_cli_runtime_files_and_detects_tokens(tmp_path: Path) -> None:
+    settings = Settings(workspace_dir=tmp_path / "ws", data_dir=tmp_path / "data")
+    gemini_dir = settings.effective_home_dir / ".gemini"
+    cli_dir = gemini_dir / "antigravity-cli"
+    for sub in ("brain", "builtin", "cache", "conversations", "crashes", "implicit", "log"):
+        (cli_dir / sub).mkdir(parents=True, exist_ok=True)
+    (gemini_dir / "config").mkdir(parents=True, exist_ok=True)
+
+    # Typické runtime soubory nepřihlášeného `agy 1.5.14`
+    (cli_dir / "builtin" / "skill.md").write_text("# skill", encoding="utf-8")
+    (cli_dir / "log" / "cli-20261121.log").write_text("started\n", encoding="utf-8")
+    (cli_dir / "conversation_summaries.db").write_bytes(b"sqlite")
+    (cli_dir / "conversation_summaries.db-shm").write_bytes(b"shm")
+    (cli_dir / "conversation_summaries.db-wal").write_bytes(b"wal")
+    (cli_dir / "installation_id").write_text("00000000-0000-0000-0000-000000000000", encoding="utf-8")
+    (cli_dir / "jetski_state.pbtxt").write_text(
+        'installation_uuid: "00000000-0000-0000-0000-000000000000"\n',
+        encoding="utf-8",
+    )
+    (cli_dir / "settings.json").write_text("{}", encoding="utf-8")
+    (gemini_dir / "config" / "mcp_config.json").write_text('{"mcpServers":{}}', encoding="utf-8")
+    (gemini_dir / "google_accounts.json").write_text('{"active": ""}', encoding="utf-8")
+
+    assert has_agy_oauth(settings) is False
+
+    clear_agy_oauth(settings)
+    assert (cli_dir / "settings.json").is_file()
+    assert (gemini_dir / "config" / "mcp_config.json").is_file()
+    assert (cli_dir / "conversation_summaries.db").is_file()
+    assert (cli_dir / "builtin" / "skill.md").is_file()
+
+    # Reálný OAuth token soubor
+    token_file = cli_dir / "antigravity-oauth-token"
+    token_file.write_text('{"refresh_token": "tok-abc"}', encoding="utf-8")
+    assert has_agy_oauth(settings) is True
+    clear_agy_oauth(settings)
+    assert has_agy_oauth(settings) is False
+    assert not token_file.exists()
+
+    # Autentizovaný jetski_state.pbtxt s refresh_tokenem
+    (cli_dir / "jetski_state.pbtxt").write_text(
+        'refresh_token: "1//example-token-123"\n',
+        encoding="utf-8",
+    )
+    assert has_agy_oauth(settings) is True
+    clear_agy_oauth(settings)
+    assert has_agy_oauth(settings) is False
+
+    # google_accounts.json s aktivním účtem
+    (gemini_dir / "google_accounts.json").write_text('{"active": "user@example.com"}', encoding="utf-8")
+    assert has_agy_oauth(settings) is True
+    clear_agy_oauth(settings)
+    assert has_agy_oauth(settings) is False

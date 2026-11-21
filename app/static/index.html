@@ -45,6 +45,7 @@
     <div id="authError" class="alert alert-danger hidden"></div>
 
     <div id="initialSetupCard" class="auth-card hidden">
+      <span class="pill accent" style="margin-bottom:10px;" data-i18n="init_step_badge">Step 1 of 2</span>
       <h1 class="auth-title" data-i18n="init_title">Assistant Initial Setup</h1>
       <p class="auth-desc" data-i18n="init_desc">Create credentials to protect your Web UI. You can enable 2FA right after signing in under Settings.</p>
       <form id="initialSetupForm">
@@ -107,12 +108,52 @@
         </div>
       </div>
     </div>
+
+    <div id="agyOnboardingCard" class="auth-card hidden">
+      <div class="row-between">
+        <span class="pill accent" data-i18n="agy_onboard_step_badge">Step 2 of 2</span>
+        <span id="onboardAgyBadge" class="pill err" data-i18n="agy_auth_signed_out">Not signed in</span>
+      </div>
+      <h1 class="auth-title" style="margin-top:10px;" data-i18n="agy_onboard_title">Authorize Google Antigravity (agy)</h1>
+      <p class="auth-desc" data-i18n="agy_onboard_desc">Connect your Google account via OAuth (or enter a Gemini API key) so the AI assistant can respond in Chat and Telegram.</p>
+      <div class="alert alert-info" style="margin-bottom:12px;" data-i18n="agy_onboard_oauth_hint">1. Click Start OAuth sign-in · 2. Open the Google link &amp; sign in · 3. Paste the authorization code below.</div>
+      <div class="row" style="margin-bottom:10px;">
+        <button id="onboardStartOauthBtn" type="button" class="btn btn-primary" data-i18n="btn_start_oauth">Start OAuth sign-in (agy)</button>
+        <button id="onboardOauthEnterBtn" type="button" class="btn btn-sm" data-i18n="btn_send_enter">Send Enter</button>
+        <button id="onboardStopOauthBtn" type="button" class="btn btn-sm" data-i18n="btn_stop">Stop</button>
+      </div>
+      <div id="onboardOauthUrls" class="row" style="margin-bottom:10px;"></div>
+      <pre id="onboardOauthOutput" class="term" data-i18n="oauth_ready">Ready to sign in…</pre>
+      <form id="onboardOauthInputForm" class="row" style="margin-top:10px;">
+        <input id="onboardOauthCodeInput" type="text" class="input grow mono" placeholder="Paste authorization code from browser…" data-i18n-placeholder="oauth_code_placeholder" />
+        <button type="submit" class="btn btn-sm" data-i18n="btn_send_code">Send code</button>
+      </form>
+      <hr class="divider" />
+      <form id="onboardGeminiKeyForm">
+        <div class="field">
+          <label for="onboardGeminiKey" data-i18n="label_gemini_key">Alternative: custom Gemini API key (optional)</label>
+          <div class="row">
+            <input id="onboardGeminiKey" type="password" class="input grow" placeholder="AIza… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gemini_key" />
+            <button type="submit" class="btn btn-sm" data-i18n="btn_save_api_key">Save API key</button>
+          </div>
+        </div>
+      </form>
+      <hr class="divider" />
+      <div class="row-between">
+        <button id="skipAgyOnboardBtn" type="button" class="btn" data-i18n="btn_skip_for_now">Skip for now</button>
+        <button id="finishAgyOnboardBtn" type="button" class="btn btn-success hidden" data-i18n="btn_continue_to_chat">Continue to Chat</button>
+      </div>
+    </div>
   </section>
 
   <!-- MAIN APP -->
   <main id="appMain" class="container hidden">
     <!-- 1. CHAT -->
     <section id="tab-chat">
+      <div id="chatAgyAuthBanner" class="alert alert-warning row-between hidden" style="margin-bottom:14px;">
+        <span data-i18n="chat_agy_unauth_banner">Antigravity CLI (agy) is not authorized yet. Sign in with Google OAuth or add a Gemini API key to start chatting.</span>
+        <button id="chatAuthorizeAgyBtn" type="button" class="btn btn-primary btn-sm" data-i18n="btn_authorize_agy">Authorize Google agy</button>
+      </div>
       <div class="card chat-shell">
         <div class="chat-toolbar">
           <div class="row">

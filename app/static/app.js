@@ -20,6 +20,7 @@
   let uiDict = {};
   const localeCache = {};
   let isAuthenticated = false;
+  let inAgyOnboarding = false;
   let lastStatus = null;
   let lastOauthState = null;
   let authScreenStatusKey = "";
@@ -127,6 +128,7 @@
     }
     if (!lastOauthState) {
       $("oauthOutput").textContent = t("oauth_ready");
+      if ($("onboardOauthOutput")) $("onboardOauthOutput").textContent = t("oauth_ready");
     }
 
     const defaultOpt = $("chatModelSelect")?.querySelector('option[value=""]');
@@ -291,19 +293,24 @@
   });
 
   function showAuthScreen(mode) {
-    isAuthenticated = false;
+    inAgyOnboarding = mode === "agy-onboarding";
+    isAuthenticated = inAgyOnboarding;
     $("authScreen").classList.remove("hidden");
+    $("authScreen").classList.toggle("wide", inAgyOnboarding);
     $("appMain").classList.add("hidden");
-    $("logoutBtn").classList.add("hidden");
+    $("logoutBtn").classList.toggle("hidden", !inAgyOnboarding || !localStorage.getItem("agy_web_token"));
     document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = true; });
     $("initialSetupCard").classList.toggle("hidden", mode !== "initial");
     $("loginCard").classList.toggle("hidden", mode !== "login");
+    if ($("agyOnboardingCard")) $("agyOnboardingCard").classList.toggle("hidden", !inAgyOnboarding);
   }
 
   function showAppMain() {
+    inAgyOnboarding = false;
     isAuthenticated = true;
     authScreenStatusKey = "";
     $("authScreen").classList.add("hidden");
+    $("authScreen").classList.remove("wide");
     $("appMain").classList.remove("hidden");
     document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = false; });
     $("logoutBtn").classList.toggle("hidden", !localStorage.getItem("agy_web_token"));
@@ -340,12 +347,19 @@
       if (statusData.language && statusData.language !== currentLang) {
         await applyLanguage(statusData.language, { persistBackend: false });
       }
+      const skipped = sessionStorage.getItem("agy_onboarding_skipped") === "1";
+      if (statusData.agy_available && !statusData.agy_authenticated && !skipped) {
+        applyStatus(statusData);
+        showAuthScreen("agy-onboarding");
+        return;
+      }
       showAppMain();
       applyStatus(statusData);
       await loadModels(false);
       renderChat();
     } catch (_) {
       isAuthenticated = false;
+      inAgyOnboarding = false;
       lastStatus = null;
       authScreenStatusKey = "status_signed_out";
       $("statusPill").textContent = t(authScreenStatusKey);
@@ -373,6 +387,7 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return showAuthErr(data.detail || t("err_setup_failed"));
       localStorage.setItem("agy_web_token", data.session_token);
+      sessionStorage.removeItem("agy_onboarding_skipped");
       toast(t("toast_setup_done"));
       await loadAuthAndBootstrap();
     } catch (err) {
@@ -463,8 +478,11 @@
   };
 
   $("logoutBtn").onclick = async () => {
+    if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; }
+    inAgyOnboarding = false;
     try { await fetch("/api/logout", { method: "POST", headers: getHeaders() }); } catch (_) {}
     localStorage.removeItem("agy_web_token");
+    sessionStorage.removeItem("agy_onboarding_skipped");
     lastStatus = null;
     await loadAuthAndBootstrap();
   };
@@ -489,21 +507,36 @@
     }
     updateAgyBadges(s);
     updateSecurityUi(s);
+    const banner = $("chatAgyAuthBanner");
+    if (banner) banner.classList.toggle("hidden", !s.agy_available || Boolean(s.agy_authenticated));
   }
 
   function updateAgyBadges(info) {
     const authBadge = $("agyAuthBadge");
+    const onboardBadge = $("onboardAgyBadge");
+    const finishBtn = $("finishAgyOnboardBtn");
     const logoutBtn = $("logoutAgyBtn");
     const parts = [];
     if (info.has_agy_oauth) parts.push(t("agy_auth_oauth"));
     if (info.has_gemini_api_key) parts.push(t("agy_auth_api_key"));
     if (parts.length) {
-      authBadge.textContent = t("agy_auth_signed_in", { parts: parts.join(" + ") });
+      const label = t("agy_auth_signed_in", { parts: parts.join(" + ") });
+      authBadge.textContent = label;
       authBadge.className = "pill ok";
+      if (onboardBadge) {
+        onboardBadge.textContent = label;
+        onboardBadge.className = "pill ok";
+      }
+      if (finishBtn) finishBtn.classList.remove("hidden");
       logoutBtn.classList.remove("hidden");
     } else if (typeof info.has_agy_oauth === "boolean") {
       authBadge.textContent = t("agy_auth_signed_out");
       authBadge.className = "pill err";
+      if (onboardBadge) {
+        onboardBadge.textContent = t("agy_auth_signed_out");
+        onboardBadge.className = "pill err";
+      }
+      if (finishBtn) finishBtn.classList.add("hidden");
       logoutBtn.classList.add("hidden");
     }
 
@@ -1134,6 +1167,7 @@
       toast(t("toast_key_saved"));
       await loadSettings();
       await loadModels(true);
+      try { applyStatus(await api("/api/status")); } catch (_) {}
     } catch (err) {
       toast(err.message, "err");
     }
@@ -1143,63 +1177,184 @@
     await api("/api/settings", { method: "POST", body: JSON.stringify({ gemini_api_key: "" }) });
     toast(t("toast_key_cleared"));
     await loadSettings();
+    try { applyStatus(await api("/api/status")); } catch (_) {}
   };
 
   // OAuth PTY
+  function renderOauthBox(outputId, urlsId, st) {
+    const outEl = $(outputId);
+    const urlsEl = $(urlsId);
+    if (outEl) {
+      outEl.textContent = st.error
+        ? t("chat_error_prefix", { msg: st.error })
+        : (st.output || (st.running ? t("oauth_starting") : t("oauth_idle")));
+      outEl.scrollTop = outEl.scrollHeight;
+    }
+    if (urlsEl) {
+      urlsEl.innerHTML = "";
+      (st.urls || []).forEach((u, i) => {
+        const a = document.createElement("a");
+        a.href = u;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.className = "btn btn-primary btn-sm";
+        a.textContent = t("oauth_open_url", { idx: i + 1 });
+        urlsEl.appendChild(a);
+      });
+    }
+  }
+
   function renderOauthState(st) {
     lastOauthState = st;
-    $("oauthOutput").textContent = st.error
-      ? t("chat_error_prefix", { msg: st.error })
-      : (st.output || (st.running ? t("oauth_starting") : t("oauth_idle")));
-    $("oauthOutput").scrollTop = $("oauthOutput").scrollHeight;
-    const urls = $("oauthUrls");
-    urls.innerHTML = "";
-    (st.urls || []).forEach((u, i) => {
-      const a = document.createElement("a");
-      a.href = u;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.className = "btn btn-primary btn-sm";
-      a.textContent = t("oauth_open_url", { idx: i + 1 });
-      urls.appendChild(a);
-    });
-    if (!st.running && authPollTimer) {
+    renderOauthBox("oauthOutput", "oauthUrls", st);
+    renderOauthBox("onboardOauthOutput", "onboardOauthUrls", st);
+  }
+
+  async function handleAgyAuthenticated() {
+    if (authPollTimer) {
+      clearInterval(authPollTimer);
+      authPollTimer = null;
+    }
+    toast(t("toast_agy_auth_done"));
+    if (inAgyOnboarding) {
+      sessionStorage.removeItem("agy_onboarding_skipped");
+      await loadAuthAndBootstrap();
+    } else {
+      await loadSettings();
+      await loadModels(true);
+      try { applyStatus(await api("/api/status")); } catch (_) {}
+    }
+  }
+
+  async function checkAndFinalizeOauth(wasAuthenticated) {
+    const cur = await api("/api/auth/status");
+    renderOauthState(cur);
+    updateAgyBadges(cur);
+    if (!wasAuthenticated && cur.agy_authenticated) {
+      if (cur.running) {
+        setTimeout(() => { api("/api/auth/stop", { method: "POST" }).catch(() => {}); }, 1200);
+      }
+      await handleAgyAuthenticated();
+      return true;
+    }
+    if (!cur.running && authPollTimer) {
       clearInterval(authPollTimer);
       authPollTimer = null;
       loadSettings();
       loadModels(true);
     }
+    return false;
   }
 
-  $("startOauthBtn").onclick = async () => {
+  async function startOauthFlow() {
+    const wasAuthenticated = Boolean(lastStatus && lastStatus.agy_authenticated);
+    let transitionDone = false;
     try {
       const st = await api("/api/auth/start", { method: "POST", body: JSON.stringify({ mode: "interactive" }) });
       renderOauthState(st);
       if (authPollTimer) clearInterval(authPollTimer);
       authPollTimer = setInterval(async () => {
         try {
-          const cur = await api("/api/auth/status");
-          renderOauthState(cur);
-          updateAgyBadges(cur);
+          if (transitionDone) return;
+          const ok = await checkAndFinalizeOauth(wasAuthenticated);
+          if (ok) transitionDone = true;
         } catch (_) {}
       }, 1000);
     } catch (err) {
       toast(err.message, "err");
     }
-  };
-  $("oauthEnterBtn").onclick = async () => renderOauthState(await api("/api/auth/input", { method: "POST", body: JSON.stringify({ value: "" }) }));
-  $("stopOauthBtn").onclick = async () => { await api("/api/auth/stop", { method: "POST" }); renderOauthState(await api("/api/auth/status")); };
+  }
+
+  async function sendOauthInputValue(value = "") {
+    const wasAuthenticated = Boolean(lastStatus && lastStatus.agy_authenticated);
+    try {
+      const st = await api("/api/auth/input", { method: "POST", body: JSON.stringify({ value }) });
+      renderOauthState(st);
+      if (!st.running) {
+        await checkAndFinalizeOauth(wasAuthenticated);
+      }
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
+  async function stopOauthFlow() {
+    if (authPollTimer) {
+      clearInterval(authPollTimer);
+      authPollTimer = null;
+    }
+    try {
+      await api("/api/auth/stop", { method: "POST" });
+      renderOauthState(await api("/api/auth/status"));
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
+  $("startOauthBtn").onclick = startOauthFlow;
+  $("oauthEnterBtn").onclick = () => sendOauthInputValue("");
+  $("stopOauthBtn").onclick = stopOauthFlow;
   $("oauthInputForm").onsubmit = async (e) => {
     e.preventDefault();
     const v = $("oauthCodeInput").value.trim();
     $("oauthCodeInput").value = "";
-    renderOauthState(await api("/api/auth/input", { method: "POST", body: JSON.stringify({ value: v }) }));
+    await sendOauthInputValue(v);
   };
+
+  if ($("onboardStartOauthBtn")) $("onboardStartOauthBtn").onclick = startOauthFlow;
+  if ($("onboardOauthEnterBtn")) $("onboardOauthEnterBtn").onclick = () => sendOauthInputValue("");
+  if ($("onboardStopOauthBtn")) $("onboardStopOauthBtn").onclick = stopOauthFlow;
+  if ($("onboardOauthInputForm")) {
+    $("onboardOauthInputForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const v = $("onboardOauthCodeInput").value.trim();
+      $("onboardOauthCodeInput").value = "";
+      await sendOauthInputValue(v);
+    };
+  }
+  if ($("onboardGeminiKeyForm")) {
+    $("onboardGeminiKeyForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const key = $("onboardGeminiKey").value.trim();
+      if (!key) return toast(t("toast_enter_key"), "warn");
+      try {
+        await api("/api/settings", { method: "POST", body: JSON.stringify({ gemini_api_key: key }) });
+        $("onboardGeminiKey").value = "";
+        sessionStorage.removeItem("agy_onboarding_skipped");
+        toast(t("toast_key_saved"));
+        await loadAuthAndBootstrap();
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    };
+  }
+  if ($("skipAgyOnboardBtn")) {
+    $("skipAgyOnboardBtn").onclick = async () => {
+      sessionStorage.setItem("agy_onboarding_skipped", "1");
+      if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; }
+      await loadAuthAndBootstrap();
+    };
+  }
+  if ($("finishAgyOnboardBtn")) {
+    $("finishAgyOnboardBtn").onclick = async () => {
+      sessionStorage.removeItem("agy_onboarding_skipped");
+      await loadAuthAndBootstrap();
+    };
+  }
+  if ($("chatAuthorizeAgyBtn")) {
+    $("chatAuthorizeAgyBtn").onclick = () => {
+      sessionStorage.removeItem("agy_onboarding_skipped");
+      if (lastStatus) applyStatus(lastStatus);
+      showAuthScreen("agy-onboarding");
+    };
+  }
+
   $("logoutAgyBtn").onclick = async () => {
     if (!confirm(t("confirm_agy_logout"))) return;
     await api("/api/auth/logout", { method: "POST" });
     toast(t("toast_agy_logged_out"));
     await loadSettings();
+    try { applyStatus(await api("/api/status")); } catch (_) {}
   };
   $("checkVerBtn").onclick = async () => {
     const info = await api("/api/agy/version?refresh=true");

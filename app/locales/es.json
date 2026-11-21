@@ -268,7 +268,17 @@
     "toast_2fa_enabled": "¡2FA activado!",
     "toast_codes_copied": "Códigos de recuperación copiados.",
     "toast_2fa_disabled": "2FA desactivado.",
-    "toast_language_switched": "Idioma cambiado a {name}."
+    "toast_language_switched": "Idioma cambiado a {name}.",
+    "init_step_badge": "Paso 1 de 2",
+    "agy_onboard_step_badge": "Paso 2 de 2",
+    "agy_onboard_title": "Autorizar Google Antigravity (agy)",
+    "agy_onboard_desc": "Conecte su cuenta de Google mediante OAuth (o introduzca una clave API de Gemini) para que el asistente pueda responder en el Chat y Telegram.",
+    "agy_onboard_oauth_hint": "1. Pulse Iniciar sesión OAuth · 2. Abra el enlace de Google e inicie sesión · 3. Pegue abajo el código de autorización.",
+    "btn_skip_for_now": "Omitir por ahora",
+    "btn_continue_to_chat": "Continuar al Chat",
+    "chat_agy_unauth_banner": "Antigravity CLI (agy) aún no está autorizado. Inicie sesión con Google OAuth o añada una clave API de Gemini para empezar a chatear.",
+    "btn_authorize_agy": "Autorizar Google agy",
+    "toast_agy_auth_done": "¡Google Antigravity (agy) autorizado correctamente!"
   },
   "backend": {
     "channel_auto": "Auto",

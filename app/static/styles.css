@@ -345,6 +345,9 @@ html, body {
   margin: 56px auto;
   padding: 0 16px;
 }
+.auth-wrap.wide {
+  max-width: 680px;
+}
 .auth-card {
   background: var(--bg-elev);
   border: 1px solid var(--border);

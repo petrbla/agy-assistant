@@ -37,7 +37,10 @@ def _build_client(tmp_path: Path, auth_token: str = "") -> TestClient:
 
 def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     client = _build_client(tmp_path, auth_token="tajne123")
-    assert client.get("/").status_code == 200
+    home_res = client.get("/")
+    assert home_res.status_code == 200
+    assert "agyOnboardingCard" in home_res.text
+    assert "chatAgyAuthBanner" in home_res.text
     assert client.get("/static/styles.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
     assert client.get("/api/health").status_code == 200

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import re
+import struct
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,9 +12,13 @@ from pathlib import Path
 from app.config import Settings
 
 try:
+    import fcntl
     import pty
-except ImportError:  # Windows nemá POSIX pty
+    import termios
+except ImportError:  # Windows nemá POSIX pty/fcntl/termios
+    fcntl = None  # type: ignore[assignment]
     pty = None  # type: ignore[assignment]
+    termios = None  # type: ignore[assignment]
 
 _ANSI_RE = re.compile(r"\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _URL_RE = re.compile(r"https?://[^\s<>\"'\)\]]+")
@@ -91,6 +96,9 @@ class AgyAuthManager:
         args = [self.settings.agy_bin]
 
         master_fd, slave_fd = pty.openpty()
+        if fcntl is not None and termios is not None:
+            with contextlib.suppress(OSError):
+                fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 400, 0, 0))
         env = self.settings.subprocess_env(gemini_api_key="", home_dir=eff_home)
         env.setdefault("TERM", "xterm-256color")
 

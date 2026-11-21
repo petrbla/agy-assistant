@@ -268,7 +268,17 @@
     "toast_2fa_enabled": "2FA aktivované!",
     "toast_codes_copied": "Záložné kódy skopírované.",
     "toast_2fa_disabled": "2FA vypnuté.",
-    "toast_language_switched": "Jazyk prepnutý na: {name}."
+    "toast_language_switched": "Jazyk prepnutý na: {name}.",
+    "init_step_badge": "Krok 1 z 2",
+    "agy_onboard_step_badge": "Krok 2 z 2",
+    "agy_onboard_title": "Autorizácia Google Antigravity (agy)",
+    "agy_onboard_desc": "Prepojte svoj Google účet cez OAuth (alebo vložte vlastný Gemini API kľúč), aby mohol AI asistent odpovedať v Chate aj na Telegrame.",
+    "agy_onboard_oauth_hint": "1. Kliknite na Spustiť OAuth prihlásenie · 2. Otvorte Google odkaz a prihláste sa · 3. Vložte nižšie autorizačný kód.",
+    "btn_skip_for_now": "Zatiaľ preskočiť",
+    "btn_continue_to_chat": "Pokračovať do chatu",
+    "chat_agy_unauth_banner": "Antigravity CLI (agy) zatiaľ nie je autorizované. Na začatie chatu sa prihláste cez Google OAuth alebo vložte Gemini API kľúč.",
+    "btn_authorize_agy": "Autorizovať Google agy",
+    "toast_agy_auth_done": "Google Antigravity (agy) úspešne autorizované!"
   },
   "backend": {
     "channel_auto": "Auto",

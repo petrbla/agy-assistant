@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -14,20 +15,31 @@ from app.runtime_config import sync_agy_settings_file
 
 logger = logging.getLogger(__name__)
 
-# Složky v ~/.gemini/, které patří Antigravity IDE/cache a nesmí se považovat za OAuth
+# Složky v konfiguračním adresáři, které obsahují cache/runtime data `agy` a nikdy neznamenají OAuth
 _SKIP_GEMINI_DIRS = frozenset(
     {
         "antigravity",
         "brain",
-        "code_tracker",
-        "extensions",
-        "plugins",
-        "logs",
-        "tmp",
+        "builtin",
         "cache",
+        "code_tracker",
+        "conversations",
+        "crashes",
+        "extensions",
+        "implicit",
+        "log",
+        "logs",
         "node_modules",
+        "plugins",
+        "tmp",
         ".git",
     }
+)
+_NON_AUTH_FILES = frozenset({"settings.json", "mcp_config.json", "installation_id", "cli.log"})
+_NON_AUTH_SUFFIXES = frozenset({".log", ".db", ".db-shm", ".db-wal", ".lock", ".tmp"})
+_JETSKI_AUTH_RE = re.compile(
+    r'(?i)\b(?:refresh_token|access_token|oauth_token|id_token|api_key)\s*:\s*"[^"\s]{8,}"'
+    r'|\b(?:user_)?email\s*:\s*"[^"\s@]+@[^"\s@]+\.[^"\s@]+"'
 )
 
 
@@ -286,51 +298,100 @@ def import_global_mcp_if_needed(
     return imported
 
 
+def _is_oauth_credential_file(path: Path) -> bool:
+    """Pozitivně ověří, zda jde o reálný OAuth / přihlašovací soubor `agy`, nikoliv cache či runtime stav."""
+    if path.is_symlink() or not path.is_file():
+        return False
+    name = path.name.lower()
+    if name in _NON_AUTH_FILES or any(name.endswith(sfx) for sfx in _NON_AUTH_SUFFIXES):
+        return False
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    if size == 0:
+        return False
+
+    if name == "google_accounts.json":
+        try:
+            data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        active = data.get("active")
+        accounts = data.get("accounts")
+        old = data.get("old")
+        return bool(
+            (isinstance(active, str) and active.strip())
+            or (isinstance(accounts, list) and len(accounts) > 0)
+            or (isinstance(old, list) and len(old) > 0)
+        )
+
+    if name == "jetski_state.pbtxt":
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as fh:
+                sample = fh.read(65536)
+        except OSError:
+            return False
+        return bool(_JETSKI_AUTH_RE.search(sample))
+
+    if name in {"auth.json", "session_auth.json"}:
+        return True
+    return any(tok in name for tok in ("oauth", "cred", "token"))
+
+
 def _iter_oauth_paths(gemini_dir: Path) -> list[Path]:
-    """Vrátí existující OAuth / přihlašovací soubory v `.gemini/` adresáři."""
+    """Vrátí existující reálné OAuth / přihlašovací soubory v zadaném konfiguračním adresáři."""
     if not gemini_dir.is_dir():
         return []
     found: list[Path] = []
-    for item in gemini_dir.iterdir():
-        if item.name in _SKIP_GEMINI_DIRS:
+    stack = [gemini_dir]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = sorted(current.iterdir(), key=lambda p: p.name)
+        except OSError:
             continue
-        if item.name == "config":
+        for item in entries:
+            if item.is_symlink():
+                continue
             if item.is_dir():
-                for sub in item.iterdir():
-                    if sub.name != "mcp_config.json" and sub.is_file():
-                        found.append(sub)
-            continue
-        if item.name == "antigravity-cli":
-            if item.is_dir():
-                for sub in item.iterdir():
-                    if sub.name == "settings.json" or sub.name in _SKIP_GEMINI_DIRS:
-                        continue
-                    if sub.is_file():
-                        found.append(sub)
-                    elif sub.is_dir():
-                        found.extend(p for p in sub.rglob("*") if p.is_file())
-            continue
-        if item.is_file():
-            found.append(item)
-        elif item.is_dir():
-            for sub in item.rglob("*"):
-                if sub.is_file() and not any(part in _SKIP_GEMINI_DIRS for part in sub.parts):
-                    found.append(sub)
+                if item.name not in _SKIP_GEMINI_DIRS:
+                    stack.append(item)
+            elif _is_oauth_credential_file(item):
+                found.append(item)
     return found
+
+
+def _iter_all_oauth_paths(settings: Settings) -> list[Path]:
+    """Najde všechny OAuth soubory `agy` napříč známými konfiguračními složkami HOME."""
+    home = settings.effective_home_dir
+    candidates = (
+        home / ".gemini",
+        home / ".config" / "antigravity-cli",
+        home / ".local" / "share" / "antigravity-cli",
+    )
+    paths: list[Path] = []
+    for base in candidates:
+        paths.extend(_iter_oauth_paths(base))
+    return paths
 
 
 def has_agy_oauth(settings: Settings) -> bool:
     """Zjistí, zda je v HOME uloženo OAuth přihlášení `agy`."""
-    return bool(_iter_oauth_paths(settings.effective_home_dir / ".gemini"))
+    return bool(_iter_all_oauth_paths(settings))
 
 
 def clear_agy_oauth(settings: Settings) -> None:
-    """Odstraní OAuth přihlášení `agy` (bez smazání MCP a settings)."""
-    for path in _iter_oauth_paths(settings.effective_home_dir / ".gemini"):
-        try:
+    """Odstraní OAuth přihlášení `agy` (bez smazání MCP, settings, builtin a DB)."""
+    for path in _iter_all_oauth_paths(settings):
+        with contextlib.suppress(OSError):
             path.unlink()
-        except OSError:
-            pass
+    jetski = settings.effective_home_dir / ".gemini" / "antigravity-cli" / "jetski_state.pbtxt"
+    if jetski.is_file() and not jetski.is_symlink():
+        with contextlib.suppress(OSError):
+            jetski.unlink()
 
 
 def prepare_agy_home(
