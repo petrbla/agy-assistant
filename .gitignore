@@ -29,3 +29,7 @@ gemini-home/
 *.log
 tmp/
 temp/
+
+# Soukromá Docker Compose konfigurace pro vlastní VPS
+docker-compose.vps.yml
+docker-compose.local.yml

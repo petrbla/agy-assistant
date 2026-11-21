@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,35 @@ def migrate_legacy_home_if_needed(settings: Settings) -> bool:
     return migrated
 
 
+def sync_soul_assistant_name(
+    workspace_dir: Path,
+    name: str,
+    *,
+    overwrite_existing: bool = False,
+) -> None:
+    """Propíše explicitně zadané jméno asistenta do `SOUL.md`."""
+    cleaned = name.strip()
+    if not cleaned or cleaned.lower() in {"asistent", "jarvis"}:
+        return
+    soul_path = workspace_dir / "SOUL.md"
+    if not soul_path.is_file():
+        return
+    content = soul_path.read_text(encoding="utf-8")
+    updated = content.replace("{{JMENO}}", cleaned)
+    pattern = re.compile(r"^(\s*(?:[-*]\s*)?\*\*Jméno:\*\*)\s*(.+?)\s*$", re.MULTILINE)
+    match = pattern.search(updated)
+    if match:
+        current_val = match.group(2).lower()
+        if overwrite_existing or "[doplnit" in current_val or "doptej se" in current_val:
+            updated = (
+                updated[: match.start()]
+                + f"{match.group(1)} {cleaned}"
+                + updated[match.end() :]
+            )
+    if updated != content:
+        soul_path.write_text(updated, encoding="utf-8")
+
+
 def ensure_workspace(settings: Settings, owner: OwnerConfig | None = None) -> Path:
     """Inicializuje workspace ze šablony, pokud soubory ještě neexistují."""
     ws = settings.workspace_dir
@@ -97,12 +127,8 @@ def ensure_workspace(settings: Settings, owner: OwnerConfig | None = None) -> Pa
     (ws / "memory").mkdir(parents=True, exist_ok=True)
     (ws / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
 
-    soul_path = ws / "SOUL.md"
-    if soul_path.is_file():
-        content = soul_path.read_text(encoding="utf-8")
-        if "{{JMENO}}" in content:
-            name = (owner.assistant_name if owner else "") or settings.assistant_name
-            soul_path.write_text(content.replace("{{JMENO}}", name), encoding="utf-8")
+    name = (owner.assistant_name if owner else "") or settings.assistant_name
+    sync_soul_assistant_name(ws, name, overwrite_existing=False)
     return ws
 
 
@@ -126,12 +152,8 @@ def reset_workspace(settings: Settings, owner: OwnerConfig | None = None) -> Pat
     memory_dir.mkdir(parents=True, exist_ok=True)
     (ws / ".agents" / "skills").mkdir(parents=True, exist_ok=True)
 
-    soul_path = ws / "SOUL.md"
-    if soul_path.is_file():
-        content = soul_path.read_text(encoding="utf-8")
-        if "{{JMENO}}" in content:
-            name = (owner.assistant_name if owner else "") or settings.assistant_name
-            soul_path.write_text(content.replace("{{JMENO}}", name), encoding="utf-8")
+    name = (owner.assistant_name if owner else "") or settings.assistant_name
+    sync_soul_assistant_name(ws, name, overwrite_existing=False)
     return ws
 
 

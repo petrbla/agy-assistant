@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "n8n-prace": {
+      "url": "https://n8n.example.com/mcp-server/http",
+      "headers": {
+        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+      }
+    },
+    "nocodb-prace": {
+      "url": "https://nocodb.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+      }
+    },
+    "n8n-osobni": {
+      "url": "https://n8n-osobni.example.com/mcp-server/http",
+      "headers": {
+        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+      }
+    },
+    "nocodb-osobni": {
+      "url": "https://nocodb-osobni.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+      }
+    },
+    "google-osobni": {
+      "url": "https://google-mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+      }
+    }
+  }
+}

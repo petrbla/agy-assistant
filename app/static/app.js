@@ -284,7 +284,7 @@
   };
 
   function applyStatus(s) {
-    $("brandTitle").textContent = s.assistant_name || "Jarvis";
+    $("brandTitle").textContent = s.assistant_name || "Asistent";
     const dot = $("brandDot");
     const pill = $("statusPill");
     if (!s.agy_available) {
@@ -508,6 +508,7 @@
         }),
       });
       typing.remove();
+      if (res.assistant_name) $("brandTitle").textContent = res.assistant_name;
       appendMsg(res.text || "(Prázdná odpověď)", "assistant");
     } catch (err) {
       typing.remove();
@@ -855,7 +856,7 @@
   async function loadSettings() {
     try {
       const s = await api("/api/settings");
-      $("cfgAssistantName").value = s.assistant_name || "Jarvis";
+      $("cfgAssistantName").value = s.assistant_name || "Asistent";
       $("cfgTz").value = s.tz || "Europe/Prague";
       $("cfgDefaultContext").value = ["pracovni", "osobni"].includes(s.default_context_mode)
         ? s.default_context_mode
@@ -879,7 +880,7 @@
   $("settingsForm").onsubmit = async (e) => {
     e.preventDefault();
     const body = {
-      assistant_name: $("cfgAssistantName").value.trim() || "Jarvis",
+      assistant_name: $("cfgAssistantName").value.trim() || "Asistent",
       tz: $("cfgTz").value.trim() || "Europe/Prague",
       default_context_mode: $("cfgDefaultContext").value,
       agy_model: $("cfgModel").value.trim(),
@@ -1087,6 +1088,7 @@
         method: "POST",
         body: JSON.stringify({ current_password: $("accCurrentPassword").value, new_password: pw }),
       });
+      if (r.session_token) localStorage.setItem("agy_web_token", r.session_token);
       $("accCurrentPassword").value = ""; $("accNewPassword").value = ""; $("accConfirmPassword").value = "";
       updateSecurityUi(r.owner);
       toast("Heslo uloženo.");

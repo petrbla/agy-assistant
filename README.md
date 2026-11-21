@@ -20,7 +20,7 @@ Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalš
 
 ## Struktura projektu
 
-- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`)
+- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`)
 - `app/static/` – Web UI (`index.html`, `styles.css`, `app.js`)
 - `workspace_template/` – výchozí šablony paměti a skillů (při startu se zkopírují do persistentního `workspace/`, pokud tam ještě nejsou)
 - `Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh` – kontejnerizace pro VPS
@@ -32,23 +32,19 @@ Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalš
 
 Všechna trvalá data (`workspace/`, `data/`, `.gemini/`) žijí v jediném adresáři **`/home/asistent`**.
 
-### Krok 1: Build image
-```bash
-docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main
-```
-*(nebo použijte předbuildovaný image `ghcr.io/petrbla/agy-assistant:latest`, který staví GitHub Actions při každém pushi do `main`)*
+### Krok 1: Portainer → Stacks → Add stack → Web editor
+Nejjednodušší je použít předbuildovaný image z GitHub Container Registry (`ghcr.io/petrbla/agy-assistant:latest`), který automaticky staví GitHub Actions při každém pushi do `main`:
 
-### Krok 2: Portainer → Stacks → Add stack → Web editor
 ```yaml
 services:
   asistent:
-    image: asistent:latest
-    pull_policy: never
+    image: ghcr.io/petrbla/agy-assistant:latest
+    pull_policy: always
     container_name: asistent
     restart: unless-stopped
     init: true
     environment:
-      JMENO: "Jarvis"
+      TZ: "Europe/Prague"
       TG_TOKEN: "xxx"
       TG_ID: "xxx"
     volumes:
@@ -59,7 +55,9 @@ services:
     cpus: 1.5
 ```
 
-### Krok 3: První spuštění
+*(Alternativně si můžete image sestavit i ručně na serveru: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` a v YAML pak použít `image: asistent:latest` a `pull_policy: never`.)*
+
+### Krok 2: První spuštění
 1. Otevřete `http://<IP-VPS>:8080` a nastavte si e-mail, uživatelské jméno a heslo.
 2. V **Nastavení → Antigravity CLI & Přihlášení** klikněte na **Spustit OAuth přihlášení (agy)**, otevřete vypsanou URL a vložte ověřovací kód. *(Alternativně lze vložit vlastní Gemini API klíč.)*
 3. V **Nastavení → Zabezpečení účtu** si doporučeně zapněte **2FA**.

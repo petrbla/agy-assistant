@@ -14,7 +14,7 @@ description: >-
    - **Kritické:** Binárka `agy` se instaluje do `/opt/agy-install` a symlinkuje do `/usr/local/bin/agy`, **nikdy** do `/home/asistent`, jinak by ji překryl volume.
 
 2. **Entrypoint a idempotence (`docker-entrypoint.sh`):**
-   - Kontejner startuje jako `root`, vytvoří složky, nakopíruje `workspace_template/` přes `cp -rn` (bez přepisu dat), dosadí `{{JMENO}}` do `SOUL.md`, vytvoří výchozí `settings.json` a `mcp_config.json` (jen pokud neexistují), nastaví `chown -R asistent:asistent /home/asistent` a spustí aplikaci přes `exec gosu asistent "$@"`.
+   - Kontejner startuje jako `root`, vytvoří složky, nakopíruje `workspace_template/` přes `cp -rn` (bez přepisu dat), při explicitně zadaném `JMENO` ho propíše do `SOUL.md` (jinak si jméno vybere asistent s uživatelem v chatu), vytvoří výchozí `settings.json` a `mcp_config.json` (jen pokud neexistují), nastaví `chown -R asistent:asistent /home/asistent` a spustí aplikaci přes `exec gosu asistent "$@"`.
    - `Dockerfile` odstraňuje CRLF ze shell skriptů (vývoj probíhá i na Windows).
 
 3. **Krátké proměnné pro Portainer:**

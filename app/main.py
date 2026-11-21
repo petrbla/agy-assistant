@@ -40,6 +40,7 @@ async def serve() -> None:
 
     db = AssistantDB(settings.db_path)
     owner = db.ensure_owner(settings)
+    db.cleanup_expired_auth_sessions()
     import_global_mcp_if_needed(db, home_dir=settings.effective_home_dir)
     ensure_workspace(settings, owner)
     prepare_agy_home(settings, db)

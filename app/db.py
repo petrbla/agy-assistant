@@ -200,7 +200,7 @@ class AssistantDB:
                     email TEXT NOT NULL DEFAULT '',
                     display_name TEXT NOT NULL DEFAULT 'Administrátor',
                     web_token TEXT NOT NULL DEFAULT '',
-                    assistant_name TEXT NOT NULL DEFAULT 'Jarvis',
+                    assistant_name TEXT NOT NULL DEFAULT 'Asistent',
                     tz TEXT NOT NULL DEFAULT 'Europe/Prague',
                     default_context_mode TEXT NOT NULL DEFAULT 'auto',
                     telegram_bot_token TEXT NOT NULL DEFAULT '',
@@ -316,7 +316,7 @@ class AssistantDB:
                         row["email"] if "email" in keys else "",
                         row["display_name"] if "display_name" in keys else "Administrátor",
                         row["web_token"] if "web_token" in keys else "",
-                        row["assistant_name"] if "assistant_name" in keys else "Jarvis",
+                        row["assistant_name"] if "assistant_name" in keys else "Asistent",
                         row["tz"] if "tz" in keys else "Europe/Prague",
                         row["default_context_mode"] if "default_context_mode" in keys else "auto",
                         row["telegram_bot_token"] if "telegram_bot_token" in keys else "",
@@ -702,6 +702,15 @@ class AssistantDB:
     def revoke_all_auth_sessions(self) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM auth_sessions")
+
+    def cleanup_expired_auth_sessions(self) -> int:
+        """Smaže expirované záznamy v `auth_sessions` a vrátí počet odstraněných řádků."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM auth_sessions WHERE expires_at <= ?",
+                (self._now_iso(),),
+            )
+            return cur.rowcount
 
     def list_mcp_servers(self) -> list[McpServerRecord]:
         with self._connect() as conn:

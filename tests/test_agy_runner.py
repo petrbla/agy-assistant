@@ -85,7 +85,7 @@ def test_build_command_and_context_prompt(tmp_path: Path) -> None:
     assert has_pending_onboarding(tmp_path) is True
     onb_prompt = runner.format_prompt("Ahoj", "auto", "web", onboarding_pending=True)
     assert "USER.md" in onb_prompt
-    (tmp_path / "USER.md").write_text("- **Jméno:** Petr", encoding="utf-8")
+    (tmp_path / "USER.md").write_text("- **Jméno:** Jan", encoding="utf-8")
     assert has_pending_onboarding(tmp_path) is False
 
 
@@ -299,7 +299,7 @@ async def test_persistent_warm_session_reuses_single_process(tmp_path: Path) -> 
             {
                 "event": "result",
                 "result": {
-                    "response": "Ahoj Petře!",
+                    "response": "Ahoj Jane!",
                     "conversation_id": "warm-1",
                     "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
                 },
@@ -372,7 +372,7 @@ async def test_persistent_warm_session_reuses_single_process(tmp_path: Path) -> 
     assert written_lines[0]["event"] == "user"
     assert isinstance(written_lines[0]["message"], dict)
     assert "První zpráva" in str(written_lines[0]["message"].get("content", ""))
-    assert r1.success and r1.text == "Ahoj Petře!" and r1.conversation_id == "warm-1"
+    assert r1.success and r1.text == "Ahoj Jane!" and r1.conversation_id == "warm-1"
     assert r1.total_tokens == 120
     assert r2.success and r2.text == "Druhá odpověď bleskově." and r2.total_tokens == 155
 
@@ -411,5 +411,49 @@ async def test_persistent_warm_session_falls_back_to_oneshot_on_eof(tmp_path: Pa
     assert res.text == "Fallback OK"
     assert res.conversation_id == "c-fb"
     assert runner._stream_json_supported is False
+
+
+async def test_soul_name_syncs_to_owner_after_chat_turn(tmp_path: Path) -> None:
+    from app.agy_runner import extract_assistant_name_from_soul
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / "SOUL.md").write_text(
+        "# Osobnost asistenta (SOUL.md)\n- **Jméno:** [DOPLNIT: Doptej se]\n",
+        encoding="utf-8",
+    )
+    assert extract_assistant_name_from_soul(ws) is None
+
+    settings = Settings(
+        workspace_dir=ws,
+        data_dir=tmp_path / "data",
+        agy_persistent_session=False,
+    )
+    db = AssistantDB(settings.db_path)
+    owner = db.ensure_owner(settings)
+    assert owner.assistant_name == "Asistent"
+
+    runner = AgyRunner(settings, db)
+    fake_proc = AsyncMock()
+    fake_proc.returncode = 0
+
+    async def _fake_communicate():
+        (ws / "SOUL.md").write_text(
+            "# Osobnost asistenta (SOUL.md)\n- **Jméno:** Viktor\n",
+            encoding="utf-8",
+        )
+        return (json.dumps({"response": "Budu se jmenovat Viktor.", "conversationId": "c-n1"}).encode(), b"")
+
+    fake_proc.communicate = AsyncMock(side_effect=_fake_communicate)
+
+    with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+        res = await runner.run("Říkejme ti Viktor", session_key="web:auto", source="web")
+
+    assert res.success is True
+    assert extract_assistant_name_from_soul(ws) == "Viktor"
+    updated_owner = db.get_owner()
+    assert updated_owner is not None
+    assert updated_owner.assistant_name == "Viktor"
+
 
 

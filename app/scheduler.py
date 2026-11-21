@@ -15,7 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.agy_runner import AgyResult, AgyRunner
 from app.config import ContextMode, Settings
 from app.db import AssistantDB
-from app.user_env import ensure_workspace, prepare_agy_home
+from app.user_env import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,6 @@ class AssistantScheduler:
         if self.db is not None:
             owner = self.db.get_owner()
             ensure_workspace(self.settings, owner)
-            prepare_agy_home(self.settings, self.db)
         return await self.runner.run(
             prompt,
             session_key=session_key,
@@ -264,7 +263,6 @@ class AssistantScheduler:
                 )  # type: ignore[assignment]
                 try:
                     ensure_workspace(self.settings, owner)
-                    prepare_agy_home(self.settings, self.db, context_mode=ctx)
                     res = await self.runner.run(
                         NIGHTLY_MEMORY_FLUSH_PROMPT,
                         session_key=session_key,

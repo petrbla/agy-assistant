@@ -7,7 +7,7 @@ Tento soubor slouží jako trvalá paměť asistenta. Průběžně sem ukládej 
 
 ## Naučené preference a procesy
 - Komunikace v češtině, stručné výstupy.
-- Striktní rozdělení MCP nástrojů mezi **firemní** a **soukromé**.
+- Striktní rozdělení MCP nástrojů mezi **pracovní** a **osobní**.
 
 ## Důležité kontakty a odkazy
 - *Doplň podle potřeby.*

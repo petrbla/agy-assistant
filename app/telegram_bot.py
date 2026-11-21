@@ -746,7 +746,6 @@ class TelegramAssistantBot:
             chat_session = self._chat_session_key(message, active_ctx)
             owner = self._owner()
             ensure_workspace(self.settings, owner)
-            prepare_agy_home(self.settings, self.db, context_mode=active_ctx)
             result = await self.runner.run(
                 prompt,
                 session_key=chat_session,

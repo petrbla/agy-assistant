@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # Identita a cesty
     assistant_name: str = Field(
-        default="Jarvis",
+        default="Asistent",
         validation_alias=AliasChoices("assistant_name", "jmeno"),
     )
     workspace_dir: Path = Path("/home/asistent/workspace")
@@ -100,7 +100,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_derived_dirs(self) -> Settings:
-        """Upraví odvozené cesty při lokálním spuštění nebo v testech."""
+        """Upraví odvozené cesty a výchozí jméno při prázdném `JMENO`."""
+        if not self.assistant_name.strip():
+            self.assistant_name = "Asistent"
         if "agy_home_dir" not in self.model_fields_set and self.agy_home_dir is None:
             if self.data_dir != Path("/home/asistent/data"):
                 self.agy_home_dir = self.data_dir.parent / "home"

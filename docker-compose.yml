@@ -7,7 +7,7 @@ services:
     init: true
     environment:
       TZ: ${TZ:-Europe/Prague}
-      JMENO: ${JMENO:-Jarvis}
+      JMENO: ${JMENO:-}
       TG_TOKEN: ${TG_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
       TG_ID: ${TG_ID:-${TELEGRAM_ALLOWED_USERS:-}}
     ports:

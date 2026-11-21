@@ -19,6 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.config import ContextMode, Settings
 from app.db import AssistantDB
+from app.user_env import prepare_agy_home
 
 logger = logging.getLogger(__name__)
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -447,6 +448,29 @@ def has_pending_assistant_name(workspace_dir: Path | None) -> bool:
     if workspace_dir is None:
         return False
     return _file_has_placeholder(workspace_dir / "SOUL.md")
+
+
+def extract_assistant_name_from_soul(workspace_dir: Path) -> str | None:
+    """Přečte zvolené jméno asistenta ze souboru `SOUL.md`, pokud již bylo doplněno."""
+    soul_path = workspace_dir / "SOUL.md"
+    if not soul_path.is_file() or has_pending_assistant_name(workspace_dir):
+        return None
+    try:
+        content = soul_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = re.search(
+        r"^\s*(?:[-*]\s*)?\*\*Jméno:\*\*\s*(.+?)\s*$",
+        content,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    if not match:
+        return None
+    candidate = match.group(1).strip().strip("*_\"' ").rstrip(".")
+    lowered = candidate.lower()
+    if not (1 <= len(candidate) <= 60) or "doplnit" in lowered or "doptej" in lowered:
+        return None
+    return candidate
 
 
 def has_pending_onboarding(workspace_dir: Path | None) -> bool:
@@ -978,6 +1002,15 @@ class AgyRunner:
             error=err_msg,
         )
 
+    def _sync_assistant_name_from_soul(self, workspace_dir: Path) -> None:
+        """Synchronizuje jméno zvolené asistentem v `SOUL.md` zpět do databáze."""
+        soul_name = extract_assistant_name_from_soul(workspace_dir)
+        if not soul_name:
+            return
+        owner = self.db.get_owner()
+        if owner is not None and owner.assistant_name != soul_name:
+            self.db.update_owner(assistant_name=soul_name)
+
     async def run(
         self,
         prompt: str,
@@ -1014,6 +1047,7 @@ class AgyRunner:
                 else (owner.agy_model if owner is not None else self.settings.agy_model)
             ).strip()
             eff_tz = (owner.tz if owner is not None else self.settings.tz) or "Europe/Prague"
+            prepare_agy_home(self.settings, self.db, context_mode=effective_ctx)
 
             is_new_chat = conv_id is None and source in ("web", "telegram")
             assistant_name_pending = is_new_chat and has_pending_assistant_name(eff_cwd)
@@ -1079,6 +1113,7 @@ class AgyRunner:
                         self.db.set_conversation_id(session_key, final_conv_id, effective_ctx)
                     if source in ("web", "telegram"):
                         self._apply_schedule_request(eff_cwd)
+                        self._sync_assistant_name_from_soul(eff_cwd)
                     self.db.log_run(
                         source=source,
                         session_key=session_key,
@@ -1171,6 +1206,7 @@ class AgyRunner:
                     self.db.set_conversation_id(session_key, final_conv_id, effective_ctx)
                 if source in ("web", "telegram"):
                     self._apply_schedule_request(eff_cwd)
+                    self._sync_assistant_name_from_soul(eff_cwd)
 
                 self.db.log_run(
                     source=source,

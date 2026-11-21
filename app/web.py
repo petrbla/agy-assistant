@@ -42,6 +42,7 @@ from app.user_env import (
     has_agy_oauth,
     prepare_agy_home,
     reset_workspace,
+    sync_soul_assistant_name,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -440,7 +441,13 @@ def create_app(
         ):
             raise HTTPException(status_code=400, detail="Současné heslo nesouhlasí.")
         updated = db.update_owner(password_hash=hash_password(payload.new_password))
-        return {"status": "ok", "owner": _owner_public_dict(updated, settings)}
+        db.revoke_all_auth_sessions()
+        session_token = db.create_auth_session()
+        return {
+            "status": "ok",
+            "session_token": session_token,
+            "owner": _owner_public_dict(updated, settings),
+        }
 
     @app.post("/api/2fa/setup")
     async def setup_2fa(owner: OwnerConfig = Depends(require_auth)) -> dict[str, str]:
@@ -584,6 +591,10 @@ def create_app(
 
         updated = db.update_owner(**owner_updates)
         ensure_workspace(settings, updated)
+        if "assistant_name" in owner_updates:
+            sync_soul_assistant_name(
+                settings.workspace_dir, updated.assistant_name, overwrite_existing=True
+            )
         prepare_agy_home(settings, db)
         if isinstance(runner, AgyRunner):
             if "gemini_api_key" in owner_updates:
@@ -754,7 +765,6 @@ def create_app(
         effective_ctx = payload.context_mode or default_ctx
         channel = normalize_chat_channel(effective_ctx)
         session_key = f"web:{channel}" if payload.session_key == "web:default" else payload.session_key
-        prepare_agy_home(settings, db, context_mode=effective_ctx)
         effective_model = payload.model if payload.model is not None else owner.agy_model
         result = await runner.run(
             payload.prompt,
@@ -763,7 +773,9 @@ def create_app(
             context_mode=effective_ctx,
             model=effective_model,
         )
-        return asdict(result)
+        data = asdict(result)
+        data["assistant_name"] = _get_owner().assistant_name
+        return data
 
     @app.post("/api/chat/reset")
     async def post_chat_reset(

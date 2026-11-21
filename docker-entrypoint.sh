@@ -5,7 +5,7 @@ ASISTENT_HOME="/home/asistent"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$ASISTENT_HOME/workspace}"
 DATA_DIR="${DATA_DIR:-$ASISTENT_HOME/data}"
 TEMPLATE_DIR="/app/workspace_template"
-JMENO_VALUE="${JMENO:-${ASSISTANT_NAME:-Jarvis}}"
+JMENO_VALUE="${JMENO:-${ASSISTANT_NAME:-}}"
 
 mkdir -p "$WORKSPACE_DIR" "$DATA_DIR" "$ASISTENT_HOME/secrets" \
     "$ASISTENT_HOME/.gemini/antigravity-cli" "$ASISTENT_HOME/.gemini/config"
@@ -14,8 +14,23 @@ mkdir -p "$WORKSPACE_DIR" "$DATA_DIR" "$ASISTENT_HOME/secrets" \
 if [ -d "$TEMPLATE_DIR" ]; then
     cp -rn "$TEMPLATE_DIR/." "$WORKSPACE_DIR/" 2>/dev/null || true
     mkdir -p "$WORKSPACE_DIR/memory" "$WORKSPACE_DIR/.agents/skills"
-    if [ -f "$WORKSPACE_DIR/SOUL.md" ]; then
-        sed -i "s/{{JMENO}}/${JMENO_VALUE//\//\\/}/g" "$WORKSPACE_DIR/SOUL.md" || true
+    if [ -f "$WORKSPACE_DIR/SOUL.md" ] && [ -n "$JMENO_VALUE" ] && [ "$JMENO_VALUE" != "Asistent" ] && [ "$JMENO_VALUE" != "Jarvis" ]; then
+        JMENO_ENV="$JMENO_VALUE" SOUL_FILE="$WORKSPACE_DIR/SOUL.md" python3 - <<'PY'
+import os, re
+from pathlib import Path
+
+p = Path(os.environ["SOUL_FILE"])
+name = os.environ["JMENO_ENV"].strip()
+txt = p.read_text(encoding="utf-8")
+txt = txt.replace("{{JMENO}}", name)
+txt = re.sub(
+    r"^(\s*(?:[-*]\s*)?\*\*Jméno:\*\*)\s*\[DOPLNIT:.*\]\s*$",
+    rf"\1 {name}",
+    txt,
+    flags=re.MULTILINE,
+)
+p.write_text(txt, encoding="utf-8")
+PY
     fi
 fi
 
