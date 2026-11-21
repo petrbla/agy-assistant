@@ -43,8 +43,9 @@ Hodnoty z `.env` slouží jako výchozí při prvním startu. Poté je zdrojem p
 3. Vytvoří výchozí `settings.json` a případně `mcp_config.json` z `MCP_PRACE_*` / `MCP_OSOBNI_*` (jen pokud ještě neexistují).
 4. `chown -R asistent:asistent /home/asistent` a `exec gosu asistent "$@"`.
 
-### `docker-compose.yml`
-- Jediný volume `${VOLUME_HOME:-asistent_home}:/home/asistent`, `restart: unless-stopped`, `init: true`, `mem_limit: 2g`, `cpus: 1.5`.
+### `docker-compose.yml` a `docker-compose.build.yml`
+- Výchozí `docker-compose.yml` stahuje předbuildovaný image `ghcr.io/petrbla/agy-assistant:latest` (`pull_policy: always`, `container_name: ${CONTAINER_NAME:-asistent}`), připojuje jediný volume `${VOLUME_HOME:-asistent_home}:/home/asistent` a předává jen základní volitelné proměnné (`TZ`, `JMENO`, `TG_TOKEN`, `TG_ID`); ostatní nastavení probíhá přes Web UI.
+- `docker-compose.build.yml` je volitelný override pro lokální build (`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`).
 
 ## GitHub Actions (`.github/workflows/docker-image.yml`)
 - Při pushi do `main` sestaví image a nahraje ho na `ghcr.io/${{ github.repository }}:latest` (vždy s nejnovější verzí `agy`).

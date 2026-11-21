@@ -73,11 +73,15 @@ services:
 ```bash
 git clone https://github.com/petrbla/agy-assistant.git
 cd agy-assistant
-cp .env.example .env   # vyplňte TELEGRAM_BOT_TOKEN a TELEGRAM_ALLOWED_USERS
-docker compose up -d --build
+cp .env.example .env   # volitelně vyplňte TELEGRAM_BOT_TOKEN a TELEGRAM_ALLOWED_USERS
+docker compose up -d
 ```
 
-Pro jistotu nejnovější verze `agy` při lokálním buildu použijte `docker compose build --no-cache`.
+Chcete-li image sestavit lokálně ze zdrojových kódů místo stažení z GHCR:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+*(Pro jistotu nejnovější verze `agy` při lokálním buildu použijte `--no-cache`.)*
 
 ---
 

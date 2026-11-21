@@ -1,0 +1,9 @@
+# Přepsání pro lokální sestavení image přímo ze zdrojových kódů:
+# docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  asistent:
+    image: asistent:latest
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile

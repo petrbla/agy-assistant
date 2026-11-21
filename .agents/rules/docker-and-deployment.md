@@ -22,5 +22,5 @@ description: >-
 
 4. **Šablony asistenta (`workspace_template/`):**
    - Oddělení **pracovní** vs. **osobní** agendy je popsané obecně v `workspace_template/AGENTS.md` a doplněné v `app/agy_runner.py` (`CONTEXT_HINTS`).
-   - Výchozí MCP názvy v `docker-entrypoint.sh` (`n8n-prace`, `nocodb-prace`, `n8n-osobni`, `nocodb-osobni`, `google-osobni`) a proměnné `MCP_PRACE_*` / `MCP_OSOBNI_*` v `.env.example` a `docker-compose.yml` musí zůstat sladěné.
+   - Výchozí MCP názvy v `docker-entrypoint.sh` (`n8n-prace`, `nocodb-prace`, `n8n-osobni`, `nocodb-osobni`, `google-osobni`) a proměnné `MCP_PRACE_*` / `MCP_OSOBNI_*` v `.env.example` zůstávají sladěné (v `docker-compose.yml` se pro přehlednost drží jen minimum proměnných, zbytek se nastavuje ve Web UI).
    - Šablony musí zůstat obecné – žádná jména, firmy ani osobní údaje.
