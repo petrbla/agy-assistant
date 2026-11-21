@@ -1,0 +1,31 @@
+# Systémové soubory
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Prostředí a tajné údaje
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Runtime data a persistentní workspace na VPS
+data/
+workspace/
+gemini-home/
+
+# Logy a dočasné soubory
+*.log
+tmp/
+temp/

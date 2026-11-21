@@ -1,0 +1,415 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from app.agy_runner import (
+    AgyRunner,
+    extract_semver,
+    has_pending_assistant_name,
+    has_pending_onboarding,
+    is_version_up_to_date,
+    parse_agy_details,
+    parse_agy_output,
+    parse_models_output,
+)
+from app.config import Settings
+from app.db import AssistantDB
+
+
+def test_parse_agy_output_json_with_conversation_id() -> None:
+    raw = json.dumps({"response": "Ahoj světe", "conversationId": "conv-123"})
+    text, conv_id = parse_agy_output(raw)
+    assert text == "Ahoj světe"
+    assert conv_id == "conv-123"
+
+
+def test_parse_agy_output_json_after_log_lines() -> None:
+    raw = "Loading MCP...\n" + json.dumps({"text": "Hotovo", "session_id": "s-42"})
+    text, conv_id = parse_agy_output(raw)
+    assert text == "Hotovo"
+    assert conv_id == "s-42"
+
+
+def test_parse_agy_output_plain_text_fallback() -> None:
+    text, conv_id = parse_agy_output("Prostá textová odpověď")
+    assert text == "Prostá textová odpověď"
+    assert conv_id is None
+
+
+def test_build_command_and_context_prompt(tmp_path: Path) -> None:
+    default_settings = Settings(
+        workspace_dir=tmp_path,
+        data_dir=tmp_path / "data",
+    )
+    default_runner = AgyRunner(default_settings, AssistantDB(default_settings.db_path))
+    assert "--dangerously-skip-permissions" in default_runner.build_command("test", "conv-9")
+
+    settings = Settings(
+        workspace_dir=tmp_path,
+        data_dir=tmp_path / "data",
+        agy_mode="accept-edit",
+        agy_dangerously_skip_permissions=False,
+    )
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+
+    cmd = runner.build_command("test", "conv-9")
+    assert cmd == [
+        "agy",
+        "-p",
+        "test",
+        "--output-format",
+        "json",
+        "--conversation",
+        "conv-9",
+        "--mode",
+        "accept-edit",
+    ]
+
+    formatted = runner.format_prompt("Zkontroluj faktury", "pracovni", "telegram")
+    assert "Kontext: Pracovní" in formatted
+    assert "pracovní MCP" in formatted
+
+    (tmp_path / "SOUL.md").write_text("- **Jméno:** [DOPLNIT: Zatím nemáš jméno]", encoding="utf-8")
+    assert has_pending_assistant_name(tmp_path) is True
+    assert has_pending_onboarding(tmp_path) is True
+    name_prompt = runner.format_prompt("Ahoj", "auto", "web", assistant_name_pending=True)
+    assert "SOUL.md" in name_prompt
+    assert "Max" in name_prompt
+    (tmp_path / "SOUL.md").write_text("- **Jméno:** Max", encoding="utf-8")
+    assert has_pending_assistant_name(tmp_path) is False
+
+    (tmp_path / "USER.md").write_text("- **Jméno:** [DOPLNIT: Doptej se na jméno]", encoding="utf-8")
+    assert has_pending_onboarding(tmp_path) is True
+    onb_prompt = runner.format_prompt("Ahoj", "auto", "web", onboarding_pending=True)
+    assert "USER.md" in onb_prompt
+    (tmp_path / "USER.md").write_text("- **Jméno:** Petr", encoding="utf-8")
+    assert has_pending_onboarding(tmp_path) is False
+
+
+def test_parse_agy_details_empty_response_with_denied_actions() -> None:
+    raw = json.dumps(
+        {
+            "conversation_id": "9b4df63f-dbdc-4201-90f1-2673106ef9f6",
+            "status": "SUCCESS",
+            "response": "",
+            "duration_seconds": 48.5,
+            "num_turns": 2,
+            "usage": {
+                "input_tokens": 87743,
+                "output_tokens": 1340,
+                "total_tokens": 89083,
+            },
+            "denied_actions": [{"action": "read_file", "display_name": "ReadFile"}],
+        }
+    )
+    text, conv_id, usage = parse_agy_details(raw)
+    assert conv_id == "9b4df63f-dbdc-4201-90f1-2673106ef9f6"
+    assert usage is not None
+    assert usage.total_tokens == 89083
+    assert "ReadFile" in text
+    assert not text.startswith("{")
+
+
+async def test_runner_persists_conversation_id_and_logs_run(tmp_path: Path) -> None:
+    settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+
+    fake_proc = AsyncMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(
+        return_value=(
+            json.dumps({"response": "Úkol splněn", "conversationId": "c-777"}).encode(),
+            b"",
+        )
+    )
+
+    with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+        res = await runner.run("Ahoj", session_key="tg:1", source="telegram", context_mode="osobni")
+
+    assert res.success is True
+    assert res.text == "Úkol splněn"
+    assert res.conversation_id == "c-777"
+
+    saved_id, saved_ctx = db.get_session("tg:1")
+    assert saved_id == "c-777"
+    assert saved_ctx == "osobni"
+
+    runs = db.list_runs(limit=5)
+    assert len(runs) == 1
+    assert runs[0].source == "telegram"
+    assert runs[0].success is True
+    assert runs[0].tokens_estimated is True
+    assert runs[0].total_tokens > 0
+
+
+async def test_runner_records_exact_tokens_from_json_usage(tmp_path: Path) -> None:
+    text, cid, usage = parse_agy_details(
+        json.dumps(
+            {
+                "response": "Hotovo",
+                "conversationId": "c-1",
+                "stats": {"models": {"gemini": {"tokens": {"input": 120, "candidates": 45, "total": 165}}}},
+            }
+        )
+    )
+    assert text == "Hotovo"
+    assert cid == "c-1"
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens, usage.estimated) == (
+        120,
+        45,
+        165,
+        False,
+    )
+
+    settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+    fake_proc = AsyncMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(
+        return_value=(
+            json.dumps(
+                {
+                    "response": "Výsledek",
+                    "conversationId": "c-99",
+                    "usage": {"input_tokens": 200, "output_tokens": 80, "total_tokens": 280},
+                }
+            ).encode(),
+            b"",
+        )
+    )
+    with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+        res = await runner.run("Dotaz", session_key="web:auto", source="web")
+
+    assert res.input_tokens == 200
+    assert res.output_tokens == 80
+    assert res.total_tokens == 280
+    assert res.tokens_estimated is False
+    saved = db.list_runs(limit=1)[0]
+    assert (saved.input_tokens, saved.output_tokens, saved.total_tokens, saved.tokens_estimated) == (
+        200,
+        80,
+        280,
+        False,
+    )
+
+
+def test_parse_models_output_and_build_command_with_model(tmp_path: Path) -> None:
+    text_out = (
+        "Fetching available models...\r\n"
+        "Available models:\n"
+        "- gemini-4-argon-medium  Fast\n"
+        "- gemini-3.8-flash-high\n"
+    )
+    assert parse_models_output(text_out) == ["gemini-4-argon-medium", "gemini-3.8-flash-high"]
+    json_out = json.dumps({"models": [{"name": "gemini-2.5-pro"}, {"displayName": "Gemini 3.5 Flash"}]})
+    assert parse_models_output(json_out) == ["gemini-2.5-pro", "Gemini 3.5 Flash"]
+
+    settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")
+    runner = AgyRunner(settings, AssistantDB(settings.db_path))
+    cmd = runner.build_command("ahoj", None, model="Gemini 3.5 Flash (High)")
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "Gemini 3.5 Flash (High)"
+
+
+async def test_version_comparison_and_get_version_info(tmp_path: Path) -> None:
+    assert extract_semver("agy 1.5.9") == (1, 5, 9)
+    assert is_version_up_to_date("1.5.12", "1.5.12") is True
+    assert is_version_up_to_date("1.5.13", "1.5.12") is True
+    assert is_version_up_to_date("1.5.9", "1.5.12") is False
+    assert is_version_up_to_date(None, "1.5.12") is None
+
+    settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")
+    runner = AgyRunner(settings, AssistantDB(settings.db_path))
+    with (
+        patch.object(runner, "check_version", AsyncMock(return_value="1.5.9")),
+        patch("app.agy_runner._fetch_manifest_version_sync", return_value="1.5.12"),
+    ):
+        info = await runner.get_version_info(force_refresh=True)
+    assert info == {
+        "agy_available": True,
+        "agy_version": "1.5.9",
+        "agy_latest_version": "1.5.12",
+        "agy_up_to_date": False,
+        "agy_update_available": True,
+    }
+
+
+async def test_startup_memory_preloaded_only_on_new_chat(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    (ws / "memory").mkdir(parents=True)
+    (ws / "SOUL.md").write_text("Jmenuji se Jarvis.", encoding="utf-8")
+    (ws / "MEMORY.md").write_text("Aktivni projekt: Alfa.", encoding="utf-8")
+    (ws / "memory" / "rozdelane.md").write_text("- Dokoncit fakturu", encoding="utf-8")
+    (ws / "memory" / "server.md").write_text("VPS detaily", encoding="utf-8")
+    (ws / "memory" / "2020-01-01.md").write_text("Stara poznamka", encoding="utf-8")
+
+    settings = Settings(
+        workspace_dir=ws, data_dir=tmp_path / "data", agy_persistent_session=False
+    )
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+
+    captured_cmds: list[tuple[str, ...]] = []
+    fake_proc = AsyncMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(
+        return_value=(json.dumps({"response": "OK", "conversationId": "c-fast"}).encode(), b"")
+    )
+
+    async def _fake_exec(*cmd, **kwargs):
+        captured_cmds.append(tuple(str(c) for c in cmd))
+        return fake_proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        await runner.run("Ahoj", session_key="tg:1:auto", source="telegram")
+        await runner.run("Druha zprava", session_key="tg:1:auto", source="telegram")
+
+    first_prompt = captured_cmds[0][captured_cmds[0].index("-p") + 1]
+    second_prompt = captured_cmds[1][captured_cmds[1].index("-p") + 1]
+
+    assert "Přednačtená paměť" in first_prompt
+    assert "Aktivni projekt: Alfa." in first_prompt
+    assert "Dokoncit fakturu" in first_prompt
+    assert "memory/server.md" in first_prompt
+    assert "2020-01-01.md" not in first_prompt
+    assert "Přednačtená paměť" not in second_prompt
+
+
+async def test_persistent_warm_session_reuses_single_process(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace_dir=tmp_path / "ws",
+        data_dir=tmp_path / "data",
+        agy_persistent_session=True,
+    )
+    settings.workspace_dir.mkdir(parents=True)
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+
+    written_lines: list[dict[str, object]] = []
+    stdout_queue: list[bytes] = [
+        json.dumps({"event": "init", "init": {"conversation_id": "warm-1"}}).encode() + b"\n",
+        json.dumps({"event": "step_update", "step_update": {"text_delta": "Ahoj "}}).encode() + b"\n",
+        json.dumps(
+            {
+                "event": "result",
+                "result": {
+                    "response": "Ahoj Petře!",
+                    "conversation_id": "warm-1",
+                    "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+                },
+            }
+        ).encode()
+        + b"\n",
+        json.dumps(
+            {
+                "event": "result",
+                "result": {
+                    "response": "Druhá odpověď bleskově.",
+                    "conversation_id": "warm-1",
+                    "usage": {"input_tokens": 130, "output_tokens": 25, "total_tokens": 155},
+                },
+            }
+        ).encode()
+        + b"\n",
+    ]
+
+    class _FakeStdin:
+        def write(self, data: bytes) -> None:
+            written_lines.append(json.loads(data.decode("utf-8")))
+
+        async def drain(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class _FakeStdout:
+        async def readline(self) -> bytes:
+            return stdout_queue.pop(0) if stdout_queue else b""
+
+    class _FakeStderr:
+        async def read(self) -> bytes:
+            return b""
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+            self.stdin = _FakeStdin()
+            self.stdout = _FakeStdout()
+            self.stderr = _FakeStderr()
+
+        async def wait(self) -> int:
+            self.returncode = 0
+            return 0
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    spawn_calls: list[tuple[str, ...]] = []
+
+    async def _fake_spawn(*cmd, **kwargs):
+        spawn_calls.append(tuple(str(c) for c in cmd))
+        return _FakeProc()
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_spawn):
+        r1 = await runner.run("První zpráva", session_key="tg:1:auto", source="telegram")
+        r2 = await runner.run("Druhá zpráva", session_key="tg:1:auto", source="telegram")
+        await runner.close_session("tg:1:auto")
+
+    assert len(spawn_calls) == 1
+    assert "--input-format" in spawn_calls[0]
+    assert "stream-json" in spawn_calls[0]
+    assert len(written_lines) == 2
+    assert written_lines[0]["event"] == "user"
+    assert isinstance(written_lines[0]["message"], dict)
+    assert "První zpráva" in str(written_lines[0]["message"].get("content", ""))
+    assert r1.success and r1.text == "Ahoj Petře!" and r1.conversation_id == "warm-1"
+    assert r1.total_tokens == 120
+    assert r2.success and r2.text == "Druhá odpověď bleskově." and r2.total_tokens == 155
+
+
+async def test_persistent_warm_session_falls_back_to_oneshot_on_eof(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace_dir=tmp_path / "ws",
+        data_dir=tmp_path / "data",
+        agy_persistent_session=True,
+    )
+    settings.workspace_dir.mkdir(parents=True)
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+
+    warm_proc = AsyncMock()
+    warm_proc.returncode = None
+    warm_proc.stdin = AsyncMock()
+    warm_proc.stdin.write = lambda _data: None
+    warm_proc.stdin.close = lambda: None
+    warm_proc.stdout = AsyncMock()
+    warm_proc.stdout.readline = AsyncMock(return_value=b"")
+    warm_proc.stderr = AsyncMock()
+    warm_proc.stderr.read = AsyncMock(return_value=b"unknown flag: --input-format")
+    warm_proc.wait = AsyncMock(return_value=2)
+
+    oneshot_proc = AsyncMock()
+    oneshot_proc.returncode = 0
+    oneshot_proc.communicate = AsyncMock(
+        return_value=(json.dumps({"response": "Fallback OK", "conversationId": "c-fb"}).encode(), b"")
+    )
+
+    with patch("asyncio.create_subprocess_exec", side_effect=[warm_proc, oneshot_proc]):
+        res = await runner.run("Test fallback", session_key="tg:1:auto", source="telegram")
+
+    assert res.success is True
+    assert res.text == "Fallback OK"
+    assert res.conversation_id == "c-fb"
+    assert runner._stream_json_supported is False
+
+

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="cs" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asistent Antigravity</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span id="brandDot" class="brand-dot"></span>
+        <span id="brandTitle">Asistent Antigravity</span>
+        <span id="statusPill" class="pill">Načítám…</span>
+      </div>
+
+      <nav class="nav-tabs" aria-label="Hlavní navigace">
+        <button type="button" class="nav-tab active" data-tab="chat">Chat</button>
+        <button type="button" class="nav-tab" data-tab="memory">Paměť</button>
+        <button type="button" class="nav-tab" data-tab="ops">Plánovač &amp; Historie</button>
+        <button type="button" class="nav-tab" data-tab="settings">Nastavení</button>
+      </nav>
+
+      <div class="topbar-right">
+        <button id="themeBtn" type="button" class="btn btn-icon" title="Přepnout světlý / tmavý režim">☀️</button>
+        <button id="logoutBtn" type="button" class="btn btn-sm hidden">Odhlásit</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- PŘIHLÁŠENÍ / PRVNÍ NASTAVENÍ -->
+  <section id="authScreen" class="auth-wrap hidden">
+    <div id="authError" class="alert alert-danger hidden"></div>
+
+    <div id="initialSetupCard" class="auth-card hidden">
+      <h1 class="auth-title">První nastavení asistenta</h1>
+      <p class="auth-desc">Vytvořte si přístupové údaje pro zabezpečení vašeho Web UI. 2FA si můžete zapnout hned po přihlášení v Nastavení.</p>
+      <form id="initialSetupForm">
+        <div class="field">
+          <label for="initEmail">E-mail</label>
+          <input id="initEmail" type="email" class="input" required placeholder="vas@email.cz" />
+        </div>
+        <div class="field">
+          <label for="initUsername">Uživatelské jméno</label>
+          <input id="initUsername" type="text" class="input" required value="admin" />
+        </div>
+        <div class="field">
+          <label for="initPassword">Heslo (min. 8 znaků)</label>
+          <input id="initPassword" type="password" class="input" required minlength="8" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="initPassword2">Potvrzení hesla</label>
+          <input id="initPassword2" type="password" class="input" required minlength="8" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Uložit a vstoupit</button>
+      </form>
+    </div>
+
+    <div id="loginCard" class="auth-card hidden">
+      <h1 class="auth-title">Přihlášení</h1>
+      <p class="auth-desc">Zadejte svůj e-mail nebo uživatelské jméno a heslo.</p>
+
+      <form id="loginStep1Form">
+        <div class="field">
+          <label for="loginIdent">E-mail nebo uživatelské jméno</label>
+          <input id="loginIdent" type="text" class="input" required autocomplete="username" placeholder="admin" />
+        </div>
+        <div class="field">
+          <label for="loginPassword">Heslo</label>
+          <input id="loginPassword" type="password" class="input" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Přihlásit se</button>
+      </form>
+
+      <form id="loginStep2Form" class="hidden">
+        <div id="login2faPrompt" class="alert alert-info">Zadejte 6místný kód z autentizační aplikace.</div>
+        <div class="field">
+          <label for="login2faCode">2FA nebo záložní kód</label>
+          <input id="login2faCode" type="text" class="input mono" required placeholder="123456" autocomplete="one-time-code" />
+        </div>
+        <div class="row">
+          <button type="button" id="login2faBackBtn" class="btn">Zpět</button>
+          <button type="submit" class="btn btn-primary grow">Ověřit a přihlásit</button>
+        </div>
+      </form>
+
+      <div id="tokenLoginWrap" class="hidden">
+        <hr class="divider" />
+        <div class="field">
+          <label for="loginWebToken">Nebo záložní Web Token</label>
+          <div class="row">
+            <input id="loginWebToken" type="password" class="input grow" placeholder="WEB_AUTH_TOKEN" />
+            <button type="button" id="loginTokenBtn" class="btn">Vstoupit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HLAVNÍ APLIKACE -->
+  <main id="appMain" class="container hidden">
+    <!-- 1. CHAT -->
+    <section id="tab-chat">
+      <div class="card chat-shell">
+        <div class="chat-toolbar">
+          <div class="row">
+            <div class="seg" id="channelSeg">
+              <button type="button" data-channel="auto" class="active">Auto</button>
+              <button type="button" data-channel="pracovni">Pracovní</button>
+              <button type="button" data-channel="osobni">Osobní</button>
+            </div>
+            <select id="chatModelSelect" class="select" style="width:auto;min-width:190px;"></select>
+            <div id="effortWrap" class="row hidden" style="gap:6px;">
+              <input id="effortRange" type="range" min="0" max="2" step="1" value="1" style="width:92px;" />
+              <span id="effortLabel" class="pill">Medium</span>
+            </div>
+          </div>
+          <div class="row">
+            <button id="chatCleanupBtn" type="button" class="btn btn-sm" title="Uloží důležité věci z konverzace do paměti a resetuje kontext">🧹 Úklid paměti</button>
+            <button id="chatResetBtn" type="button" class="btn btn-sm">Nový chat</button>
+          </div>
+        </div>
+
+        <div id="chatMessages" class="chat-messages"></div>
+
+        <form id="chatForm" class="chat-input-bar">
+          <textarea id="chatInput" class="textarea grow" rows="1" placeholder="Napiš zprávu… (Enter = odeslat, Shift+Enter = nový řádek)"></textarea>
+          <button id="chatSendBtn" type="submit" class="btn btn-primary">Odeslat</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2. PAMĚŤ -->
+    <section id="tab-memory" class="hidden">
+      <div class="memory-layout">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Soubory paměti</h2>
+            <div class="row" style="gap:6px;">
+              <button id="refreshFilesBtn" type="button" class="btn btn-sm">Obnovit</button>
+              <button id="resetWorkspaceBtn" type="button" class="btn btn-sm btn-danger" title="Přepíše výchozí šablony">Reset</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="field">
+              <input id="fileFilter" type="text" class="input" placeholder="Filtrovat soubory…" />
+            </div>
+            <div id="fileList" class="file-list"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 id="currentFileLabel" class="card-title mono">Vyberte soubor</h2>
+              <p id="fileDirtyHint" class="card-subtitle">Klávesová zkratka Ctrl+S uloží změny.</p>
+            </div>
+            <button id="saveFileBtn" type="button" class="btn btn-primary btn-sm" disabled>Uložit změny</button>
+          </div>
+          <div class="card-body">
+            <textarea id="fileEditor" class="editor-area" disabled placeholder="Vyberte soubor z levého panelu…"></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. PLÁNOVAČ & HISTORIE -->
+    <section id="tab-ops" class="hidden">
+      <div class="grid-4" style="margin-bottom:18px;">
+        <div class="kpi-card">
+          <div class="kpi-label">Spotřeba za poslední hodinu</div>
+          <div id="kpi1h" class="kpi-value">—</div>
+          <div id="kpi1hSub" class="kpi-sub"></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Spotřeba za 24 hodin</div>
+          <div id="kpi24h" class="kpi-value">—</div>
+          <div id="kpi24hSub" class="kpi-sub"></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Spotřeba za 7 dní</div>
+          <div id="kpi7d" class="kpi-value">—</div>
+          <div id="kpi7dSub" class="kpi-sub"></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Celková spotřeba</div>
+          <div id="kpiAll" class="kpi-value">—</div>
+          <div id="kpiAllSub" class="kpi-sub"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Plánovač &amp; Rychlé akce</h2>
+            <p id="opsSummary" class="card-subtitle"></p>
+          </div>
+          <div class="row">
+            <button id="runHeartbeatBtn" type="button" class="btn btn-sm">Spustit Heartbeat</button>
+            <button id="runBriefingBtn" type="button" class="btn btn-sm">Vygenerovat Briefing</button>
+            <button id="runNightlyBtn" type="button" class="btn btn-sm">🧹 Spustit noční úklid</button>
+            <button id="refreshOpsBtn" type="button" class="btn btn-sm">Obnovit</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="jobsList" class="jobs-strip hidden"></div>
+
+          <h3 style="margin:4px 0 10px;font-size:14px;">Vlastní automatické úlohy &amp; připomínky</h3>
+          <div class="table-wrap" style="margin-bottom:14px;">
+            <table class="tasks-table">
+              <thead>
+                <tr>
+                  <th>Název</th>
+                  <th>Plán</th>
+                  <th>Typ</th>
+                  <th>Text / Úkol</th>
+                  <th>Stav</th>
+                  <th style="text-align:right;">Akce</th>
+                </tr>
+              </thead>
+              <tbody id="tasksBody"></tbody>
+            </table>
+          </div>
+
+          <form id="taskForm" class="row">
+            <input id="taskName" type="text" class="input" style="max-width:170px;" required placeholder="Název (např. Oběd)" />
+            <select id="taskScheduleType" class="select" style="max-width:160px;">
+              <option value="cron">Opakovaně (cron)</option>
+              <option value="once">Jednorázově</option>
+            </select>
+            <input id="taskCron" type="text" class="input mono" style="max-width:140px;" placeholder="0 12 * * *" />
+            <input id="taskRunAt" type="datetime-local" class="input hidden" style="max-width:200px;" />
+            <select id="taskActionType" class="select" style="max-width:170px;">
+              <option value="message">Poslat zprávu (0 tok.)</option>
+              <option value="agent">Spustit AI asistenta</option>
+            </select>
+            <input id="taskPrompt" type="text" class="input grow" required placeholder="Text připomínky nebo úkol pro AI…" />
+            <button type="submit" class="btn btn-primary btn-sm">Přidat</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Historie posledních běhů</h2>
+        </div>
+        <div class="card-body">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Čas</th>
+                  <th>Zdroj</th>
+                  <th>Kontext</th>
+                  <th>Prompt</th>
+                  <th>Odpověď</th>
+                  <th>Tokeny</th>
+                  <th>Doba</th>
+                </tr>
+              </thead>
+              <tbody id="runsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. NASTAVENÍ -->
+    <section id="tab-settings" class="hidden">
+      <!-- Antigravity CLI & OAuth -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Antigravity CLI &amp; Přihlášení</h2>
+            <p class="card-subtitle">OAuth přihlášení k Google účtu nebo vlastní Gemini API klíč + správa verze <code class="mono">agy</code>.</p>
+          </div>
+          <div class="row">
+            <span id="agyAuthBadge" class="pill">Neověřeno</span>
+            <span id="agyVerBadge" class="pill">Verze…</span>
+            <button id="checkVerBtn" type="button" class="btn btn-sm">Ověřit verzi</button>
+            <button id="updateAgyBtn" type="button" class="btn btn-sm btn-primary hidden">Aktualizovat agy</button>
+            <button id="logoutAgyBtn" type="button" class="btn btn-sm btn-danger hidden">Odhlásit z agy</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="grid-2">
+            <div>
+              <div class="row" style="margin-bottom:10px;">
+                <button id="startOauthBtn" type="button" class="btn btn-primary btn-sm">Spustit OAuth přihlášení (agy)</button>
+                <button id="oauthEnterBtn" type="button" class="btn btn-sm">Odeslat Enter</button>
+                <button id="stopOauthBtn" type="button" class="btn btn-sm">Zastavit</button>
+              </div>
+              <div id="oauthUrls" class="row" style="margin-bottom:10px;"></div>
+              <pre id="oauthOutput" class="term">Připraveno k přihlášení…</pre>
+              <form id="oauthInputForm" class="row" style="margin-top:10px;">
+                <input id="oauthCodeInput" type="text" class="input grow mono" placeholder="Vložte autorizační kód z prohlížeče…" />
+                <button type="submit" class="btn btn-sm">Odeslat kód</button>
+              </form>
+            </div>
+            <div>
+              <form id="geminiKeyForm">
+                <div class="field">
+                  <label for="cfgGeminiKey">Alternativa: vlastní Gemini API klíč (volitelné)</label>
+                  <input id="cfgGeminiKey" type="password" class="input" placeholder="AIza… (prázdné = beze změny)" />
+                </div>
+                <div class="row">
+                  <button type="submit" class="btn btn-primary btn-sm">Uložit API klíč</button>
+                  <button id="clearGeminiKeyBtn" type="button" class="btn btn-sm btn-danger">Smazat API klíč</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:18px;">
+        <!-- Asistent, Telegram & Plánovač -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Asistent, Telegram &amp; Plánovač</h2>
+          </div>
+          <div class="card-body">
+            <form id="settingsForm">
+              <div class="grid-2">
+                <div class="field">
+                  <label for="cfgAssistantName">Jméno asistenta</label>
+                  <input id="cfgAssistantName" type="text" class="input" placeholder="Jarvis" />
+                </div>
+                <div class="field">
+                  <label for="cfgTz">Časové pásmo</label>
+                  <input id="cfgTz" type="text" class="input" placeholder="Europe/Prague" />
+                </div>
+              </div>
+              <div class="grid-2">
+                <div class="field">
+                  <label for="cfgDefaultContext">Výchozí oblast chatu</label>
+                  <select id="cfgDefaultContext" class="select">
+                    <option value="auto">Auto</option>
+                    <option value="pracovni">Pracovní</option>
+                    <option value="osobni">Osobní</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="cfgModel">Výchozí AI model</label>
+                  <input id="cfgModel" type="text" class="input" list="modelsDatalist" placeholder="prázdné = výchozí z agy" />
+                  <datalist id="modelsDatalist"></datalist>
+                </div>
+              </div>
+              <div class="field">
+                <label for="cfgTgToken">Telegram Bot Token (od @BotFather)</label>
+                <input id="cfgTgToken" type="password" class="input" placeholder="prázdné = beze změny" />
+              </div>
+              <div class="grid-2">
+                <div class="field">
+                  <label for="cfgTgUsers">Povolená Telegram User ID</label>
+                  <input id="cfgTgUsers" type="text" class="input" placeholder="123456789" />
+                </div>
+                <div class="field">
+                  <label for="cfgTgNotify">Notifikační Chat ID (volitelné)</label>
+                  <input id="cfgTgNotify" type="text" class="input" placeholder="prázdné = první povolené" />
+                </div>
+              </div>
+
+              <hr class="divider" />
+              <div class="row-between" style="margin-bottom:12px;">
+                <label class="switch"><input id="cfgHbEnabled" type="checkbox" checked /> Heartbeat zapnut</label>
+                <input id="cfgHbInterval" type="number" class="input" min="1" value="60" style="width:110px;" title="Interval v minutách" />
+              </div>
+              <div class="row-between" style="margin-bottom:12px;">
+                <label class="switch"><input id="cfgBriefEnabled" type="checkbox" checked /> Ranní briefing</label>
+                <input id="cfgBriefCron" type="text" class="input mono" placeholder="0 8 * * *" style="width:150px;" />
+              </div>
+              <div class="row-between" style="margin-bottom:14px;">
+                <label class="switch"><input id="cfgNightlyEnabled" type="checkbox" checked /> Noční úklid paměti &amp; reset</label>
+                <input id="cfgNightlyCron" type="text" class="input mono" placeholder="15 0 * * *" style="width:150px;" />
+              </div>
+
+              <button type="submit" class="btn btn-primary">Uložit nastavení</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- MCP servery -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">MCP servery</h2>
+          </div>
+          <div class="card-body">
+            <div class="table-wrap" style="margin-bottom:16px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Název</th>
+                    <th>Oblast</th>
+                    <th>Cíl</th>
+                    <th>Akce</th>
+                  </tr>
+                </thead>
+                <tbody id="mcpBody"></tbody>
+              </table>
+            </div>
+
+            <form id="mcpForm">
+              <div class="grid-3">
+                <div class="field">
+                  <label for="mcpName">Název</label>
+                  <input id="mcpName" type="text" class="input" required placeholder="např. google" />
+                </div>
+                <div class="field">
+                  <label for="mcpScope">Oblast</label>
+                  <select id="mcpScope" class="select">
+                    <option value="all">Všechny chaty</option>
+                    <option value="pracovni">Pracovní</option>
+                    <option value="osobni">Osobní</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="mcpTransport">Typ</label>
+                  <select id="mcpTransport" class="select">
+                    <option value="http">HTTP</option>
+                    <option value="stdio">stdio</option>
+                  </select>
+                </div>
+              </div>
+              <div id="mcpUrlWrap" class="field">
+                <label for="mcpUrl">MCP URL</label>
+                <input id="mcpUrl" type="text" class="input" placeholder="https://…" />
+              </div>
+              <div id="mcpTokenWrap" class="field">
+                <label for="mcpToken">Bearer Token (volitelné)</label>
+                <input id="mcpToken" type="password" class="input" placeholder="tajný token" />
+              </div>
+              <div id="mcpCmdWrap" class="field hidden">
+                <label for="mcpCommand">Příkaz (stdio)</label>
+                <input id="mcpCommand" type="text" class="input mono" placeholder="npx" />
+              </div>
+              <div id="mcpArgsWrap" class="field hidden">
+                <label for="mcpArgs">Argumenty (JSON pole)</label>
+                <input id="mcpArgs" type="text" class="input mono" placeholder='["-y", "@modelcontextprotocol/server"]' />
+              </div>
+              <div class="row-between">
+                <label class="switch"><input id="mcpEnabled" type="checkbox" checked /> Aktivní</label>
+                <button type="submit" class="btn btn-primary btn-sm">Uložit MCP</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Zabezpečení účtu (Heslo & 2FA) -->
+      <div class="card" style="margin-top:18px;">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Zabezpečení účtu &amp; 2FA (TOTP)</h2>
+            <p class="card-subtitle">Heslo pro přístup k Web UI a dvoufaktorové ověření (Google Authenticator, Authy, 1Password).</p>
+          </div>
+          <span id="totpBadge" class="pill">2FA vypnuto</span>
+        </div>
+        <div class="card-body">
+          <div class="grid-2">
+            <div>
+              <form id="accountEmailForm" style="margin-bottom:16px;">
+                <div class="field">
+                  <label for="accEmail">E-mail účtu</label>
+                  <div class="row">
+                    <input id="accEmail" type="email" class="input grow" required placeholder="vas@email.cz" />
+                    <button type="submit" class="btn btn-sm">Uložit e-mail</button>
+                  </div>
+                </div>
+              </form>
+              <form id="accountPasswordForm">
+                <div id="pwdCurrentWrap" class="field hidden">
+                  <label for="accCurrentPassword">Současné heslo</label>
+                  <input id="accCurrentPassword" type="password" class="input" autocomplete="current-password" />
+                </div>
+                <div class="grid-2">
+                  <div class="field">
+                    <label for="accNewPassword">Nové heslo (min. 8 znaků)</label>
+                    <input id="accNewPassword" type="password" class="input" required minlength="8" autocomplete="new-password" />
+                  </div>
+                  <div class="field">
+                    <label for="accConfirmPassword">Potvrzení hesla</label>
+                    <input id="accConfirmPassword" type="password" class="input" required minlength="8" autocomplete="new-password" />
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Uložit heslo</button>
+              </form>
+            </div>
+
+            <div>
+              <div id="totpDisabledBox">
+                <button id="start2faBtn" type="button" class="btn btn-sm">Nastavit 2FA (QR kód)</button>
+                <div id="totpSetupArea" class="hidden" style="margin-top:12px;">
+                  <div class="row" style="align-items:flex-start;margin-bottom:12px;">
+                    <div id="totpQrBox" class="qr-box"></div>
+                    <div class="grow">
+                      <div class="card-subtitle" style="margin-bottom:6px;">Tajný klíč (Base32):</div>
+                      <code id="totpSecretCode" class="mono" style="display:block;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;word-break:break-all;margin-bottom:8px;"></code>
+                      <button id="copy2faSecretBtn" type="button" class="btn btn-sm">Zkopírovat klíč</button>
+                    </div>
+                  </div>
+                  <form id="enable2faForm" class="row">
+                    <input id="enable2faCode" type="text" class="input grow mono" required placeholder="6místný kód z aplikace" />
+                    <button type="submit" class="btn btn-success btn-sm">Ověřit a zapnout</button>
+                  </form>
+                </div>
+              </div>
+
+              <div id="recoveryCodesBox" class="alert alert-warning hidden" style="margin-top:12px;">
+                <strong>Uložte si záložní kódy (zobrazují se pouze jednou):</strong>
+                <div id="recoveryCodesList" class="recovery-grid mono"></div>
+                <button id="copyRecoveryBtn" type="button" class="btn btn-sm">Zkopírovat kódy</button>
+              </div>
+
+              <div id="totpEnabledBox" class="hidden">
+                <p class="card-subtitle" style="margin-bottom:10px;">2FA je aktivní. K přihlášení je vyžadován TOTP nebo záložní kód.</p>
+                <form id="disable2faForm" class="row">
+                  <input id="disable2faPwd" type="password" class="input hidden" style="max-width:170px;" placeholder="Heslo" />
+                  <input id="disable2faCode" type="text" class="input mono" style="max-width:160px;" required placeholder="2FA kód" />
+                  <button type="submit" class="btn btn-danger btn-sm">Vypnout 2FA</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="/static/vendor/qrcode.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

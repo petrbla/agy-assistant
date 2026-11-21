@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p /opt/agy-install
+rm -f /opt/agy-install/.local/bin/agy
+HOME=/opt/agy-install bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
+AGY_FOUND="$(find /opt/agy-install /usr/local/bin -name agy \( -type f -o -type l \) -executable 2>/dev/null | head -n 1)"
+test -n "$AGY_FOUND"
+if [ "$AGY_FOUND" != "/usr/local/bin/agy" ]; then
+    ln -sf "$AGY_FOUND" /usr/local/bin/agy
+fi
+chmod -R a+rX /opt/agy-install
+/usr/local/bin/agy --version

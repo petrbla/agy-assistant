@@ -1,0 +1,55 @@
+services:
+  asistent:
+    image: asistent:latest
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: asistent-petr
+    restart: unless-stopped
+    init: true
+    environment:
+      JMENO: ${JMENO:-Jarvis}
+      TG_TOKEN: ${TG_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      TG_ID: ${TG_ID:-${TELEGRAM_ALLOWED_USERS:-}}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN:-}
+      TZ: ${TZ:-Europe/Prague}
+      HOME: /home/asistent
+      WORKSPACE_DIR: /home/asistent/workspace
+      DATA_DIR: /home/asistent/data
+      AGY_MODE: ${AGY_MODE:-auto}
+      AGY_DANGEROUSLY_SKIP_PERMISSIONS: ${AGY_DANGEROUSLY_SKIP_PERMISSIONS:-true}
+      AGY_TIMEOUT_SECONDS: ${AGY_TIMEOUT_SECONDS:-300}
+      AGY_PERSISTENT_SESSION: ${AGY_PERSISTENT_SESSION:-true}
+      HEARTBEAT_ENABLED: ${HEARTBEAT_ENABLED:-true}
+      HEARTBEAT_INTERVAL_MINUTES: ${HEARTBEAT_INTERVAL_MINUTES:-60}
+      MORNING_BRIEFING_ENABLED: ${MORNING_BRIEFING_ENABLED:-true}
+      MORNING_BRIEFING_CRON: ${MORNING_BRIEFING_CRON:-0 8 * * *}
+      NIGHTLY_RESET_ENABLED: ${NIGHTLY_RESET_ENABLED:-true}
+      NIGHTLY_RESET_CRON: ${NIGHTLY_RESET_CRON:-15 0 * * *}
+      DEFAULT_CONTEXT_MODE: ${DEFAULT_CONTEXT_MODE:-auto}
+      MCP_PRACE_N8N_URL: ${MCP_PRACE_N8N_URL:-}
+      MCP_PRACE_N8N_TOKEN: ${MCP_PRACE_N8N_TOKEN:-}
+      MCP_PRACE_NOCODB_URL: ${MCP_PRACE_NOCODB_URL:-}
+      MCP_PRACE_NOCODB_TOKEN: ${MCP_PRACE_NOCODB_TOKEN:-}
+      MCP_OSOBNI_N8N_URL: ${MCP_OSOBNI_N8N_URL:-}
+      MCP_OSOBNI_N8N_TOKEN: ${MCP_OSOBNI_N8N_TOKEN:-}
+      MCP_OSOBNI_NOCODB_URL: ${MCP_OSOBNI_NOCODB_URL:-}
+      MCP_OSOBNI_NOCODB_TOKEN: ${MCP_OSOBNI_NOCODB_TOKEN:-}
+      MCP_OSOBNI_GOOGLE_URL: ${MCP_OSOBNI_GOOGLE_URL:-}
+      MCP_OSOBNI_GOOGLE_TOKEN: ${MCP_OSOBNI_GOOGLE_TOKEN:-}
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - ${VOLUME_HOME:-asistent_home}:/home/asistent
+    mem_limit: 2g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  asistent_home:
