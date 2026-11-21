@@ -142,7 +142,7 @@ async def test_telegram_bot_handles_photo_and_excel_attachment(tmp_path: Path) -
         )
         await bot._download_and_handle_attachment(photo_msg)
         photo_prompt = runner.run.await_args.args[0]
-        assert "Příloha z Telegramu (obrázek)" in photo_prompt
+        assert "Telegram attachment (image)" in photo_prompt
         assert "inbox/tg_" in photo_prompt
         assert "Co je na té účtence?" in photo_prompt
         assert len(list((tmp_path / "inbox").glob("*.jpg"))) == 1
@@ -177,10 +177,14 @@ async def test_telegram_bot_handles_photo_and_excel_attachment(tmp_path: Path) -
         assert "Káva | 490" in doc_prompt
         assert "Sečti částku" in doc_prompt
 
-        prompt_preview = build_attachment_prompt(
-            rel_path="inbox/test.pdf", kind="dokument", caption=""
+        prompt_en = build_attachment_prompt(
+            rel_path="inbox/test.pdf", kind="document", caption="", lang="en"
         )
-        assert "inbox/test.pdf" in prompt_preview
+        assert "Telegram attachment (document)" in prompt_en
+        prompt_cs = build_attachment_prompt(
+            rel_path="inbox/test.pdf", kind="dokument", caption="", lang="cs"
+        )
+        assert "Příloha z Telegramu (dokument)" in prompt_cs
     finally:
         await bot.bot.session.close()
 

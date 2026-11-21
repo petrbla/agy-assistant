@@ -20,7 +20,7 @@ description: >-
    - Plánované úlohy volají `runner.run(..., use_conversation=False)`; noční úklid jako jediný pracuje s aktivními konverzacemi.
 
 3. **Zabezpečení Web API a paměti:**
-   - Každý nový endpoint v `app/web.py` (kromě `/`, `/api/health`, `/api/auth/state`, `/api/auth/initial-setup`, `/api/login*`, `/api/logout`) musí mít `Depends(require_auth)`.
+   - Každý nový endpoint v `app/web.py` (kromě `/`, `/api/health`, `/api/i18n`, `/api/i18n/{lang}`, `/api/auth/state`, `/api/auth/initial-setup`, `/api/login*`, `/api/logout`) musí mít `Depends(require_auth)`.
    - Práce se soubory v `workspace/` musí jít přes `WorkspaceMemory`.
    - Do `/api/settings` ani `/api/status` nevracej surové tajné hodnoty – jen booleany `has_*`.
 

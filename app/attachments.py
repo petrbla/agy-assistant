@@ -10,6 +10,8 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.i18n import t
+
 logger = logging.getLogger(__name__)
 
 _SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
@@ -352,42 +354,40 @@ def build_attachment_prompt(
     size_bytes: int = 0,
     extracted_text: str | None = None,
     truncated: bool = False,
+    lang: str = "en",
 ) -> str:
     """Sestaví prompt pro `agy` obsahující cestu k příloze a případně její extrahovaný obsah."""
-    meta_parts = [f"soubor: `{rel_path}`"]
+    meta_parts = [t("prompts.att_file", lang, rel_path=rel_path)]
     if size_bytes > 0:
-        meta_parts.append(f"velikost: {size_bytes} B")
+        meta_parts.append(t("prompts.att_size", lang, size_bytes=size_bytes))
     if mime_type:
-        meta_parts.append(f"typ: {mime_type}")
-    header = f"[Příloha z Telegramu ({kind}): {', '.join(meta_parts)}]"
+        meta_parts.append(t("prompts.att_type", lang, mime_type=mime_type))
+    header = t("prompts.att_header", lang, kind=kind, meta=", ".join(meta_parts))
+
+    is_image = kind in ("image", "obrázek")
+    is_voice = kind in ("voice message", "audio", "hlasová zpráva")
 
     lines = [header]
-    if kind == "obrázek":
-        lines.append(
-            f'Prohlédni si obrázek uložený v pracovním prostoru na cestě "{rel_path}" '
-            "pomocí nástroje pro čtení souborů."
-        )
+    if is_image:
+        lines.append(t("prompts.att_image_instruction", lang, rel_path=rel_path))
     elif extracted_text is not None:
-        lines.append(f'[Extrahovaný obsah souboru "{rel_path}":]')
+        lines.append(t("prompts.att_extracted_start", lang, rel_path=rel_path))
         lines.append(extracted_text)
         if truncated:
-            lines.append(f'... [obsah zkrácen, kompletní soubor je uložen v "{rel_path}"]')
-        lines.append("[Konec extrahovaného obsahu]")
+            lines.append(t("prompts.att_extracted_truncated", lang, rel_path=rel_path))
+        lines.append(t("prompts.att_extracted_end", lang))
     else:
-        lines.append(
-            f'Soubor je uložen v pracovním prostoru na cestě "{rel_path}". '
-            "Pokud potřebuješ, otevři nebo zpracuj ho přímo z disku."
-        )
+        lines.append(t("prompts.att_disk_instruction", lang, rel_path=rel_path))
 
     clean_caption = caption.strip()
     if clean_caption:
-        lines.append(f"Zpráva od uživatele: {clean_caption}")
-    elif kind == "obrázek":
-        lines.append("Úkol uživatele: Prohlédni obrázek, popiš co na něm je a splň případný text na něm.")
-    elif kind in ("hlasová zpráva", "audio"):
-        lines.append("Úkol uživatele: Zpracuj tuto hlasovou/audio přílohu, pokud máš dostupný nástroj pro přepis.")
+        lines.append(t("prompts.att_user_message", lang, caption=clean_caption))
+    elif is_image:
+        lines.append(t("prompts.att_default_image_task", lang))
+    elif is_voice:
+        lines.append(t("prompts.att_default_voice_task", lang))
     else:
-        lines.append("Úkol uživatele: Analyzuj přiložený soubor a stručně shrň jeho obsah a klíčové body.")
+        lines.append(t("prompts.att_default_file_task", lang))
 
     return "\n".join(lines)
 

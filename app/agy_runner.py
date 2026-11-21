@@ -17,8 +17,9 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import ContextMode, Settings
+from app.config import ContextMode, Settings, normalize_language
 from app.db import AssistantDB
+from app.i18n import get_context_hint, get_language_hint, t
 from app.user_env import prepare_agy_home
 
 logger = logging.getLogger(__name__)
@@ -78,14 +79,8 @@ def _fetch_manifest_version_sync(timeout: float = 4.0) -> str | None:
 
 
 CONTEXT_HINTS: dict[str, str] = {
-    "pracovni": (
-        "[Kontext: Pracovní – tento chat je určen výhradně pro pracovní úkoly. "
-        "Používej výhradně pracovní MCP nástroje a drž pracovní agendu odděleně od osobní.]"
-    ),
-    "osobni": (
-        "[Kontext: Osobní – tento chat je určen výhradně pro osobní záležitosti. "
-        "Používej výhradně osobní MCP nástroje a drž soukromou agendu odděleně od pracovní.]"
-    ),
+    "pracovni": t("prompts.context_pracovni", "en"),
+    "osobni": t("prompts.context_osobni", "en"),
 }
 
 
@@ -146,6 +141,7 @@ _TOTAL_TOKEN_KEYS = (
 def build_startup_memory_block(
     workspace_dir: Path,
     tz_name: str = "Europe/Prague",
+    language: str = "en",
 ) -> str:
     """Sestaví kompaktní přednačtený blok paměti pro první zprávu nové konverzace.
 
@@ -164,10 +160,11 @@ def build_startup_memory_block(
         ("USER.md", 3000),
         ("MEMORY.md", 6000),
         ("memory/rozdelane.md", 2500),
+        ("memory/open-tasks.md", 2500),
         (f"memory/{today_name}", 2500),
     ]
     sections: list[str] = []
-    preloaded_memory_names: set[str] = {"rozdelane.md", today_name}
+    preloaded_memory_names: set[str] = {"rozdelane.md", "open-tasks.md", today_name}
     resolved_ws = workspace_dir.resolve()
 
     for rel, limit in targets:
@@ -183,7 +180,9 @@ def build_startup_memory_block(
         if not content:
             continue
         if len(content) > limit:
-            content = content[:limit].rstrip() + f"\n… [zkráceno – zbytek je v {rel}]"
+            content = content[:limit].rstrip() + t(
+                "prompts.startup_memory_truncated", language, rel=rel
+            )
         sections.append(f"### {rel}\n{content}")
 
     mem_dir = workspace_dir / "memory"
@@ -204,15 +203,15 @@ def build_startup_memory_block(
     if not sections and not thematic_files:
         return ""
 
-    out = [
-        "[Přednačtená paměť pro start konverzace – tyto soubory už máš níže, "
-        "nemusíš je znovu číst přes ReadFile, pokud je nepotřebuješ upravit:]"
-    ]
+    out = [t("prompts.startup_memory_header", language)]
     out.extend(sections)
     if thematic_files:
         out.append(
-            "Další tematické soubory v paměti (čti je jen na vyžádání, když se jich týká dotaz): "
-            + ", ".join(thematic_files)
+            t(
+                "prompts.startup_memory_thematic",
+                language,
+                files=", ".join(thematic_files),
+            )
         )
     return "\n\n".join(out)
 
@@ -441,7 +440,9 @@ def _file_has_placeholder(path: Path) -> bool:
         lowered = path.read_text(encoding="utf-8").lower()
     except OSError:
         return False
-    return "doptej se" in lowered or "[doplnit" in lowered
+    return any(
+        tok in lowered for tok in ("doptej se", "[doplnit", "[todo", "ask the user")
+    )
 
 
 def has_pending_assistant_name(workspace_dir: Path | None) -> bool:
@@ -460,7 +461,7 @@ def extract_assistant_name_from_soul(workspace_dir: Path) -> str | None:
     except OSError:
         return None
     match = re.search(
-        r"^\s*(?:[-*]\s*)?\*\*Jméno:\*\*\s*(.+?)\s*$",
+        r"^\s*(?:[-*]\s*)?\*\*(?:Name|Jméno):\*\*\s*(.+?)\s*$",
         content,
         flags=re.MULTILINE | re.IGNORECASE,
     )
@@ -468,7 +469,10 @@ def extract_assistant_name_from_soul(workspace_dir: Path) -> str | None:
         return None
     candidate = match.group(1).strip().strip("*_\"' ").rstrip(".")
     lowered = candidate.lower()
-    if not (1 <= len(candidate) <= 60) or "doplnit" in lowered or "doptej" in lowered:
+    if (
+        not (1 <= len(candidate) <= 60)
+        or any(tok in lowered for tok in ("doplnit", "doptej", "todo", "ask the user"))
+    ):
         return None
     return candidate
 
@@ -743,37 +747,25 @@ class AgyRunner:
         context_mode: ContextMode,
         source: str,
         *,
+        language: str = "en",
         onboarding_pending: bool = False,
         assistant_name_pending: bool = False,
         include_schedule_hint: bool = False,
         startup_memory: str = "",
     ) -> str:
-        """Připojí lehkou hlavičku kontextu, zdroje a případnou přednačtenou paměť."""
-        parts = [f"[Zdroj: {source}]"]
-        hint = CONTEXT_HINTS.get(context_mode)
+        """Připojí lehkou hlavičku kontextu, jazyka, zdroje a případnou přednačtenou paměť."""
+        parts = [t("prompts.source_label", language, source=source)]
+        if source in ("web", "telegram"):
+            parts.append(get_language_hint(language))
+        hint = get_context_hint(context_mode, language)
         if hint:
             parts.append(hint)
         if include_schedule_hint:
-            parts.append(
-                "[Plánovač: Pokud uživatel žádá připomínku nebo opakovanou automatickou úlohu/zprávu v určitý čas, "
-                "zapiš JSON do schedule_request.json v kořenu workspace: "
-                '{"add_tasks":[{"name":"Název","prompt":"Text/úkol","schedule_type":"cron|once",'
-                '"cron_expr":"0 12 * * *","run_at":"YYYY-MM-DDTHH:MM:SS","action_type":"message|agent"}]} '
-                "(pro změnu briefingu/heartbeatu klíče morning_briefing_cron/enabled, heartbeat_interval_minutes/enabled).]"
-            )
+            parts.append(t("prompts.schedule_hint", language))
         if assistant_name_pending:
-            parts.append(
-                "[Úvodní nastavení: V SOUL.md ještě nemáš vybrané vlastní jméno. "
-                "Začni konverzaci tím, že se uživatele zeptáš, jak se máš jmenovat, "
-                "nabídni mu několik návrhů (např. Max, Viktor, Nova, Eliška, Hugo – nikdy nenavrhuj Jarvis) "
-                "a zvolené jméno rovnou zapiš do SOUL.md. Poté postupně doplň i USER.md podle AGENTS.md.]"
-            )
+            parts.append(t("prompts.onboarding_name", language))
         elif onboarding_pending:
-            parts.append(
-                "[Profil uživatele: V USER.md jsou zatím nevyplněné položky označené 'Doptej se' / '[DOPLNIT]'. "
-                "Řiď se pokyny v AGENTS.md – přirozeně se doptávej (1–3 stručné otázky, příp. až po vyřízení úkolu) "
-                "a zjištěné údaje rovnou doplň do USER.md / MEMORY.md.]"
-            )
+            parts.append(t("prompts.onboarding_profile", language))
         if startup_memory.strip():
             parts.append(startup_memory.strip())
         parts.append(prompt.strip())
@@ -1047,6 +1039,9 @@ class AgyRunner:
                 else (owner.agy_model if owner is not None else self.settings.agy_model)
             ).strip()
             eff_tz = (owner.tz if owner is not None else self.settings.tz) or "Europe/Prague"
+            eff_lang = normalize_language(
+                owner.language if owner is not None else self.settings.language
+            )
             prepare_agy_home(self.settings, self.db, context_mode=effective_ctx)
 
             is_new_chat = conv_id is None and source in ("web", "telegram")
@@ -1055,11 +1050,16 @@ class AgyRunner:
             include_schedule_hint = source in ("web", "telegram") and not has_schedule_instructions(
                 eff_cwd
             )
-            startup_memory = build_startup_memory_block(eff_cwd, tz_name=eff_tz) if is_new_chat else ""
+            startup_memory = (
+                build_startup_memory_block(eff_cwd, tz_name=eff_tz, language=eff_lang)
+                if is_new_chat
+                else ""
+            )
             full_prompt = self.format_prompt(
                 prompt,
                 effective_ctx,
                 source,
+                language=eff_lang,
                 onboarding_pending=onboarding_pending,
                 assistant_name_pending=assistant_name_pending,
                 include_schedule_hint=include_schedule_hint,
@@ -1075,7 +1075,7 @@ class AgyRunner:
                 and source in ("web", "telegram", "nightly_reset")
             )
             if use_warm:
-                sig = (eff_model, effective_ctx, eff_key or "", str(eff_cwd))
+                sig = (eff_model, effective_ctx, eff_key or "", str(eff_cwd), eff_lang)
                 warm = self._warm_procs.get(session_key)
                 if warm is not None and (not warm.is_alive() or warm.signature != sig):
                     await self.close_session(session_key)
@@ -1129,7 +1129,7 @@ class AgyRunner:
                         tokens_estimated=usage.estimated,
                     )
                     return AgyResult(
-                        text=text or "(Prázdná odpověď)",
+                        text=text or t("prompts.empty_response", eff_lang),
                         conversation_id=final_conv_id,
                         duration_ms=duration_ms,
                         success=True,
@@ -1223,7 +1223,7 @@ class AgyRunner:
                     tokens_estimated=usage.estimated,
                 )
                 return AgyResult(
-                    text=text or "(Prázdná odpověď)",
+                    text=text or t("prompts.empty_response", eff_lang),
                     conversation_id=final_conv_id,
                     duration_ms=duration_ms,
                     success=True,

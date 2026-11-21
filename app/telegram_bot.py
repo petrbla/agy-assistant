@@ -27,8 +27,15 @@ from app.attachments import (
     extract_attachment_text,
     is_image_filename,
 )
-from app.config import ContextMode, Settings, normalize_chat_channel
+from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, OwnerConfig
+from app.i18n import (
+    channel_label,
+    get_language_name,
+    list_available_languages,
+    resolve_language,
+    t,
+)
 from app.memory import WorkspaceMemory
 from app.scheduler import AssistantScheduler
 from app.user_env import ensure_workspace, get_memory, prepare_agy_home
@@ -80,7 +87,7 @@ def split_model_effort(full_name: str) -> tuple[str, str]:
 
 
 def build_model_selection_keyboard(
-    models: list[str], active_model: str
+    models: list[str], active_model: str, *, lang: str = "en"
 ) -> InlineKeyboardMarkup:
     """Sestaví klikací inline klávesnici pro výběr rodiny modelu a jeho váhy v Telegramu."""
     effective_list = list(models) if models else list(FALLBACK_TELEGRAM_MODELS)
@@ -148,7 +155,11 @@ def build_model_selection_keyboard(
         if eff_row:
             rows.append(eff_row)
 
-    default_label = "✅ Výchozí (agy)" if not active_model else "🔄 Výchozí (agy)"
+    default_label = (
+        t("backend.model_default_btn_active", lang)
+        if not active_model
+        else t("backend.model_default_btn", lang)
+    )
     rows.append([InlineKeyboardButton(text=default_label, callback_data="mdl:default")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -300,6 +311,10 @@ class TelegramAssistantBot:
     def _owner(self) -> OwnerConfig | None:
         return self.db.get_owner()
 
+    def _lang(self) -> str:
+        owner = self._owner()
+        return normalize_language(owner.language if owner is not None else self.settings.language)
+
     def _allowed_ids(self) -> set[int]:
         owner = self._owner()
         if owner is not None:
@@ -334,11 +349,10 @@ class TelegramAssistantBot:
     async def _guard(self, message: Message) -> bool:
         if self._is_authorized(message):
             return True
-        uid = message.from_user.id if message.from_user else "neznámé"
+        lang = self._lang()
+        uid = message.from_user.id if message.from_user else t("backend.tg_unknown_user", lang)
         logger.warning("Neautorizovaný přístup k Telegram botovi od tg_user_id=%s", uid)
-        await message.answer(
-            f"Přístup zamítnut. Vaše Telegram ID ({uid}) není mezi povolenými ID."
-        )
+        await message.answer(t("backend.tg_access_denied", lang, uid=uid))
         return False
 
     def _session_key(self, message: Message) -> str:
@@ -359,50 +373,57 @@ class TelegramAssistantBot:
         return f"{int(value):,}".replace(",", " ")
 
     @staticmethod
-    def _format_cleanup_summary(summary: dict[str, object]) -> str:
+    def _format_cleanup_summary(summary: dict[str, object], *, lang: str = "en") -> str:
         flushed = int(summary.get("flushed_sessions", 0) or 0)
         reset = int(summary.get("reset_sessions", 0) or 0)
         errors = summary.get("errors") or []
         if reset == 0:
-            return "🧹 Žádná aktivní konverzace k úklidu – kontext už je čistý."
-        text = (
-            f"🧹 Úklid dokončen: paměť uložena z {flushed}/{reset} aktivních konverzací "
-            "a kontext byl resetován.\n"
-            "Další zpráva začne s čistou hlavou (historie v Telegramu zůstává beze změny)."
-        )
+            return t("backend.tg_cleanup_empty", lang)
+        text = t("backend.tg_cleanup_done", lang, flushed=flushed, reset=reset)
         if isinstance(errors, list) and errors:
-            text += f"\n\n⚠️ Poznámka: u {len(errors)} relací se uložení paměti nezdařilo, reset ale proběhl."
+            text += t("backend.tg_cleanup_partial", lang, failed=len(errors))
         return text
 
-    def _format_usage_report(self, message: Message) -> str:
+    def _format_usage_report(self, message: Message, *, lang: str | None = None) -> str:
+        eff_lang = normalize_language(lang) if lang is not None else self._lang()
         owner = self._owner()
         active_model = (
             owner.agy_model if owner is not None else self.settings.agy_model
-        ) or "výchozí (agy)"
+        ) or t("backend.model_default", eff_lang)
         active_ctx = self._active_context(message)
         channel = normalize_chat_channel(active_ctx)
+        ch_lbl = channel_label(channel, eff_lang)
         chat_session = self._chat_session_key(message, active_ctx)
         conv_id, _ = self.db.get_session(chat_session, default_context=active_ctx)
 
         if conv_id:
             conv_runs, conv_tokens = self.db.get_conversation_stats(conv_id)
             short_id = conv_id if len(conv_id) <= 12 else f"{conv_id[:12]}…"
-            conv_line = (
-                f"Aktuální konverzace ({channel}): `{short_id}` "
-                f"({self._fmt_int(conv_runs)} běhů, {self._fmt_int(conv_tokens)} tokenů)"
+            conv_line = t(
+                "backend.tg_usage_conv_active",
+                eff_lang,
+                channel=ch_lbl,
+                short_id=short_id,
+                runs=self._fmt_int(conv_runs),
+                tokens=self._fmt_int(conv_tokens),
             )
         else:
-            conv_line = f"Aktuální konverzace ({channel}): čistý start (zatím bez historie)"
+            conv_line = t("backend.tg_usage_conv_clean", eff_lang, channel=ch_lbl)
 
         def _period_line(label: str, days: int | None) -> str:
             st = self.db.get_activity_stats(days=days)
             if st.total_runs == 0:
-                return f"- **{label}:** 0 běhů (0 tokenů)"
+                return t("backend.tg_usage_period_empty", eff_lang, label=label)
             tilde = "~" if st.estimated_runs > 0 and st.exact_runs == 0 else ""
-            return (
-                f"- **{label}:** {tilde}{self._fmt_int(st.total_tokens)} tokenů "
-                f"(vstup {self._fmt_int(st.input_tokens)} / výstup {self._fmt_int(st.output_tokens)}) "
-                f"• {self._fmt_int(st.total_runs)} běhů"
+            return t(
+                "backend.tg_usage_period",
+                eff_lang,
+                label=label,
+                tilde=tilde,
+                tokens=self._fmt_int(st.total_tokens),
+                in_tok=self._fmt_int(st.input_tokens),
+                out_tok=self._fmt_int(st.output_tokens),
+                runs=self._fmt_int(st.total_runs),
             )
 
         nightly_enabled = (
@@ -414,21 +435,20 @@ class TelegramAssistantBot:
             owner.nightly_reset_cron if owner is not None else self.settings.nightly_reset_cron
         )
         nightly_line = (
-            f"zapnut (`{nightly_cron}` – uloží paměť a vyčistí kontext)"
+            t("backend.tg_usage_nightly_on", eff_lang, cron=nightly_cron)
             if nightly_enabled
-            else "vypnut"
+            else t("backend.tg_usage_nightly_off", eff_lang)
         )
 
-        return (
-            "📊 **Přehled spotřeby a konverzace**\n\n"
-            f"• **Aktivní model:** `{active_model}`\n"
-            f"• {conv_line}\n"
-            f"• **Noční reset:** {nightly_line}\n\n"
-            "**Spotřeba z logu asistenta:**\n"
-            f"{_period_line('Posledních 24 h', 1)}\n"
-            f"{_period_line('Posledních 7 dní', 7)}\n"
-            f"{_period_line('Celkem', None)}\n\n"
-            "_Pozn.: K celkové kvótě Google účtu nemá bot přístup. Pro okamžité vyčištění kontextu použij `/new` nebo `/uklid`._"
+        return t(
+            "backend.tg_usage_report",
+            eff_lang,
+            model=active_model,
+            conv_line=conv_line,
+            nightly_line=nightly_line,
+            p24=_period_line(t("backend.tg_usage_24h", eff_lang), 1),
+            p7=_period_line(t("backend.tg_usage_7d", eff_lang), 7),
+            pall=_period_line(t("backend.tg_usage_all", eff_lang), None),
         )
 
     async def _send_long(self, chat_id: int, text: str) -> None:
@@ -466,12 +486,13 @@ class TelegramAssistantBot:
         self,
         chat_id: int,
         *,
-        label: str = "Stále pracuji na odpovědi",
+        label: str | None = None,
         initial_delay: float = 12.0,
         update_interval: float = 15.0,
     ) -> AsyncIterator[None]:
         started = time.monotonic()
         status_msg_id: int | None = None
+        eff_label = label or t("backend.tg_progress_default", self._lang())
 
         async def _progress_loop() -> None:
             nonlocal status_msg_id
@@ -480,7 +501,7 @@ class TelegramAssistantBot:
                 elapsed = format_elapsed_seconds(int(time.monotonic() - started))
                 sent = await self.bot.send_message(
                     chat_id=chat_id,
-                    text=f"⏳ {label}… ({elapsed})",
+                    text=f"⏳ {eff_label}… ({elapsed})",
                 )
                 status_msg_id = sent.message_id
                 while True:
@@ -490,7 +511,7 @@ class TelegramAssistantBot:
                         await self.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=status_msg_id,
-                            text=f"⏳ {label}… ({elapsed})",
+                            text=f"⏳ {eff_label}… ({elapsed})",
                         )
             except asyncio.CancelledError:
                 return
@@ -517,29 +538,25 @@ class TelegramAssistantBot:
         async def cmd_start(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             ctx = self._active_context(message)
+            ch_lbl = channel_label(normalize_chat_channel(ctx), lang)
             await message.answer(
-                f"Ahoj! Jsem {self._assistant_name()}, tvůj AI zaměstnanec na Google Antigravity.\n\n"
-                f"Aktivní chat: {normalize_chat_channel(ctx)} ({ctx})\n\n"
-                "Příkazy:\n"
-                "/auto – přepne na chat Auto (oddělené vlákno)\n"
-                "/pracovni – přepne na Pracovní chat (oddělené vlákno)\n"
-                "/osobni – přepne na Osobní chat (oddělené vlákno)\n"
-                "/kontext [auto|pracovni|osobni] – přepne kontext nástrojů\n"
-                "/model [název|default] – zobrazí nebo přepne AI model\n"
-                "/new – zahájí novou čistou konverzaci v aktuálním chatu\n"
-                "/uklid – uloží důležité věci z konverzace do paměti a resetuje kontext\n"
-                "/usage – spotřeba tokenů a délka aktuální konverzace\n"
-                "/memory – zobrazí MEMORY.md\n"
-                "/heartbeat – spustí okamžitou kontrolu HEARTBEAT.md\n"
-                "/briefing – vygeneruje ranní briefing\n"
-                "/status – stav systému a plánovače"
+                t(
+                    "backend.tg_start",
+                    lang,
+                    name=self._assistant_name(),
+                    channel=ch_lbl,
+                    ctx=ctx,
+                    lang=f"{get_language_name(lang)} ({lang})",
+                )
             )
 
         @self.dp.message(Command("new"))
         async def cmd_new(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             ctx = self._active_context(message)
             channel = normalize_chat_channel(ctx)
             chat_session = self._chat_session_key(message, ctx)
@@ -547,45 +564,106 @@ class TelegramAssistantBot:
             if isinstance(self.runner, AgyRunner):
                 await self.runner.close_session(chat_session)
             await message.answer(
-                f"Konverzace v chatu '{channel}' resetována. Dlouhodobá paměť v MEMORY.md zůstává zachována."
+                t("backend.tg_new_done", lang, channel=channel_label(channel, lang))
             )
 
         async def _switch_context(message: Message, target: str) -> None:
-            if target not in VALID_CONTEXTS:
-                await message.answer("Neplatný kontext. Povolené hodnoty: auto, pracovni, osobni")
+            lang = self._lang()
+            cleaned = target.strip().lower()
+            valid_inputs = {
+                "auto",
+                "pracovni",
+                "prace",
+                "firemni",
+                "work",
+                "business",
+                "company",
+                "osobni",
+                "soukrome",
+                "personal",
+                "private",
+            }
+            if cleaned not in valid_inputs:
+                await message.answer(t("backend.tg_invalid_context", lang))
                 return
-            self.db.set_context_mode(self._session_key(message), target)
-            channel = normalize_chat_channel(target)
-            await message.answer(f"Přepnuto na chat: {channel} (kontext: {target})")
+            canonical = normalize_chat_channel(cleaned)
+            self.db.set_context_mode(self._session_key(message), canonical)
+            await message.answer(
+                t(
+                    "backend.tg_switched_context",
+                    lang,
+                    channel=channel_label(canonical, lang),
+                    ctx=canonical,
+                )
+            )
 
         @self.dp.message(Command("auto"))
         async def cmd_auto(message: Message) -> None:
             if await self._guard(message):
                 await _switch_context(message, "auto")
 
-        @self.dp.message(Command("pracovni"))
+        @self.dp.message(Command("pracovni", "work"))
         async def cmd_pracovni(message: Message) -> None:
             if await self._guard(message):
                 await _switch_context(message, "pracovni")
 
-        @self.dp.message(Command("osobni"))
+        @self.dp.message(Command("osobni", "personal"))
         async def cmd_osobni(message: Message) -> None:
             if await self._guard(message):
                 await _switch_context(message, "osobni")
 
-        @self.dp.message(Command("kontext"))
+        @self.dp.message(Command("kontext", "context"))
         async def cmd_context(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             parts = (message.text or "").split(maxsplit=1)
             if len(parts) < 2:
                 current = self._active_context(message)
                 await message.answer(
-                    f"Aktuální chat/kontext: {normalize_chat_channel(current)} ({current})\n"
-                    "Použití: /kontext auto | pracovni | osobni"
+                    t(
+                        "backend.tg_context_status",
+                        lang,
+                        channel=channel_label(normalize_chat_channel(current), lang),
+                        ctx=current,
+                    )
                 )
                 return
             await _switch_context(message, parts[1].strip().lower())
+
+        @self.dp.message(Command("lang", "language"))
+        async def cmd_lang(message: Message) -> None:
+            if not await self._guard(message):
+                return
+            parts = (message.text or "").split(maxsplit=1)
+            if len(parts) < 2:
+                cur = self._lang()
+                avail = ", ".join(item["code"] for item in list_available_languages())
+                await message.answer(
+                    t(
+                        "backend.tg_lang_status",
+                        cur,
+                        lang=cur,
+                        lang_name=get_language_name(cur),
+                        available=avail,
+                    )
+                )
+                return
+            new_lang = resolve_language(parts[1])
+            if self._owner() is not None:
+                self.db.update_owner(language=new_lang)
+            else:
+                self.settings.language = new_lang
+            if isinstance(self.runner, AgyRunner):
+                await self.runner.close_all()
+            await message.answer(
+                t(
+                    "backend.tg_lang_switched",
+                    new_lang,
+                    lang=new_lang,
+                    lang_name=get_language_name(new_lang),
+                )
+            )
 
         async def _apply_model(new_model: str) -> None:
             if self._owner() is not None:
@@ -596,18 +674,21 @@ class TelegramAssistantBot:
             if isinstance(self.runner, AgyRunner):
                 await self.runner.close_all()
 
-        def _format_model_menu_text(active_model: str) -> str:
+        def _format_model_menu_text(active_model: str, lang: str) -> str:
             _, eff = split_model_effort(active_model)
-            eff_part = f" (váha: {eff})" if eff else ""
-            return (
-                f"🤖 Aktuální model: {active_model or 'výchozí (agy)'}{eff_part}\n\n"
-                "Vyberte model kliknutím na tlačítko níže (ve spodním řádku můžete přepnout váhu Low / Medium / High / XHigh):"
+            eff_part = t("backend.tg_model_effort_part", lang, eff=eff) if eff else ""
+            return t(
+                "backend.tg_model_menu",
+                lang,
+                model=active_model or t("backend.model_default", lang),
+                eff_part=eff_part,
             )
 
         @self.dp.message(Command("model"))
         async def cmd_model(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             parts = (message.text or "").split(maxsplit=1)
             owner = self._owner()
             active_model = owner.agy_model if owner is not None else self.settings.agy_model
@@ -616,35 +697,43 @@ class TelegramAssistantBot:
                 active_model = "" if raw_model.lower() in {"default", "auto", "reset", "-"} else raw_model
                 await _apply_model(active_model)
             avail = await self.runner.list_models()
-            keyboard = build_model_selection_keyboard(avail, active_model)
-            await message.answer(_format_model_menu_text(active_model), reply_markup=keyboard)
+            keyboard = build_model_selection_keyboard(avail, active_model, lang=lang)
+            await message.answer(_format_model_menu_text(active_model, lang), reply_markup=keyboard)
 
         @self.dp.callback_query(F.data.startswith("mdl:"))
         async def cb_select_model(callback: CallbackQuery) -> None:
+            lang = self._lang()
             uid = callback.from_user.id if callback.from_user else None
             if not self._is_authorized_user_id(uid):
-                await callback.answer("Přístup zamítnut.", show_alert=True)
+                await callback.answer(t("backend.tg_access_denied_short", lang), show_alert=True)
                 return
             raw_model = (callback.data or "")[4:].strip()
             new_model = "" if raw_model.lower() in {"default", "auto", "reset", "-"} else raw_model
             await _apply_model(new_model)
             avail = await self.runner.list_models()
-            keyboard = build_model_selection_keyboard(avail, new_model)
+            keyboard = build_model_selection_keyboard(avail, new_model, lang=lang)
             if isinstance(callback.message, Message):
                 with contextlib.suppress(TelegramBadRequest):
                     await callback.message.edit_text(
-                        _format_model_menu_text(new_model), reply_markup=keyboard
+                        _format_model_menu_text(new_model, lang), reply_markup=keyboard
                     )
-            await callback.answer(f"Nastaveno: {new_model or 'výchozí (agy)'}")
+            await callback.answer(
+                t(
+                    "backend.tg_model_set_toast",
+                    lang,
+                    model=new_model or t("backend.model_default", lang),
+                )
+            )
 
         @self.dp.message(Command("memory"))
         async def cmd_memory(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             try:
                 content = self.memory.read_file("MEMORY.md")
             except FileNotFoundError:
-                content = "Soubor MEMORY.md zatím neexistuje."
+                content = t("backend.tg_memory_missing", lang)
             await self._send_long(message.chat.id, content)
 
         @self.dp.message(Command("usage"))
@@ -656,23 +745,29 @@ class TelegramAssistantBot:
         async def cmd_cleanup(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             if not self.scheduler:
-                await message.answer("Plánovač není inicializován.")
+                await message.answer(t("backend.tg_scheduler_missing", lang))
                 return
             async with self._with_progress(
-                message.chat.id, label="Ukládám paměť a čistím konverzaci"
+                message.chat.id, label=t("backend.tg_progress_cleanup", lang)
             ):
                 summary = await self.scheduler.run_nightly_reset()
-            await self._send_long(message.chat.id, self._format_cleanup_summary(summary))
+            await self._send_long(
+                message.chat.id, self._format_cleanup_summary(summary, lang=lang)
+            )
 
         @self.dp.message(Command("heartbeat"))
         async def cmd_heartbeat(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             if not self.scheduler:
-                await message.answer("Plánovač není inicializován.")
+                await message.answer(t("backend.tg_scheduler_missing", lang))
                 return
-            async with self._with_progress(message.chat.id, label="Provádím kontrolu Heartbeat"):
+            async with self._with_progress(
+                message.chat.id, label=t("backend.tg_progress_heartbeat", lang)
+            ):
                 result = await self.scheduler.run_heartbeat(notify=False)
             await self._send_long(message.chat.id, result.text)
 
@@ -680,10 +775,13 @@ class TelegramAssistantBot:
         async def cmd_briefing(message: Message) -> None:
             if not await self._guard(message):
                 return
+            lang = self._lang()
             if not self.scheduler:
-                await message.answer("Plánovač není inicializován.")
+                await message.answer(t("backend.tg_scheduler_missing", lang))
                 return
-            async with self._with_progress(message.chat.id, label="Připravuji ranní briefing"):
+            async with self._with_progress(
+                message.chat.id, label=t("backend.tg_progress_briefing", lang)
+            ):
                 result = await self.scheduler.run_morning_briefing(notify=False)
             await self._send_long(message.chat.id, result.text)
 
@@ -691,38 +789,46 @@ class TelegramAssistantBot:
         async def cmd_status(message: Message) -> None:
             if not await self._guard(message):
                 return
-            version = await self.runner.check_version() or "nedostupné"
+            lang = self._lang()
+            unavail = t("backend.tg_status_unavailable", lang)
+            version = await self.runner.check_version() or unavail
             latest = (
                 await self.runner.check_latest_version()
                 if isinstance(self.runner, AgyRunner)
                 else None
             )
-            up_to_date = is_version_up_to_date(None if version == "nedostupné" else version, latest)
+            up_to_date = is_version_up_to_date(None if version == unavail else version, latest)
             if up_to_date is True:
-                ver_status = f"{version} (aktuální ✓)"
+                ver_status = t("backend.tg_status_up_to_date", lang, ver=version)
             elif up_to_date is False and latest:
-                ver_status = f"{version} (dostupná nová verze {latest}!)"
+                ver_status = t("backend.tg_status_update_avail", lang, ver=version, latest=latest)
             else:
                 ver_status = version
             owner = self._owner()
             active_model = (
                 owner.agy_model if owner is not None else self.settings.agy_model
-            ) or "výchozí (agy)"
+            ) or t("backend.model_default", lang)
             _, ctx = self.db.get_session(
                 self._session_key(message), default_context=self._default_context()
             )
-            skills = ", ".join(self.memory.list_skills()) or "žádné"
-            jobs_txt = "žádné"
+            none_lbl = t("backend.tg_none", lang)
+            skills = ", ".join(self.memory.list_skills()) or none_lbl
+            jobs_txt = none_lbl
             if self.scheduler:
                 jobs = self.scheduler.list_jobs()
                 if jobs:
                     jobs_txt = "\n".join(f"- {j.id}: {j.next_run_time}" for j in jobs)
             await message.answer(
-                f"Antigravity CLI: {ver_status}\n"
-                f"Aktivní model: {active_model}\n"
-                f"Kontext chatu: {ctx}\n"
-                f"Skilly: {skills}\n"
-                f"Plánované úlohy:\n{jobs_txt}"
+                t(
+                    "backend.tg_status_msg",
+                    lang,
+                    ver_status=ver_status,
+                    model=active_model,
+                    lang=f"{get_language_name(lang)} ({lang})",
+                    ctx=f"{channel_label(normalize_chat_channel(ctx), lang)} ({ctx})",
+                    skills=skills,
+                    jobs=jobs_txt,
+                )
             )
 
         @self.dp.message(F.photo | F.document | F.voice | F.audio)
@@ -757,33 +863,38 @@ class TelegramAssistantBot:
     @staticmethod
     def _extract_attachment_meta(
         message: Message,
+        *,
+        lang: str = "en",
     ) -> tuple[str, str, str, str, int, str] | None:
         if message.photo:
             best = message.photo[-1]
-            return best.file_id, "telegram_obrazek.jpg", ".jpg", "image/jpeg", best.file_size or 0, "obrázek"
+            return best.file_id, "telegram_obrazek.jpg", ".jpg", "image/jpeg", best.file_size or 0, t("prompts.att_kind_image", lang)
         if message.document:
             doc = message.document
-            fname = doc.file_name or "dokument"
+            fname = doc.file_name or "document"
             mime = doc.mime_type or ""
-            kind = "obrázek" if is_image_filename(fname, mime) else "dokument"
+            kind = (
+                t("prompts.att_kind_image", lang)
+                if is_image_filename(fname, mime)
+                else t("prompts.att_kind_document", lang)
+            )
             return doc.file_id, fname, "", mime, doc.file_size or 0, kind
         if message.voice:
             v = message.voice
-            return v.file_id, "hlasova_zprava.ogg", ".ogg", v.mime_type or "audio/ogg", v.file_size or 0, "hlasová zpráva"
+            return v.file_id, "voice_message.ogg", ".ogg", v.mime_type or "audio/ogg", v.file_size or 0, t("prompts.att_kind_voice", lang)
         if message.audio:
             a = message.audio
-            return a.file_id, a.file_name or "audio.mp3", ".mp3", a.mime_type or "audio/mpeg", a.file_size or 0, "audio"
+            return a.file_id, a.file_name or "audio.mp3", ".mp3", a.mime_type or "audio/mpeg", a.file_size or 0, t("prompts.att_kind_audio", lang)
         return None
 
     async def _download_and_handle_attachment(self, message: Message) -> None:
-        meta = self._extract_attachment_meta(message)
+        lang = self._lang()
+        meta = self._extract_attachment_meta(message, lang=lang)
         if meta is None:
             return
         file_id, raw_name, default_ext, mime_type, file_size, kind = meta
         if file_size and file_size > 20 * 1024 * 1024:
-            await message.answer(
-                "Soubor je větší než 20 MB – Telegram Bot API bohužel neumožňuje stáhnout větší přílohy."
-            )
+            await message.answer(t("backend.tg_file_too_large", lang))
             return
 
         ws = ensure_workspace(self.settings, self._owner())
@@ -792,7 +903,7 @@ class TelegramAssistantBot:
             await self.bot.download(file_id, destination=dest_path)
         except Exception as exc:
             logger.exception("Stažení přílohy z Telegramu selhalo (%s): %s", raw_name, exc)
-            await message.answer("Nepodařilo se stáhnout přiložený soubor z Telegramu.")
+            await message.answer(t("backend.tg_file_download_failed", lang))
             return
 
         actual_size = dest_path.stat().st_size if dest_path.is_file() else file_size
@@ -805,6 +916,7 @@ class TelegramAssistantBot:
             size_bytes=actual_size,
             extracted_text=extracted_text,
             truncated=truncated,
+            lang=lang,
         )
         await self._run_prompt_and_reply(message, prompt)
 

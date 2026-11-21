@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     init: true
     environment:
+      LANGUAGE: ${LANGUAGE:-en}
       TZ: ${TZ:-Europe/Prague}
       JMENO: ${JMENO:-}
       TG_TOKEN: ${TG_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}

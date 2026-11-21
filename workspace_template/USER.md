@@ -1,14 +1,14 @@
-# Profil uživatele (USER.md)
+# User Profile (USER.md)
 
-- **Jméno:** [DOPLNIT: Doptej se na jméno a oslovení]
-- **Jazyk:** Čeština
-- **Časové pásmo:** Europe/Prague
-- **Pracovní kontext:**
-  - **Pracovní:** [DOPLNIT: Doptej se, o jakou práci/firmu se jedná, jaká je role uživatele a jaké pracovní nástroje/MCP používá]
-  - **Osobní:** [DOPLNIT: Doptej se na osobní projekty a osobní nástroje (např. Gmail, Kalendář, `osobni` automatizace)]
+- **Name:** [TODO: Ask the user for their name and preferred form of address]
+- **Language:** English
+- **Timezone:** Europe/Prague
+- **Areas:**
+  - **Work:** [TODO: Ask the user about their work/company, role, and which work MCP tools/workflows they use]
+  - **Personal:** [TODO: Ask the user about personal projects and personal tools (e.g., Gmail, Calendar, `personal` automations)]
 
-## Preference
-- Krátké, konkrétní odpovědi a přehledné shrnutí výsledků.
-- Ranní briefing se souhrnem důležitých bodů dne.
-- Přísné oddělení pracovních a osobních dat.
-- **Další preference:** [DOPLNIT: Doptej se na preferovaný čas briefingu, styl komunikace nebo co má asistent hlídat]
+## Preferences
+- Short, concrete answers and clear summaries.
+- Morning briefing summarizing key items for the day.
+- Strict separation between work and personal data.
+- **Other preferences:** [TODO: Ask the user for preferred briefing time, communication style, or items to monitor]

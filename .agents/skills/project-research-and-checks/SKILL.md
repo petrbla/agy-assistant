@@ -29,10 +29,11 @@ Tento skill slouží k rychlému ověření, že změny v kódu, konfiguraci a �
      - `workspace_template/AGENTS.md`
      - `workspace_template/.agents/mcp_config.example.json`
 
-3. **Kontrola bezpečnosti a entrypointu:**
-   - Nové endpointy v `app/web.py` (kromě veřejných `/`, `/api/health`, `/api/auth/state`, `/api/auth/initial-setup`, `/api/login*`, `/api/logout`) musí chránit `Depends(require_auth)`.
+3. **Kontrola bezpečnosti, lokalizace a entrypointu:**
+   - Nové endpointy v `app/web.py` (kromě veřejných `/`, `/api/health`, `/api/i18n*`, `/api/auth/state`, `/api/auth/initial-setup`, `/api/login*`, `/api/logout`) musí chránit `Depends(require_auth)`.
+   - Všechny soubory v `app/locales/*.json` (`en.json`, `cs.json`, ...) musí mít 100 % shodnou sadu klíčů v `_meta`, `ui`, `backend` a `prompts`.
    - Přístup k souborům v `workspace/` musí procházet přes `WorkspaceMemory._resolve_safe()`.
-   - Pokud upravuješ `.agents/` pro vývoj, nepleť si kořenovou složku `.agents/` se šablonou `workspace_template/.agents/`.
+   - Pokud upravuješ `.agents/` pro vývoj, nepleť si kořenovou složku `.agents/` se šablonami `workspace_template/.agents/` a `workspace_template_cs/.agents/`.
 
 4. **Aktualizace znalostí v `.agents/`:**
    - Pokud změna mění architekturu, API endpointy, konfigurační proměnné nebo strukturu modulů, aktualizuj příslušný dokument v `.agents/docs/` (případně `.agents/rules/`).

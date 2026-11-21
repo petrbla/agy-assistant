@@ -1,19 +1,19 @@
 ---
 name: memory-maintenance
-description: Údržba a sumarizace denních poznámek z memory/YYYY-MM-DD.md do dlouhodobé paměti MEMORY.md.
+description: Maintain and summarize daily notes from memory/YYYY-MM-DD.md into curated long-term memory MEMORY.md.
 ---
 
-# Údržba paměti
+# Memory Maintenance
 
-Použij tento postup, když uživatel požádá o úklid paměti nebo při pravidelné týdenní rekapitulaci.
+Use this workflow when asked to clean up memory or during periodic reviews.
 
-## Postup
-1. Projdi soubory ve složce `memory/` za poslední dny.
-2. Identifikuj trvalé informace:
-   - nová rozhodnutí a preferované postupy,
-   - aktivní projekty a jejich aktuální stav,
-   - důležité kontakty, termíny a odkazy.
-3. Aktualizuj `MEMORY.md` tak, aby zůstal přehledný, kompaktní (cílově do ~150 řádků), bez duplicit a bez zastaralých jednorázových detailů.
-4. Uzavřené úkoly, historické poznámky a obsáhlejší podrobnosti přesouvej do tematických souborů v `memory/` nebo do `memory/archiv.md`, aby se `MEMORY.md` nenafukoval.
-5. Nikdy do paměti neukládej hesla, tokeny ani tajné klíče.
-6. Uživateli stručně shrň, co bylo do `MEMORY.md` přidáno nebo aktualizováno.
+## Steps
+1. Review recent files in `memory/`.
+2. Identify durable information:
+   - new decisions and preferred workflows,
+   - active projects and current status,
+   - key contacts, deadlines, and links.
+3. Update `MEMORY.md` so it stays clean, compact (target under ~150 lines), free of duplicates, and free of obsolete one-off details.
+4. Move closed tasks, historical notes, and detailed logs into thematic files in `memory/` or `memory/archive.md` so `MEMORY.md` stays lean.
+5. Never store passwords, tokens, or secret keys in memory files.
+6. Briefly summarize to the user what was added or updated in `MEMORY.md`.

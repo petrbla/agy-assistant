@@ -16,8 +16,9 @@ from pydantic import BaseModel, Field
 
 from app.agy_runner import AgyRunner, is_version_up_to_date
 from app.auth_session import AgyAuthManager
-from app.config import ContextMode, Settings, normalize_chat_channel
+from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
+from app.i18n import get_ui_bundle, list_available_languages, t
 from app.memory import WorkspaceMemory
 from app.runtime_config import save_runtime_overrides
 from app.scheduler import AssistantScheduler
@@ -73,6 +74,7 @@ class SettingsUpdateRequest(BaseModel):
     web_token: str | None = None
     assistant_name: str | None = None
     display_name: str | None = None
+    language: str | None = Field(default=None, max_length=16)
     tz: str | None = None
     default_context_mode: ContextMode | None = None
     heartbeat_enabled: bool | None = None
@@ -131,7 +133,8 @@ class LoginRequest(BaseModel):
 class InitialSetupRequest(BaseModel):
     email: str = Field(min_length=5, max_length=200)
     username: str = Field(default="admin", min_length=2, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$")
-    display_name: str = Field(default="Administrátor", max_length=100)
+    display_name: str = Field(default="", max_length=100)
+    language: str = Field(default="en", max_length=16)
     password: str = Field(min_length=8, max_length=200)
 
 
@@ -162,6 +165,7 @@ def _owner_public_dict(owner: OwnerConfig, settings: Settings) -> dict[str, obje
         "email": owner.email,
         "display_name": owner.display_name,
         "assistant_name": owner.assistant_name,
+        "language": normalize_language(owner.language),
         "tz": owner.tz,
         "default_context_mode": owner.default_context_mode,
         "has_telegram_bot_token": bool(owner.telegram_bot_token.strip()),
@@ -313,6 +317,17 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/i18n")
+    async def list_i18n_languages() -> dict[str, object]:
+        return {
+            "default_language": "en",
+            "available_languages": list_available_languages(),
+        }
+
+    @app.get("/api/i18n/{lang}")
+    async def get_i18n_bundle(lang: str) -> dict[str, object]:
+        return get_ui_bundle(lang)
+
     @app.get("/api/auth/state")
     async def auth_state() -> dict[str, object]:
         owner = _get_owner()
@@ -324,6 +339,8 @@ def create_app(
             "has_token_configured": has_tok,
             "totp_enabled": bool(owner.totp_enabled),
             "assistant_name": owner.assistant_name,
+            "language": normalize_language(owner.language),
+            "available_languages": list_available_languages(),
         }
 
     @app.post("/api/auth/initial-setup")
@@ -335,12 +352,18 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="Zadejte platnou e-mailovou adresu (např. vas@email.cz)."
             )
+        prev_lang = normalize_language(owner.language)
+        lang = normalize_language(payload.language)
+        disp = payload.display_name.strip() or t("backend.default_display_name", lang)
         updated = db.update_owner(
             username=payload.username.strip().lower(),
             email=normalize_email(payload.email),
-            display_name=payload.display_name.strip() or payload.username.strip(),
+            display_name=disp,
+            language=lang,
             password_hash=hash_password(payload.password),
         )
+        if lang != prev_lang and not db.list_runs(limit=1):
+            reset_workspace(settings, updated)
         session_token = db.create_auth_session()
         return {
             "status": "ok",
@@ -539,6 +562,7 @@ def create_app(
         for field in (
             "display_name",
             "assistant_name",
+            "language",
             "tz",
             "default_context_mode",
             "telegram_bot_token",
@@ -554,7 +578,11 @@ def create_app(
             "gemini_api_key",
         ):
             if field in raw_updates and raw_updates[field] is not None:
-                owner_updates[field] = raw_updates[field]
+                owner_updates[field] = (
+                    normalize_language(str(raw_updates[field]))
+                    if field == "language"
+                    else raw_updates[field]
+                )
 
         for cron_field, label in (
             ("morning_briefing_cron", "ranního briefingu"),
@@ -599,7 +627,10 @@ def create_app(
         if isinstance(runner, AgyRunner):
             if "gemini_api_key" in owner_updates:
                 runner.invalidate_models_cache()
-            if any(k in owner_updates for k in ("agy_model", "gemini_api_key", "default_context_mode")):
+            if any(
+                k in owner_updates
+                for k in ("agy_model", "gemini_api_key", "default_context_mode", "language")
+            ):
                 await runner.close_all()
         await _notify_settings_updated()
         return {"status": "ok", **_owner_public_dict(updated, settings)}

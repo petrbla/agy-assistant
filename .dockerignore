@@ -25,3 +25,5 @@ pytest.ini
 *.log
 !workspace_template/.agents
 !workspace_template/.agents/**
+!workspace_template_cs/.agents
+!workspace_template_cs/.agents/**

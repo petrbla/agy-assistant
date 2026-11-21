@@ -4,20 +4,27 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.i18n import resolve_language
 
 
 ContextMode = Literal["auto", "pracovni", "osobni"]
 ChatChannel = Literal["auto", "pracovni", "osobni"]
 
 
+def normalize_language(raw: str | None) -> str:
+    """Převede kód nebo název jazyka na dostupný kód (`en` / `cs`)."""
+    return resolve_language(raw)
+
+
 def normalize_chat_channel(mode: str | None) -> ChatChannel:
     """Převede kontextový režim na kanál chatu (neznámé hodnoty → `auto`)."""
     cleaned = (mode or "auto").strip().lower()
-    if cleaned in ("pracovni", "prace", "firemni"):
+    if cleaned in ("pracovni", "prace", "firemni", "work", "business", "company"):
         return "pracovni"
-    if cleaned in ("osobni", "soukrome"):
+    if cleaned in ("osobni", "soukrome", "personal", "private"):
         return "osobni"
     return "auto"
 
@@ -53,13 +60,18 @@ class Settings(BaseSettings):
 
     # Identita a cesty
     assistant_name: str = Field(
-        default="Asistent",
-        validation_alias=AliasChoices("assistant_name", "jmeno"),
+        default="Assistant",
+        validation_alias=AliasChoices("assistant_name", "jmeno", "name"),
+    )
+    language: str = Field(
+        default="en",
+        validation_alias=AliasChoices("language", "app_language", "jazyk"),
     )
     workspace_dir: Path = Path("/home/asistent/workspace")
     data_dir: Path = Path("/home/asistent/data")
     agy_home_dir: Path | None = None
     template_dir: Path = Path("/app/workspace_template")
+    template_dir_cs: Path = Path("/app/workspace_template_cs")
 
     # Antigravity CLI (agy)
     agy_bin: str = "agy"
@@ -98,11 +110,17 @@ class Settings(BaseSettings):
     # Výchozí kontext (auto | pracovni | osobni)
     default_context_mode: ContextMode = "auto"
 
+    @field_validator("language", mode="before")
+    @classmethod
+    def _validate_language(cls, value: object) -> str:
+        return normalize_language(None if value is None else str(value))
+
     @model_validator(mode="after")
     def _resolve_derived_dirs(self) -> Settings:
-        """Upraví odvozené cesty a výchozí jméno při prázdném `JMENO`."""
+        """Upraví odvozené cesty a výchozí hodnoty při prázdném `JMENO`."""
         if not self.assistant_name.strip():
-            self.assistant_name = "Asistent"
+            self.assistant_name = "Assistant"
+        self.language = normalize_language(self.language)
         if "agy_home_dir" not in self.model_fields_set and self.agy_home_dir is None:
             if self.data_dir != Path("/home/asistent/data"):
                 self.agy_home_dir = self.data_dir.parent / "home"
@@ -112,7 +130,18 @@ class Settings(BaseSettings):
             local_tpl = Path(__file__).resolve().parent.parent / "workspace_template"
             if local_tpl.is_dir():
                 self.template_dir = local_tpl
+        if "template_dir_cs" not in self.model_fields_set and not self.template_dir_cs.is_dir():
+            local_tpl_cs = Path(__file__).resolve().parent.parent / "workspace_template_cs"
+            if local_tpl_cs.is_dir():
+                self.template_dir_cs = local_tpl_cs
         return self
+
+    def template_dir_for_language(self, lang: str | None = None) -> Path:
+        """Vrátí cestu k výchozím šablonám podle zvoleného jazyka."""
+        resolved = normalize_language(lang or self.language)
+        if resolved == "cs" and self.template_dir_cs.is_dir():
+            return self.template_dir_cs
+        return self.template_dir
 
     @property
     def effective_home_dir(self) -> Path:

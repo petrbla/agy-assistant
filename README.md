@@ -1,39 +1,54 @@
-# Asistent Antigravity (AI zaměstnanec v Dockeru)
+🌐 **English** | [Čeština](README.cs.md)
 
-Osobní a pracovní autonomní asistent inspirovaný konceptem **AI zaměstnance**, postavený na **Google Antigravity CLI (`agy`)** v headless režimu a připravený k nepřetržitému provozu 24/7 v Docker kontejneru na VPS.
+# Antigravity Assistant (AI Employee in Docker)
 
-Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalšího člověka stačí nasadit další kopii.
+A personal and work autonomous assistant inspired by the **AI Employee** concept, built on top of **Google Antigravity CLI (`agy`)** in headless mode and ready for 24/7 operation inside a Docker container on a VPS.
 
-## Co umí
+Designed as **single-user**: 1 container = 1 user. Deploy another container for another user.
 
-- **Telegram bot (`aiogram`):** ovládání z mobilu i PC s whitelistem povolených Telegram ID, samoopravným pollingem (watchdog) a příkazy `/auto`, `/pracovni`, `/osobni`, `/kontext`, `/model`, `/new`, `/uklid`, `/usage`, `/memory`, `/heartbeat`, `/briefing`, `/status`.
-- **Moderní Web UI & REST API (`FastAPI`):** dashboard na portu `8080` (tmavý i světlý režim, bez npm buildu) se záložkami **Chat**, **Paměť**, **Plánovač & Historie** a **Nastavení**. Přihlášení heslem + volitelné **2FA (TOTP)**.
-- **Rychlé odpovědi:** trvale spuštěný („teplý“) proces `agy --input-format stream-json --output-format stream-json`, přednačtení paměti při startu konverzace a automatický fallback na jednorázové `agy -p`.
-- **Trvalá souborová paměť (`workspace/`):**
-  - `AGENTS.md` – operační manuál a pravidla oddělení **pracovní** vs. **osobní** agendy
-  - `SOUL.md` – osobnost a styl komunikace
-  - `USER.md` – profil a preference uživatele
-  - `MEMORY.md` + `memory/*.md` – dlouhodobá, tematická a denní paměť
-  - `HEARTBEAT.md` – kontrolní seznam pro pravidelné probuzení na pozadí
-- **Plánovač (`APScheduler`):** tichý *Heartbeat*, *Ranní briefing*, **noční úklid paměti a reset konverzace** (výchozí `00:15`) a vlastní opakované i jednorázové úlohy (proběhlé jednorázové úlohy se samy mažou).
-- **MCP servery:** spravované ve Web UI a filtrované podle oblasti chatu (`Všechny` / `Pracovní` / `Osobní`).
+## Features
 
-## Struktura projektu
+- **Bilingual (`en` / `cs`) with file-based translations (`app/locales/*.json`):** English by default, instant switching to Czech via the topbar toggle (`EN / CS`), Settings, Telegram (`/lang cs`), or `LANGUAGE=cs` environment variable. Adding another language only requires dropping a new JSON file into `app/locales/`.
+- **Telegram Bot (`aiogram`):** mobile & desktop control with user ID whitelist, self-healing polling (30s watchdog), file/photo/voice attachments, and commands `/auto`, `/work`, `/personal`, `/context`, `/model`, `/lang`, `/new`, `/cleanup`, `/usage`, `/memory`, `/heartbeat`, `/briefing`, `/status`.
+- **Modern Web UI & REST API (`FastAPI`):** dashboard on port `8080` (dark & light theme, zero npm build) with **Chat**, **Memory**, **Scheduler & History**, and **Settings** tabs, protected by password + optional **2FA (TOTP)**.
+- **Fast responses:** persistent warm `agy --input-format stream-json --output-format stream-json` process, startup memory preloading, and automatic fallback to one-shot `agy -p`.
+- **Persistent Markdown memory (`workspace/`):**
+  - `AGENTS.md` – operating manual and **Work** vs. **Personal** separation rules
+  - `SOUL.md` – assistant identity and communication style
+  - `USER.md` – user profile and preferences
+  - `MEMORY.md` + `memory/*.md` – curated long-term, thematic, and daily memory
+  - `HEARTBEAT.md` – checklist for periodic background checks
+- **Scheduler (`APScheduler`):** silent *Heartbeat*, *Morning Briefing*, **nightly memory cleanup & conversation reset** (default `00:15`), plus custom recurring or one-time tasks (expired one-time tasks clean up automatically).
+- **MCP Servers:** managed in Web UI and filtered per chat area (`All` / `Work` / `Personal`).
 
-- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`)
+## Project Structure
+
+- `app/` – Python orchestrator (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`)
+- `app/locales/` – JSON translation files (`en.json`, `cs.json`)
 - `app/static/` – Web UI (`index.html`, `styles.css`, `app.js`)
-- `workspace_template/` – výchozí šablony paměti a skillů (při startu se zkopírují do persistentního `workspace/`, pokud tam ještě nejsou)
-- `Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh` – kontejnerizace pro VPS
-- `tests/` – automatické testy (`pytest`)
+- `workspace_template/` – default English memory & skill templates (copied to persistent `workspace/` on first start)
+- `workspace_template_cs/` – Czech memory & skill templates used when initialized with `LANGUAGE=cs`
+- `Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh` – VPS containerization
+- `tests/` – automated test suite (`pytest`)
 
 ---
 
-## Nasazení na VPS přes Portainer (1 volume `/home/asistent`)
+## Language Switching & Adding Translations
 
-Všechna trvalá data (`workspace/`, `data/`, `.gemini/`) žijí v jediném adresáři **`/home/asistent`**.
+- **Default:** `en` (English).
+- **In Web UI:** click `EN` / `CS` in the top right bar (before or after login) or change it under **Settings → Language**.
+- **In Telegram:** send `/lang cs` or `/lang en`.
+- **At container startup:** set `LANGUAGE=cs` in environment variables (see below) to initialize both the UI and Czech `workspace_template_cs/` templates.
+- **Add a new language:** copy `app/locales/en.json` to e.g. `app/locales/de.json`, update `_meta` (`code`, `name`, `short`, `date_locale`) and translate the strings. It is picked up automatically by both Web UI and `/lang`.
 
-### Krok 1: Portainer → Stacks → Add stack → Web editor
-Nejjednodušší je použít předbuildovaný image z GitHub Container Registry (`ghcr.io/petrbla/agy-assistant:latest`), který automaticky staví GitHub Actions při každém pushi do `main`:
+---
+
+## Deployment on VPS via Portainer (Single Volume `/home/asistent`)
+
+All persistent data (`workspace/`, `data/`, `.gemini/`) lives in a single directory: **`/home/asistent`**.
+
+### Step 1: Portainer → Stacks → Add stack → Web editor
+The easiest option is the prebuilt image from GitHub Container Registry (`ghcr.io/petrbla/agy-assistant:latest`), built automatically by GitHub Actions on every push to `main`:
 
 ```yaml
 services:
@@ -44,6 +59,7 @@ services:
     restart: unless-stopped
     init: true
     environment:
+      LANGUAGE: "en" # or "cs" for Czech
       TZ: "Europe/Prague"
       TG_TOKEN: "xxx"
       TG_ID: "xxx"
@@ -55,42 +71,42 @@ services:
     cpus: 1.5
 ```
 
-*(Alternativně si můžete image sestavit i ručně na serveru: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` a v YAML pak použít `image: asistent:latest` a `pull_policy: never`.)*
+*(Alternatively, build the image manually on your server: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` and use `image: asistent:latest` with `pull_policy: never`.)*
 
-### Krok 2: První spuštění
-1. Otevřete `http://<IP-VPS>:8080` a nastavte si e-mail, uživatelské jméno a heslo.
-2. V **Nastavení → Antigravity CLI & Přihlášení** klikněte na **Spustit OAuth přihlášení (agy)**, otevřete vypsanou URL a vložte ověřovací kód. *(Alternativně lze vložit vlastní Gemini API klíč.)*
-3. V **Nastavení → Zabezpečení účtu** si doporučeně zapněte **2FA**.
+### Step 2: First Launch
+1. Open `http://<VPS-IP>:8080` and create your admin email, username, and password.
+2. Go to **Settings → Antigravity CLI & Sign-in**, click **Start OAuth sign-in (agy)**, open the displayed URL, and paste the authorization code *(or enter your own Gemini API key)*.
+3. Under **Settings → Account Security**, enabling **2FA** is strongly recommended.
 
-> Pro vystavení do internetu doporučujeme před kontejner reverzní proxy s HTTPS (Caddy, Nginx, Traefik).
+> For public internet exposure, place the container behind a reverse proxy with HTTPS (Caddy, Nginx Proxy Manager, Traefik).
 
 ---
 
-## Nasazení přes terminál (Docker Compose)
+## Terminal Deployment (Docker Compose)
 
 ```bash
 git clone https://github.com/petrbla/agy-assistant.git
 cd agy-assistant
-cp .env.example .env   # volitelně vyplňte TELEGRAM_BOT_TOKEN a TELEGRAM_ALLOWED_USERS
+cp .env.example .env   # optionally set LANGUAGE, TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
 docker compose up -d
 ```
 
-Chcete-li image sestavit lokálně ze zdrojových kódů místo stažení z GHCR:
+To build the image locally from source instead of pulling from GHCR:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
-*(Pro jistotu nejnovější verze `agy` při lokálním buildu použijte `--no-cache`.)*
+*(Use `--no-cache` when building locally to fetch the latest `agy` CLI release.)*
 
 ---
 
-## Napojení MCP serverů
+## Connecting MCP Servers
 
-1. **Doporučeno:** přidat servery ve Web UI v **Nastavení → MCP servery** a u každého zvolit oblast (`Všechny`, `Pracovní`, `Osobní`).
-2. Volitelně vyplnit `MCP_PRACE_*` / `MCP_OSOBNI_*` v `.env` ještě před prvním spuštěním – `docker-entrypoint.sh` z nich jednorázově vygeneruje `~/.gemini/config/mcp_config.json`.
+1. **Recommended:** add servers in Web UI under **Settings → MCP Servers** and assign each to an area (`All chats`, `Work`, `Personal`).
+2. Optionally set `MCP_WORK_*` / `MCP_PERSONAL_*` (or legacy Czech `MCP_PRACE_*` / `MCP_OSOBNI_*`) in `.env` before the very first startup – `docker-entrypoint.sh` generates `~/.gemini/config/mcp_config.json` automatically.
 
-Pravidla oddělení pracovních a osobních nástrojů jsou v `workspace_template/AGENTS.md`. V Telegramu se oblast přepíná příkazy `/pracovni`, `/osobni` nebo `/auto`.
+Context separation rules are defined in `workspace_template/AGENTS.md` (or `workspace_template_cs/AGENTS.md`). In Telegram, switch areas with `/work` (`/pracovni`), `/personal` (`/osobni`), or `/auto`.
 
-## Vývoj a testy
+## Development & Tests
 
 ```bash
 python -m venv .venv

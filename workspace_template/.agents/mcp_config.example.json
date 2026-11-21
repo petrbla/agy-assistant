@@ -1,33 +1,33 @@
 {
   "mcpServers": {
-    "n8n-prace": {
+    "n8n-work": {
       "url": "https://n8n.example.com/mcp-server/http",
       "headers": {
-        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+        "Authorization": "Bearer REPLACE_WITH_YOUR_TOKEN"
       }
     },
-    "nocodb-prace": {
+    "nocodb-work": {
       "url": "https://nocodb.example.com/mcp",
       "headers": {
-        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+        "Authorization": "Bearer REPLACE_WITH_YOUR_TOKEN"
       }
     },
-    "n8n-osobni": {
-      "url": "https://n8n-osobni.example.com/mcp-server/http",
+    "n8n-personal": {
+      "url": "https://n8n-personal.example.com/mcp-server/http",
       "headers": {
-        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+        "Authorization": "Bearer REPLACE_WITH_YOUR_TOKEN"
       }
     },
-    "nocodb-osobni": {
-      "url": "https://nocodb-osobni.example.com/mcp",
+    "nocodb-personal": {
+      "url": "https://nocodb-personal.example.com/mcp",
       "headers": {
-        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+        "Authorization": "Bearer REPLACE_WITH_YOUR_TOKEN"
       }
     },
-    "google-osobni": {
+    "google-personal": {
       "url": "https://google-mcp.example.com/mcp",
       "headers": {
-        "Authorization": "Bearer NAHRADTE_VLASTNIM_TOKENEM"
+        "Authorization": "Bearer REPLACE_WITH_YOUR_TOKEN"
       }
     }
   }

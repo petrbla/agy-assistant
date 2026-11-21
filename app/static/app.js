@@ -1,7 +1,24 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const EFFORTS = ["low", "medium", "high", "xhigh"];
-  const EFFORT_LABELS = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh" };
+  const SYSTEM_JOB_KEY_BY_ID = {
+    heartbeat: "job_name_heartbeat",
+    briefing: "job_name_briefing",
+    nightly_reset: "job_name_nightly",
+  };
+
+  let currentLang = "en";
+  let currentMeta = { code: "en", name: "English", short: "EN", date_locale: "en-US" };
+  let availableLanguages = [
+    { code: "en", name: "English", short: "EN", date_locale: "en-US" },
+    { code: "cs", name: "Čeština", short: "CS", date_locale: "cs-CZ" },
+  ];
+  let uiDict = {};
+  const localeCache = {};
+  let isAuthenticated = false;
+  let lastStatus = null;
+  let lastOauthState = null;
+  let authScreenStatusKey = "";
 
   let activeTab = "chat";
   let activeChannel = "auto";
@@ -16,9 +33,142 @@
   let authPollTimer = null;
   const chatLogs = { auto: [], pracovni: [], osobni: [] };
 
-  // Motiv (tmavý / světlý)
-  function applyTheme(t) {
-    const theme = t === "light" ? "light" : "dark";
+  function t(key, vars = {}) {
+    let text = typeof uiDict[key] === "string" ? uiDict[key] : key;
+    Object.entries(vars).forEach(([k, v]) => {
+      text = text.replaceAll(`{${k}}`, String(v ?? ""));
+    });
+    return text;
+  }
+
+  function channelLabel(ch) {
+    if (ch === "pracovni") return t("channel_work");
+    if (ch === "osobni") return t("channel_personal");
+    return t("channel_auto");
+  }
+
+  function displayBrandTitle(name) {
+    const cleaned = (name || "").trim();
+    if (!cleaned || cleaned === "Assistant" || cleaned === "Asistent") {
+      return t("brand_default");
+    }
+    return cleaned;
+  }
+
+  function renderLanguageControls(langs = availableLanguages) {
+    if (Array.isArray(langs) && langs.length) {
+      availableLanguages = langs;
+    }
+    const seg = $("langSeg");
+    if (seg) {
+      seg.innerHTML = "";
+      availableLanguages.forEach((item) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.lang = item.code;
+        b.textContent = item.short || item.code.toUpperCase();
+        b.title = item.name || item.code;
+        b.classList.toggle("active", item.code === currentLang);
+        b.onclick = () => applyLanguage(item.code, { persistBackend: true });
+        seg.appendChild(b);
+      });
+    }
+    const sel = $("cfgLanguage");
+    if (sel) {
+      sel.innerHTML = "";
+      availableLanguages.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = item.code;
+        opt.textContent = item.name || item.code.toUpperCase();
+        sel.appendChild(opt);
+      });
+      sel.value = currentLang;
+    }
+  }
+
+  function applyStaticTranslations() {
+    document.documentElement.lang = currentLang;
+    document.title = t("doc_title");
+
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const k = el.getAttribute("data-i18n");
+      if (k && typeof uiDict[k] === "string") el.textContent = uiDict[k];
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+      const k = el.getAttribute("data-i18n-placeholder");
+      if (k && typeof uiDict[k] === "string") el.placeholder = uiDict[k];
+    });
+    document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+      const k = el.getAttribute("data-i18n-title");
+      if (k && typeof uiDict[k] === "string") el.title = uiDict[k];
+    });
+
+    if (authScreenStatusKey) {
+      $("statusPill").textContent = t(authScreenStatusKey);
+    }
+    if (!currentFile) {
+      $("currentFileLabel").textContent = t("select_file");
+      $("fileDirtyHint").textContent = t("file_hint_shortcut");
+    } else {
+      $("fileDirtyHint").textContent = fileDirty ? t("file_hint_dirty") : t("file_hint_loaded");
+    }
+    if (!lastOauthState) {
+      $("oauthOutput").textContent = t("oauth_ready");
+    }
+
+    const defaultOpt = $("chatModelSelect")?.querySelector('option[value=""]');
+    if (defaultOpt) defaultOpt.textContent = t("model_default");
+    const [curBase, curEff] = splitModel(currentModel);
+    if (curBase) syncEffortUi(curBase, curEff);
+  }
+
+  async function loadLocaleBundle(lang) {
+    const code = (lang || "en").trim().toLowerCase() || "en";
+    if (localeCache[code]) return localeCache[code];
+    const res = await fetch(`/api/i18n/${encodeURIComponent(code)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    localeCache[data.language] = data;
+    localeCache[code] = data;
+    return data;
+  }
+
+  async function applyLanguage(lang, { persistBackend = false } = {}) {
+    try {
+      const bundle = await loadLocaleBundle(lang);
+      currentLang = bundle.language || "en";
+      currentMeta = bundle.meta || currentMeta;
+      uiDict = bundle.ui || {};
+      localStorage.setItem("agy_lang", currentLang);
+      renderLanguageControls(bundle.available_languages);
+      applyStaticTranslations();
+
+      if (lastStatus) {
+        applyStatus(lastStatus);
+      } else {
+        $("brandTitle").textContent = t("brand_default");
+      }
+      renderChat();
+      if (lastOauthState) renderOauthState(lastOauthState);
+
+      if (persistBackend && isAuthenticated) {
+        await api("/api/settings", {
+          method: "POST",
+          body: JSON.stringify({ language: currentLang }),
+        });
+        if (lastStatus) lastStatus.language = currentLang;
+        toast(t("toast_language_switched", { name: currentMeta.name }));
+      }
+      if (isAuthenticated && activeTab === "ops") loadOps();
+      if (isAuthenticated && activeTab === "settings") loadMcp();
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
+  // Theme (dark / light)
+  function applyTheme(tMode) {
+    const theme = tMode === "light" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("agy_theme", theme);
     $("themeBtn").textContent = theme === "dark" ? "☀️" : "🌙";
@@ -54,7 +204,7 @@
     if (res.status === 401) {
       localStorage.removeItem("agy_web_token");
       await loadAuthAndBootstrap();
-      throw new Error("Vyžadováno přihlášení.");
+      throw new Error(t("err_login_required"));
     }
     const text = await res.text();
     let data = {};
@@ -65,8 +215,12 @@
     return data;
   }
 
+  function dateLocale() {
+    return currentMeta.date_locale || (currentLang === "cs" ? "cs-CZ" : "en-US");
+  }
+
   function fmtInt(n) {
-    return Number(n || 0).toLocaleString("cs-CZ");
+    return Number(n || 0).toLocaleString(dateLocale());
   }
 
   function escapeHtml(str) {
@@ -102,18 +256,18 @@
       const svg = container.querySelector("svg");
       if (svg) { svg.style.width = "100%"; svg.style.height = "100%"; }
     } else {
-      container.textContent = "QR knihovna chybí";
+      container.textContent = t("qr_lib_missing");
     }
   }
 
-  // Navigace
+  // Navigation
   function switchTab(tab) {
     activeTab = tab;
     document.querySelectorAll(".nav-tab").forEach((b) => {
       b.classList.toggle("active", b.dataset.tab === tab);
     });
-    ["chat", "memory", "ops", "settings"].forEach((t) => {
-      $(`tab-${t}`).classList.toggle("hidden", t !== tab);
+    ["chat", "memory", "ops", "settings"].forEach((tabId) => {
+      $(`tab-${tabId}`).classList.toggle("hidden", tabId !== tab);
     });
     if (tab === "memory") loadFiles();
     if (tab === "ops") loadOps();
@@ -124,6 +278,7 @@
   });
 
   function showAuthScreen(mode) {
+    isAuthenticated = false;
     $("authScreen").classList.remove("hidden");
     $("appMain").classList.add("hidden");
     $("logoutBtn").classList.add("hidden");
@@ -133,6 +288,8 @@
   }
 
   function showAppMain() {
+    isAuthenticated = true;
+    authScreenStatusKey = "";
     $("authScreen").classList.add("hidden");
     $("appMain").classList.remove("hidden");
     document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = false; });
@@ -145,26 +302,40 @@
     el.classList.toggle("hidden", !msg);
   }
 
-  // Autentizace
+  // Auth & Bootstrap
   async function loadAuthAndBootstrap() {
     showAuthErr("");
     try {
       const st = await fetch("/api/auth/state").then((r) => r.json());
-      $("brandTitle").textContent = st.assistant_name || "Asistent Antigravity";
+      if (Array.isArray(st.available_languages)) {
+        availableLanguages = st.available_languages;
+      }
+      const preferredLang = localStorage.getItem("agy_lang") || st.language || "en";
+      await applyLanguage(preferredLang, { persistBackend: false });
+
+      $("brandTitle").textContent = displayBrandTitle(st.assistant_name);
       $("tokenLoginWrap").classList.toggle("hidden", !st.has_token_configured);
       if (st.needs_initial_setup) {
-        $("statusPill").textContent = "První nastavení";
+        authScreenStatusKey = "status_initial_setup";
+        $("statusPill").textContent = t(authScreenStatusKey);
         $("statusPill").className = "pill warn";
         showAuthScreen("initial");
         return;
       }
       const statusData = await api("/api/status");
+      lastStatus = statusData;
+      if (statusData.language && statusData.language !== currentLang) {
+        await applyLanguage(statusData.language, { persistBackend: false });
+      }
       showAppMain();
       applyStatus(statusData);
       await loadModels(false);
       renderChat();
     } catch (_) {
-      $("statusPill").textContent = "Nepřihlášen";
+      isAuthenticated = false;
+      lastStatus = null;
+      authScreenStatusKey = "status_signed_out";
+      $("statusPill").textContent = t(authScreenStatusKey);
       $("statusPill").className = "pill";
       showAuthScreen("login");
     }
@@ -174,7 +345,7 @@
     e.preventDefault();
     showAuthErr("");
     const pw = $("initPassword").value;
-    if (pw !== $("initPassword2").value) return showAuthErr("Hesla se neshodují.");
+    if (pw !== $("initPassword2").value) return showAuthErr(t("err_passwords_mismatch"));
     try {
       const res = await fetch("/api/auth/initial-setup", {
         method: "POST",
@@ -182,13 +353,14 @@
         body: JSON.stringify({
           email: $("initEmail").value.trim(),
           username: $("initUsername").value.trim(),
+          language: currentLang,
           password: pw,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return showAuthErr(data.detail || "Nastavení selhalo.");
+      if (!res.ok) return showAuthErr(data.detail || t("err_setup_failed"));
       localStorage.setItem("agy_web_token", data.session_token);
-      toast("Účet byl nastaven.");
+      toast(t("toast_setup_done"));
       await loadAuthAndBootstrap();
     } catch (err) {
       showAuthErr(err.message);
@@ -208,7 +380,7 @@
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return showAuthErr(data.detail || "Přihlášení selhalo.");
+      if (!res.ok) return showAuthErr(data.detail || t("err_login_failed"));
       if (data.requires_2fa) {
         pending2faChallenge = data.challenge_token;
         $("loginStep1Form").classList.add("hidden");
@@ -219,7 +391,7 @@
       }
       localStorage.setItem("agy_web_token", data.session_token);
       $("loginPassword").value = "";
-      toast("Přihlášeno.");
+      toast(t("toast_signed_in"));
       await loadAuthAndBootstrap();
     } catch (err) {
       showAuthErr(err.message);
@@ -239,11 +411,11 @@
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return showAuthErr(data.detail || "Neplatný 2FA kód.");
+      if (!res.ok) return showAuthErr(data.detail || t("err_invalid_2fa"));
       localStorage.setItem("agy_web_token", data.session_token);
       $("loginStep2Form").classList.add("hidden");
       $("loginStep1Form").classList.remove("hidden");
-      toast("Přihlášeno s 2FA.");
+      toast(t("toast_signed_in_2fa"));
       await loadAuthAndBootstrap();
     } catch (err) {
       showAuthErr(err.message);
@@ -259,7 +431,7 @@
   $("loginTokenBtn").onclick = async () => {
     showAuthErr("");
     const tok = $("loginWebToken").value.trim();
-    if (!tok) return showAuthErr("Zadejte Web Token.");
+    if (!tok) return showAuthErr(t("err_enter_web_token"));
     try {
       const res = await fetch("/api/login", {
         method: "POST",
@@ -267,10 +439,10 @@
         body: JSON.stringify({ web_token: tok }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return showAuthErr(data.detail || "Neplatný token.");
+      if (!res.ok) return showAuthErr(data.detail || t("err_invalid_token"));
       localStorage.setItem("agy_web_token", data.session_token);
       $("loginWebToken").value = "";
-      toast("Přihlášeno tokenem.");
+      toast(t("toast_signed_in_token"));
       await loadAuthAndBootstrap();
     } catch (err) {
       showAuthErr(err.message);
@@ -280,25 +452,27 @@
   $("logoutBtn").onclick = async () => {
     try { await fetch("/api/logout", { method: "POST", headers: getHeaders() }); } catch (_) {}
     localStorage.removeItem("agy_web_token");
+    lastStatus = null;
     await loadAuthAndBootstrap();
   };
 
   function applyStatus(s) {
-    $("brandTitle").textContent = s.assistant_name || "Asistent";
+    lastStatus = s;
+    $("brandTitle").textContent = displayBrandTitle(s.assistant_name);
     const dot = $("brandDot");
     const pill = $("statusPill");
     if (!s.agy_available) {
       dot.className = "brand-dot err";
       pill.className = "pill err";
-      pill.textContent = "agy nedostupné";
+      pill.textContent = t("status_agy_unavailable");
     } else if (!s.agy_authenticated) {
       dot.className = "brand-dot warn";
       pill.className = "pill warn";
-      pill.textContent = `${s.agy_version || "agy"} • nepřihlášeno`;
+      pill.textContent = t("status_agy_unauthenticated", { version: s.agy_version || "agy" });
     } else {
       dot.className = "brand-dot ok";
       pill.className = "pill ok";
-      pill.textContent = s.agy_version ? `agy ${s.agy_version}` : "Online";
+      pill.textContent = s.agy_version ? `agy ${s.agy_version}` : t("status_online");
     }
     updateAgyBadges(s);
     updateSecurityUi(s);
@@ -308,14 +482,14 @@
     const authBadge = $("agyAuthBadge");
     const logoutBtn = $("logoutAgyBtn");
     const parts = [];
-    if (info.has_agy_oauth) parts.push("OAuth");
-    if (info.has_gemini_api_key) parts.push("API klíč");
+    if (info.has_agy_oauth) parts.push(t("agy_auth_oauth"));
+    if (info.has_gemini_api_key) parts.push(t("agy_auth_api_key"));
     if (parts.length) {
-      authBadge.textContent = `Přihlášeno (${parts.join(" + ")})`;
+      authBadge.textContent = t("agy_auth_signed_in", { parts: parts.join(" + ") });
       authBadge.className = "pill ok";
       logoutBtn.classList.remove("hidden");
     } else if (typeof info.has_agy_oauth === "boolean") {
-      authBadge.textContent = "Nepřihlášeno";
+      authBadge.textContent = t("agy_auth_signed_out");
       authBadge.className = "pill err";
       logoutBtn.classList.add("hidden");
     }
@@ -323,11 +497,11 @@
     const verBadge = $("agyVerBadge");
     const updBtn = $("updateAgyBtn");
     if (info.agy_update_available && info.agy_latest_version) {
-      verBadge.textContent = `Dostupná ${info.agy_latest_version}`;
+      verBadge.textContent = t("agy_ver_available", { ver: info.agy_latest_version });
       verBadge.className = "pill warn";
       updBtn.classList.remove("hidden");
     } else if (info.agy_up_to_date === true) {
-      verBadge.textContent = `${info.agy_version} (aktuální)`;
+      verBadge.textContent = t("agy_ver_current", { ver: info.agy_version });
       verBadge.className = "pill ok";
       updBtn.classList.add("hidden");
     } else if (info.agy_version) {
@@ -337,7 +511,7 @@
     }
   }
 
-  // Modely & váha
+  // Models & Effort
   function splitModel(full) {
     const s = (full || "").trim();
     for (const e of EFFORTS) {
@@ -346,6 +520,10 @@
       }
     }
     return [s, ""];
+  }
+
+  function effortLabel(eff) {
+    return t(`effort_${eff}`) || eff;
   }
 
   async function loadModels(refresh = false) {
@@ -362,7 +540,7 @@
       });
       const sel = $("chatModelSelect");
       const dl = $("modelsDatalist");
-      sel.innerHTML = `<option value="">Výchozí (agy)</option>`;
+      sel.innerHTML = `<option value="">${escapeHtml(t("model_default"))}</option>`;
       dl.innerHTML = "";
       list.forEach((m) => {
         const opt = document.createElement("option");
@@ -402,10 +580,10 @@
     const idx = Math.max(0, ordered.indexOf(eff || "medium"));
     range.value = String(idx);
     const activeEff = ordered[idx];
-    $("effortLabel").textContent = EFFORT_LABELS[activeEff] || activeEff;
+    $("effortLabel").textContent = effortLabel(activeEff);
     range.oninput = () => {
       const e = ordered[Number(range.value)];
-      $("effortLabel").textContent = EFFORT_LABELS[e] || e;
+      $("effortLabel").textContent = effortLabel(e);
     };
     range.onchange = async () => {
       const e = ordered[Number(range.value)];
@@ -417,7 +595,7 @@
     currentModel = fullModel;
     try {
       await api("/api/settings", { method: "POST", body: JSON.stringify({ agy_model: fullModel }) });
-      toast(`Model: ${fullModel || "výchozí (agy)"}`);
+      toast(t("toast_model_set", { model: fullModel || t("model_default") }));
     } catch (err) {
       toast(err.message, "err");
     }
@@ -445,7 +623,7 @@
     if (!msgs.length) {
       const empty = document.createElement("div");
       empty.className = "msg meta";
-      empty.textContent = `Nová konverzace v kanálu „${activeChannel}“. Napiš první zprávu.`;
+      empty.textContent = t("chat_empty", { channel: channelLabel(activeChannel) });
       box.appendChild(empty);
       return;
     }
@@ -508,11 +686,14 @@
         }),
       });
       typing.remove();
-      if (res.assistant_name) $("brandTitle").textContent = res.assistant_name;
-      appendMsg(res.text || "(Prázdná odpověď)", "assistant");
+      if (res.assistant_name) {
+        if (lastStatus) lastStatus.assistant_name = res.assistant_name;
+        $("brandTitle").textContent = displayBrandTitle(res.assistant_name);
+      }
+      appendMsg(res.text || t("empty_reply"), "assistant");
     } catch (err) {
       typing.remove();
-      appendMsg(`Chyba: ${err.message}`, "meta");
+      appendMsg(t("chat_error_prefix", { msg: err.message }), "meta");
     } finally {
       isSending = false;
       $("chatSendBtn").disabled = false;
@@ -528,26 +709,26 @@
       });
       chatLogs[activeChannel] = [];
       renderChat();
-      toast(`Konverzace „${activeChannel}“ byla resetována.`);
+      toast(t("toast_chat_reset", { channel: channelLabel(activeChannel) }));
     } catch (err) {
       toast(err.message, "err");
     }
   };
 
   $("chatCleanupBtn").onclick = async () => {
-    if (!confirm("Uložit důležité věci z aktivních konverzací do paměti a vyčistit kontext?")) return;
-    toast("Provádím úklid paměti…", "warn");
+    if (!confirm(t("confirm_cleanup"))) return;
+    toast(t("toast_cleanup_running"), "warn");
     try {
       const r = await api("/api/nightly-reset/run", { method: "POST" });
       chatLogs.auto = []; chatLogs.pracovni = []; chatLogs.osobni = [];
       renderChat();
-      toast(`Úklid hotov: uloženo ${r.flushed_sessions}/${r.reset_sessions} relací.`);
+      toast(t("toast_cleanup_done", { flushed: r.flushed_sessions, reset: r.reset_sessions }));
     } catch (err) {
       toast(err.message, "err");
     }
   };
 
-  // Paměť
+  // Memory
   async function loadFiles() {
     try {
       allFiles = await api("/api/files");
@@ -581,7 +762,7 @@
       currentFile = path;
       fileDirty = false;
       $("currentFileLabel").textContent = path;
-      $("fileDirtyHint").textContent = "Načteno (Ctrl+S uloží změny).";
+      $("fileDirtyHint").textContent = t("file_hint_loaded");
       $("fileEditor").disabled = false;
       $("fileEditor").value = data.content;
       $("saveFileBtn").disabled = false;
@@ -593,7 +774,7 @@
 
   $("fileEditor").oninput = () => {
     fileDirty = true;
-    $("fileDirtyHint").textContent = "Neuložené změny…";
+    $("fileDirtyHint").textContent = t("file_hint_dirty");
   };
 
   async function saveCurrentFile() {
@@ -604,8 +785,8 @@
         body: JSON.stringify({ content: $("fileEditor").value }),
       });
       fileDirty = false;
-      $("fileDirtyHint").textContent = "Uloženo.";
-      toast(`Soubor ${currentFile} uložen.`);
+      $("fileDirtyHint").textContent = t("file_hint_saved");
+      toast(t("toast_file_saved", { path: currentFile }));
     } catch (err) {
       toast(err.message, "err");
     }
@@ -619,71 +800,86 @@
   });
 
   $("resetWorkspaceBtn").onclick = async () => {
-    if (!confirm("Obnovit výchozí šablony paměti a resetovat všechny konverzace?")) return;
+    if (!confirm(t("confirm_workspace_reset"))) return;
     try {
       await api("/api/workspace/reset", { method: "POST" });
       currentFile = null;
-      $("currentFileLabel").textContent = "Vyberte soubor";
+      fileDirty = false;
+      $("currentFileLabel").textContent = t("select_file");
+      $("fileDirtyHint").textContent = t("file_hint_shortcut");
       $("fileEditor").value = "";
       $("fileEditor").disabled = true;
       $("saveFileBtn").disabled = true;
       await loadFiles();
-      toast("Paměť obnovena ze šablon.");
+      toast(t("toast_workspace_reset"));
     } catch (err) {
       toast(err.message, "err");
     }
   };
 
-  // Plánovač & Historie
+  // Scheduler & History
   function renderKpi(valId, subId, st) {
     const tilde = st.estimated_runs > 0 && st.exact_runs === 0 ? "~" : "";
-    $(valId).textContent = `${tilde}${fmtInt(st.total_tokens)} tok.`;
-    $(subId).textContent = `${fmtInt(st.total_runs)} běhů • vstup ${fmtInt(st.input_tokens)} / výstup ${fmtInt(st.output_tokens)}`;
+    $(valId).textContent = `${tilde}${fmtInt(st.total_tokens)} ${t("kpi_tok_unit")}`;
+    $(subId).textContent = t("kpi_sub", {
+      runs: fmtInt(st.total_runs),
+      in_tok: fmtInt(st.input_tokens),
+      out_tok: fmtInt(st.output_tokens),
+    });
   }
 
-  const DOW = ["ne", "po", "út", "st", "čt", "pá", "so", "ne"];
+  function dowNames() {
+    return [0, 1, 2, 3, 4, 5, 6].map((i) => t(`dow_${i}`));
+  }
 
   function fmtNextRun(iso) {
     if (!iso) return "—";
     const d = new Date(iso);
     if (isNaN(d)) return iso;
-    const time = d.toLocaleTimeString("cs-CZ", { hour: "numeric", minute: "2-digit" });
+    const loc = dateLocale();
+    const time = d.toLocaleTimeString(loc, { hour: "numeric", minute: "2-digit" });
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const day = new Date(d);
     day.setHours(0, 0, 0, 0);
     const diff = Math.round((day - today) / 86400000);
-    if (diff === 0) return `dnes ${time}`;
-    if (diff === 1) return `zítra ${time}`;
-    if (diff > 1 && diff < 7) return `${DOW[d.getDay()]} ${time}`;
-    const sameYear = d.getFullYear() === today.getFullYear();
-    return `${d.getDate()}. ${d.getMonth() + 1}.${sameYear ? "" : " " + d.getFullYear()} ${time}`;
+    if (diff === 0) return t("sched_today", { time });
+    if (diff === 1) return t("sched_tomorrow", { time });
+    const dows = dowNames();
+    if (diff > 1 && diff < 7) return `${dows[d.getDay()]} ${time}`;
+    return `${d.toLocaleDateString(loc)} ${time}`;
   }
 
   function humanDow(f) {
     if (f === "*") return "";
-    if (f === "1-5") return "po–pá";
-    if (f === "0,6" || f === "6,0" || f === "6-7" || f === "sat,sun") return "so–ne";
+    if (f === "1-5") return t("sched_mon_fri");
+    if (f === "0,6" || f === "6,0" || f === "6-7" || f === "sat,sun") return t("sched_sat_sun");
+    const dows = dowNames();
+    const dayAt = (x) => dows[(+x) % 7] ?? x;
     return f.split(",").map((p) => p.includes("-")
-      ? p.split("-").map((x) => DOW[+x] ?? x).join("–")
-      : DOW[+p] ?? p).join(", ");
+      ? p.split("-").map(dayAt).join("–")
+      : dayAt(p)).join(", ");
   }
 
-  function humanSchedule(t) {
-    if (t.schedule_type === "once") {
-      return t.run_at ? "jednou " + fmtNextRun(t.run_at) : "jednou";
+  function humanSchedule(task) {
+    if (task.schedule_type === "once") {
+      return task.run_at ? t("sched_once_prefix") + fmtNextRun(task.run_at) : t("sched_once_plain");
     }
-    const parts = (t.cron_expr || "").trim().split(/\s+/);
-    if (parts.length !== 5) return t.cron_expr;
+    const parts = (task.cron_expr || "").trim().split(/\s+/);
+    if (parts.length !== 5) return task.cron_expr;
     const [mi, h, dom, mon, dow] = parts;
-    if (!/^\d+$/.test(mi) || !/^\d+$/.test(h)) return t.cron_expr;
+    if (!/^\d+$/.test(mi) || !/^\d+$/.test(h)) return task.cron_expr;
     const time = `${+h}:${mi.padStart(2, "0")}`;
     if (dom === "*" && mon === "*") {
-      return dow === "*" ? `denně ${time}` : `${humanDow(dow)} ${time}`;
+      return dow === "*" ? t("sched_daily", { time }) : `${humanDow(dow)} ${time}`;
     }
-    if (/^\d+$/.test(dom) && /^\d+$/.test(mon) && dow === "*") return `každý ${+dom}. ${+mon}. ${time}`;
-    if (/^\d+$/.test(dom) && mon === "*" && dow === "*") return `${+dom}. v měsíci ${time}`;
-    return t.cron_expr;
+    if (/^\d+$/.test(dom) && /^\d+$/.test(mon) && dow === "*") {
+      return t("sched_yearly", { day: +dom, month: +mon, time });
+    }
+    if (/^\d+$/.test(dom) && mon === "*" && dow === "*") {
+      return t("sched_monthly", { day: +dom, time });
+    }
+    return task.cron_expr;
   }
 
   async function loadOps() {
@@ -701,24 +897,29 @@
       renderKpi("kpi24h", "kpi24hSub", u1);
       renderKpi("kpi7d", "kpi7dSub", u7);
       renderKpi("kpiAll", "kpiAllSub", uAll);
-      $("opsSummary").textContent = `Skilly: ${(s.skills || []).join(", ") || "žádné"} • Telegram: ${s.telegram_enabled ? "zapnut" : "vypnut"}`;
+      $("opsSummary").textContent = t("ops_summary", {
+        skills: (s.skills || []).join(", ") || t("none"),
+        tg_state: s.telegram_enabled ? t("state_on") : t("state_off"),
+      });
       const jobs = s.jobs || [];
       const nextByName = new Map(jobs.map((j) => [j.name, j.next_run_time]));
-      const taskNames = new Set(tasks.map((t) => t.name));
+      const taskNames = new Set(tasks.map((task) => task.name));
       const systemJobs = jobs.filter((j) => !taskNames.has(j.name));
       const jl = $("jobsList");
       jl.innerHTML = "";
       if (systemJobs.length) {
         const label = document.createElement("span");
         label.className = "jobs-label";
-        label.textContent = "Systémové úlohy";
+        label.textContent = t("system_jobs_label");
         jl.appendChild(label);
         systemJobs
           .sort((a, b) => String(a.next_run_time || "~").localeCompare(String(b.next_run_time || "~")))
           .forEach((j) => {
             const chip = document.createElement("span");
             chip.className = "job-chip";
-            chip.innerHTML = `${escapeHtml(j.name)} <span class="job-chip-time">${escapeHtml(fmtNextRun(j.next_run_time))}</span>`;
+            const sysKey = SYSTEM_JOB_KEY_BY_ID[j.id];
+            const jobDisplayName = sysKey ? t(sysKey) : j.name;
+            chip.innerHTML = `${escapeHtml(jobDisplayName)} <span class="job-chip-time">${escapeHtml(fmtNextRun(j.next_run_time))}</span>`;
             chip.title = j.next_run_time || "";
             jl.appendChild(chip);
           });
@@ -728,30 +929,30 @@
       const tb = $("tasksBody");
       tb.innerHTML = "";
       if (!tasks.length) {
-        tb.innerHTML = `<tr><td colspan="6" class="muted" style="text-align:center;padding:18px;">Zatím žádné vlastní úlohy.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="6" class="muted" style="text-align:center;padding:18px;">${escapeHtml(t("tasks_empty"))}</td></tr>`;
       }
       const sorted = [...tasks].sort((a, b) => {
         const na = a.enabled ? nextByName.get(a.name) || "~" : "~~";
         const nb = b.enabled ? nextByName.get(b.name) || "~" : "~~";
         return String(na).localeCompare(String(nb));
       });
-      sorted.forEach((t) => {
+      sorted.forEach((task) => {
         const tr = document.createElement("tr");
-        if (!t.enabled) tr.className = "task-disabled";
-        const raw = t.schedule_type === "once" ? t.run_at : t.cron_expr;
-        const next = t.enabled ? nextByName.get(t.name) : null;
-        const typePill = t.action_type === "agent"
-          ? `<span class="pill accent">AI</span>`
-          : `<span class="pill">Zpráva</span>`;
-        const statePill = t.enabled
-          ? `<span class="pill ok">aktivní</span>`
-          : `<span class="pill">pozastaveno</span>`;
+        if (!task.enabled) tr.className = "task-disabled";
+        const raw = task.schedule_type === "once" ? task.run_at : task.cron_expr;
+        const next = task.enabled ? nextByName.get(task.name) : null;
+        const typePill = task.action_type === "agent"
+          ? `<span class="pill accent">${escapeHtml(t("task_type_ai"))}</span>`
+          : `<span class="pill">${escapeHtml(t("task_type_msg"))}</span>`;
+        const statePill = task.enabled
+          ? `<span class="pill ok">${escapeHtml(t("task_state_active"))}</span>`
+          : `<span class="pill">${escapeHtml(t("task_state_paused"))}</span>`;
         tr.innerHTML =
-          `<td class="task-name">${escapeHtml(t.name)}</td>` +
-          `<td class="nowrap"><div title="${escapeHtml(raw)}">${escapeHtml(humanSchedule(t))}</div>` +
-          `<div class="task-next">${next ? "příště " + escapeHtml(fmtNextRun(next)) : "—"}</div></td>` +
+          `<td class="task-name">${escapeHtml(task.name)}</td>` +
+          `<td class="nowrap"><div title="${escapeHtml(raw)}">${escapeHtml(humanSchedule(task))}</div>` +
+          `<div class="task-next">${next ? escapeHtml(t("task_next_prefix", { time: fmtNextRun(next) })) : "—"}</div></td>` +
           `<td>${typePill}</td>` +
-          `<td><div class="task-prompt" title="${escapeHtml(t.prompt)}">${escapeHtml(t.prompt)}</div></td>` +
+          `<td><div class="task-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(task.prompt)}</div></td>` +
           `<td>${statePill}</td>`;
         const td = document.createElement("td");
         td.className = "task-actions";
@@ -768,18 +969,18 @@
           return b;
         };
         td.append(
-          mk("▶", "btn-icon-sm", "Spustit teď", async () => {
-            await api(`/api/tasks/${t.id}/run`, { method: "POST" });
-            toast(`Úloha „${t.name}“ spuštěna.`);
+          mk("▶", "btn-icon-sm", t("task_action_run"), async () => {
+            await api(`/api/tasks/${task.id}/run`, { method: "POST" });
+            toast(t("toast_task_run", { name: task.name }));
           }),
-          mk(t.enabled ? "⏸" : "⏵", "btn-icon-sm", t.enabled ? "Pozastavit" : "Obnovit", async () => {
-            await api(`/api/tasks/${t.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !t.enabled }) });
-            toast(t.enabled ? "Úloha pozastavena." : "Úloha obnovena.");
+          mk(task.enabled ? "⏸" : "⏵", "btn-icon-sm", task.enabled ? t("task_action_pause") : t("task_action_resume"), async () => {
+            await api(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !task.enabled }) });
+            toast(task.enabled ? t("toast_task_paused") : t("toast_task_resumed"));
           }),
-          mk("✕", "btn-icon-sm btn-danger", "Smazat", async () => {
-            if (!confirm(`Smazat úlohu „${t.name}“?`)) throw new Error("Zrušeno.");
-            await api(`/api/tasks/${t.id}`, { method: "DELETE" });
-            toast("Úloha smazána.");
+          mk("✕", "btn-icon-sm btn-danger", t("task_action_delete"), async () => {
+            if (!confirm(t("confirm_delete_task", { name: task.name }))) throw new Error(t("toast_cancelled"));
+            await api(`/api/tasks/${task.id}`, { method: "DELETE" });
+            toast(t("toast_task_deleted"));
           }),
         );
         tr.appendChild(td);
@@ -788,12 +989,13 @@
 
       const rb = $("runsBody");
       rb.innerHTML = "";
+      const loc = dateLocale();
       runs.forEach((r) => {
         const tr = document.createElement("tr");
-        const dt = r.created_at ? new Date(r.created_at).toLocaleString("cs-CZ") : "";
+        const dt = r.created_at ? new Date(r.created_at).toLocaleString(loc) : "";
         const tok = `${r.tokens_estimated ? "~" : ""}${fmtInt(r.total_tokens)}`;
         const dur = `${(r.duration_ms / 1000).toFixed(1)} s`;
-        tr.innerHTML = `<td class="mono">${escapeHtml(dt)}</td><td>${escapeHtml(r.source)}</td><td>${escapeHtml(r.context_mode)}</td><td>${escapeHtml((r.prompt || "").slice(0, 90))}</td><td>${escapeHtml((r.response || r.error || "").slice(0, 110))}</td><td class="mono">${tok}</td><td class="mono">${dur}</td>`;
+        tr.innerHTML = `<td class="mono">${escapeHtml(dt)}</td><td>${escapeHtml(r.source)}</td><td>${escapeHtml(channelLabel(r.context_mode))}</td><td>${escapeHtml((r.prompt || "").slice(0, 90))}</td><td>${escapeHtml((r.response || r.error || "").slice(0, 110))}</td><td class="mono">${tok}</td><td class="mono">${dur}</td>`;
         rb.appendChild(tr);
       });
     } catch (err) {
@@ -825,7 +1027,7 @@
       });
       $("taskName").value = "";
       $("taskPrompt").value = "";
-      toast("Úloha přidána.");
+      toast(t("toast_task_added"));
       loadOps();
     } catch (err) {
       toast(err.message, "err");
@@ -834,29 +1036,30 @@
 
   $("refreshOpsBtn").onclick = loadOps;
   $("runHeartbeatBtn").onclick = async () => {
-    toast("Spouštím Heartbeat…", "warn");
+    toast(t("toast_hb_running"), "warn");
     const r = await api("/api/heartbeat/run", { method: "POST" });
-    toast(r.text || "Heartbeat dokončen.");
+    toast(r.text || t("toast_hb_done"));
     loadOps();
   };
   $("runBriefingBtn").onclick = async () => {
-    toast("Generuji Ranní briefing…", "warn");
-    const r = await api("/api/briefing/run", { method: "POST" });
-    toast("Briefing dokončen.");
+    toast(t("toast_briefing_running"), "warn");
+    await api("/api/briefing/run", { method: "POST" });
+    toast(t("toast_briefing_done"));
     loadOps();
   };
   $("runNightlyBtn").onclick = async () => {
-    toast("Spouštím noční úklid…", "warn");
+    toast(t("toast_nightly_running"), "warn");
     const r = await api("/api/nightly-reset/run", { method: "POST" });
-    toast(`Uloženo ${r.flushed_sessions}/${r.reset_sessions} relací.`);
+    toast(t("toast_nightly_done", { flushed: r.flushed_sessions, reset: r.reset_sessions }));
     loadOps();
   };
 
-  // Nastavení & MCP & OAuth & 2FA
+  // Settings & MCP & OAuth & 2FA
   async function loadSettings() {
     try {
       const s = await api("/api/settings");
-      $("cfgAssistantName").value = s.assistant_name || "Asistent";
+      $("cfgAssistantName").value = s.assistant_name || t("placeholder_assistant_name");
+      if ($("cfgLanguage")) $("cfgLanguage").value = s.language || currentLang;
       $("cfgTz").value = s.tz || "Europe/Prague";
       $("cfgDefaultContext").value = ["pracovni", "osobni"].includes(s.default_context_mode)
         ? s.default_context_mode
@@ -879,8 +1082,10 @@
 
   $("settingsForm").onsubmit = async (e) => {
     e.preventDefault();
+    const chosenLang = $("cfgLanguage") ? $("cfgLanguage").value : currentLang;
     const body = {
-      assistant_name: $("cfgAssistantName").value.trim() || "Asistent",
+      assistant_name: $("cfgAssistantName").value.trim() || t("placeholder_assistant_name"),
+      language: chosenLang,
       tz: $("cfgTz").value.trim() || "Europe/Prague",
       default_context_mode: $("cfgDefaultContext").value,
       agy_model: $("cfgModel").value.trim(),
@@ -898,8 +1103,9 @@
     try {
       await api("/api/settings", { method: "POST", body: JSON.stringify(body) });
       $("cfgTgToken").value = "";
-      toast("Nastavení uloženo a aktivováno.");
+      localStorage.setItem("agy_lang", chosenLang);
       await loadAuthAndBootstrap();
+      toast(t("toast_settings_saved"));
     } catch (err) {
       toast(err.message, "err");
     }
@@ -908,11 +1114,11 @@
   $("geminiKeyForm").onsubmit = async (e) => {
     e.preventDefault();
     const key = $("cfgGeminiKey").value.trim();
-    if (!key) return toast("Zadejte klíč.", "warn");
+    if (!key) return toast(t("toast_enter_key"), "warn");
     try {
       await api("/api/settings", { method: "POST", body: JSON.stringify({ gemini_api_key: key }) });
       $("cfgGeminiKey").value = "";
-      toast("Gemini API klíč uložen.");
+      toast(t("toast_key_saved"));
       await loadSettings();
       await loadModels(true);
     } catch (err) {
@@ -922,13 +1128,16 @@
 
   $("clearGeminiKeyBtn").onclick = async () => {
     await api("/api/settings", { method: "POST", body: JSON.stringify({ gemini_api_key: "" }) });
-    toast("Gemini API klíč smazán.");
+    toast(t("toast_key_cleared"));
     await loadSettings();
   };
 
   // OAuth PTY
   function renderOauthState(st) {
-    $("oauthOutput").textContent = st.error ? `Chyba: ${st.error}` : (st.output || (st.running ? "Spouštím…" : "Připraveno."));
+    lastOauthState = st;
+    $("oauthOutput").textContent = st.error
+      ? t("chat_error_prefix", { msg: st.error })
+      : (st.output || (st.running ? t("oauth_starting") : t("oauth_idle")));
     $("oauthOutput").scrollTop = $("oauthOutput").scrollHeight;
     const urls = $("oauthUrls");
     urls.innerHTML = "";
@@ -938,7 +1147,7 @@
       a.target = "_blank";
       a.rel = "noopener noreferrer";
       a.className = "btn btn-primary btn-sm";
-      a.textContent = `Otevřít přihlašovací URL ${i + 1}`;
+      a.textContent = t("oauth_open_url", { idx: i + 1 });
       urls.appendChild(a);
     });
     if (!st.running && authPollTimer) {
@@ -974,23 +1183,27 @@
     renderOauthState(await api("/api/auth/input", { method: "POST", body: JSON.stringify({ value: v }) }));
   };
   $("logoutAgyBtn").onclick = async () => {
-    if (!confirm("Odhlásit se z Antigravity (smaže OAuth i Gemini API klíč)?")) return;
+    if (!confirm(t("confirm_agy_logout"))) return;
     await api("/api/auth/logout", { method: "POST" });
-    toast("Odhlášeno z Antigravity.");
+    toast(t("toast_agy_logged_out"));
     await loadSettings();
   };
   $("checkVerBtn").onclick = async () => {
     const info = await api("/api/agy/version?refresh=true");
     updateAgyBadges(info);
-    toast(info.agy_update_available ? `Dostupná nová verze ${info.agy_latest_version}` : `agy ${info.agy_version || "nedostupné"}`);
+    toast(
+      info.agy_update_available
+        ? t("toast_ver_update_avail", { ver: info.agy_latest_version })
+        : `agy ${info.agy_version || t("toast_ver_unavailable")}`
+    );
   };
   $("updateAgyBtn").onclick = async () => {
-    if (!confirm("Aktualizovat agy CLI na nejnovější verzi?")) return;
-    toast("Aktualizuji agy…", "warn");
+    if (!confirm(t("confirm_agy_update"))) return;
+    toast(t("toast_agy_updating"), "warn");
     try {
       const res = await api("/api/agy/update", { method: "POST" });
       updateAgyBadges(res);
-      toast(`Aktualizováno na ${res.agy_version || "OK"}.`);
+      toast(t("toast_agy_updated", { ver: res.agy_version || "OK" }));
     } catch (err) {
       toast(err.message, "err");
     }
@@ -1010,18 +1223,22 @@
       const items = await api("/api/mcp");
       const tb = $("mcpBody");
       tb.innerHTML = "";
-      const labels = { all: "Všechny", pracovni: "Pracovní", osobni: "Osobní" };
+      const labels = {
+        all: t("scope_all"),
+        pracovni: t("scope_work"),
+        osobni: t("scope_personal"),
+      };
       items.forEach((srv) => {
         const tr = document.createElement("tr");
         const target = srv.transport === "stdio" ? `${srv.command} ${(srv.args || []).join(" ")}` : srv.url;
-        tr.innerHTML = `<td><strong>${escapeHtml(srv.name)}</strong></td><td>${labels[srv.scope] || "Všechny"}</td><td class="mono">${escapeHtml(target)}</td>`;
+        tr.innerHTML = `<td><strong>${escapeHtml(srv.name)}</strong></td><td>${escapeHtml(labels[srv.scope] || labels.all)}</td><td class="mono">${escapeHtml(target)}</td>`;
         const td = document.createElement("td");
         const del = document.createElement("button");
         del.className = "btn btn-sm btn-danger";
-        del.textContent = "Smazat";
+        del.textContent = t("btn_delete");
         del.onclick = async () => {
           await api(`/api/mcp/${srv.id}`, { method: "DELETE" });
-          toast("MCP server smazán.");
+          toast(t("toast_mcp_deleted"));
           loadMcp();
         };
         td.appendChild(del);
@@ -1052,19 +1269,19 @@
       }
       await api("/api/mcp", { method: "POST", body: JSON.stringify(body) });
       $("mcpName").value = ""; $("mcpUrl").value = ""; $("mcpToken").value = ""; $("mcpCommand").value = ""; $("mcpArgs").value = "";
-      toast("MCP server uložen.");
+      toast(t("toast_mcp_saved"));
       loadMcp();
     } catch (err) {
       toast(err.message, "err");
     }
   };
 
-  // Zabezpečení (Heslo & 2FA)
+  // Security (Password & 2FA)
   function updateSecurityUi(s) {
     if ($("accEmail")) $("accEmail").value = s.email || "";
     $("pwdCurrentWrap").classList.toggle("hidden", !s.has_password);
     $("disable2faPwd").classList.toggle("hidden", !s.has_password);
-    $("totpBadge").textContent = s.totp_enabled ? "2FA aktivní" : "2FA vypnuto";
+    $("totpBadge").textContent = s.totp_enabled ? t("totp_on") : t("totp_off");
     $("totpBadge").className = `pill ${s.totp_enabled ? "ok" : ""}`;
     $("totpDisabledBox").classList.toggle("hidden", Boolean(s.totp_enabled));
     $("totpEnabledBox").classList.toggle("hidden", !s.totp_enabled);
@@ -1075,14 +1292,14 @@
     try {
       const r = await api("/api/account/email", { method: "POST", body: JSON.stringify({ email: $("accEmail").value.trim() }) });
       updateSecurityUi(r.owner);
-      toast("E-mail uložen.");
+      toast(t("toast_email_saved"));
     } catch (err) { toast(err.message, "err"); }
   };
 
   $("accountPasswordForm").onsubmit = async (e) => {
     e.preventDefault();
     const pw = $("accNewPassword").value;
-    if (pw !== $("accConfirmPassword").value) return toast("Hesla se neshodují.", "err");
+    if (pw !== $("accConfirmPassword").value) return toast(t("err_passwords_mismatch"), "err");
     try {
       const r = await api("/api/account/password", {
         method: "POST",
@@ -1091,7 +1308,7 @@
       if (r.session_token) localStorage.setItem("agy_web_token", r.session_token);
       $("accCurrentPassword").value = ""; $("accNewPassword").value = ""; $("accConfirmPassword").value = "";
       updateSecurityUi(r.owner);
-      toast("Heslo uloženo.");
+      toast(t("toast_password_saved"));
     } catch (err) { toast(err.message, "err"); }
   };
 
@@ -1107,7 +1324,7 @@
 
   $("copy2faSecretBtn").onclick = async () => {
     await navigator.clipboard.writeText($("totpSecretCode").textContent.trim());
-    toast("Klíč zkopírován.");
+    toast(t("toast_key_copied"));
   };
 
   $("enable2faForm").onsubmit = async (e) => {
@@ -1121,13 +1338,13 @@
       $("recoveryCodesList").innerHTML = latestRecoveryCodes.map((c) => `<div>${escapeHtml(c)}</div>`).join("");
       $("recoveryCodesBox").classList.toggle("hidden", !latestRecoveryCodes.length);
       updateSecurityUi(r.owner);
-      toast("2FA aktivováno!");
+      toast(t("toast_2fa_enabled"));
     } catch (err) { toast(err.message, "err"); }
   };
 
   $("copyRecoveryBtn").onclick = async () => {
     await navigator.clipboard.writeText(latestRecoveryCodes.join("\n"));
-    toast("Záložní kódy zkopírovány.");
+    toast(t("toast_codes_copied"));
   };
 
   $("disable2faForm").onsubmit = async (e) => {
@@ -1140,7 +1357,7 @@
       $("disable2faPwd").value = ""; $("disable2faCode").value = "";
       $("recoveryCodesBox").classList.add("hidden");
       updateSecurityUi(r.owner);
-      toast("2FA vypnuto.");
+      toast(t("toast_2fa_disabled"));
     } catch (err) { toast(err.message, "err"); }
   };
 

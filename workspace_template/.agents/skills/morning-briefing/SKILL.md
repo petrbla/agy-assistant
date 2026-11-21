@@ -1,19 +1,19 @@
 ---
 name: morning-briefing
-description: Příprava přehledného ranního briefingu pro uživatele (kalendář, priority dne, nedokončené úkoly z paměti a připojených MCP zdrojů).
+description: Prepare a concise morning briefing for the user (calendar, daily priorities, open tasks from memory and connected MCP sources).
 ---
 
-# Ranní briefing
+# Morning Briefing
 
-Použij tento postup, když dostaneš pokyn připravit ranní briefing nebo shrnutí dne.
+Use this workflow when instructed to prepare a morning briefing or daily summary.
 
-## Postup
-1. Přečti si `USER.md`, `MEMORY.md` a včerejší záznam v `memory/` (pokud existuje).
-2. Zkontroluj, jaké MCP nástroje jsou aktuálně dostupné:
-   - Pokud je dostupný kalendář / Gmail, vypiš dnešní schůzky a důležité nepřečtené zprávy.
-   - Pokud jsou dostupné nástěnky / tabulky úkolů (např. NocoDB, CRM, úkolovník), shrň dnešní priority.
-3. Sestav stručný přehled v češtině s těmito sekcemi:
-   - **Dnešní program** (časově seřazené události)
-   - **Priority & otevřené úkoly** (max 5 nejdůležitějších bodů)
-   - **Pozornost vyžaduje** (urgentní zprávy nebo termíny, pokud nějaké jsou)
-4. Drž rozsah krátký a čitelný na mobilu (Telegram).
+## Steps
+1. Read `USER.md`, `MEMORY.md`, and yesterday's note in `memory/` (if present).
+2. Check which MCP tools are currently available:
+   - If Calendar / Gmail is available, list today's events and important unread messages.
+   - If task boards / databases are available (e.g., NocoDB, CRM, task tracker), summarize today's priorities.
+3. Produce a concise summary with these sections:
+   - **Today's Schedule** (chronological events)
+   - **Priorities & Open Tasks** (up to 5 key items)
+   - **Needs Attention** (urgent messages or deadlines, if any)
+4. Keep it short and easy to read on mobile (Telegram).

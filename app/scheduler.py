@@ -15,36 +15,16 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.agy_runner import AgyResult, AgyRunner
 from app.config import ContextMode, Settings
 from app.db import AssistantDB
+from app.i18n import t
 from app.user_env import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
 Notifier = Callable[[str], Awaitable[None]]
 
-HEARTBEAT_PROMPT = (
-    "Proveď pravidelnou kontrolu podle HEARTBEAT.md. "
-    "Přečti si HEARTBEAT.md, MEMORY.md a dnešní poznámku v memory/. "
-    "Pokud není nic urgentního ani důvod uživatele kontaktovat, "
-    "odpověz přesně a pouze: HEARTBEAT_OK"
-)
-
-MORNING_BRIEFING_PROMPT = (
-    "Aktivuj skill morning-briefing (viz .agents/skills/morning-briefing/SKILL.md) "
-    "a připrav stručný český ranní briefing pro dnešní den."
-)
-
-NIGHTLY_MEMORY_FLUSH_PROMPT = (
-    "Provádíš automatický noční úklid před resetem této konverzace. "
-    "Projdi dnešní konverzaci a ulož důležité trvalé informace, rozhodnutí, "
-    "rozdělané úkoly, termíny a kontakty do dnešního souboru memory/YYYY-MM-DD.md "
-    "(případně do příslušného tematického souboru v memory/, např. memory/rozdelane.md nebo memory/projekty.md) "
-    "a aktualizuj dlouhodobou paměť MEMORY.md podle skillu memory-maintenance. "
-    "Drž MEMORY.md kompaktní a stručný (cílově do ~150 řádků – jen aktivní věci, preference a odkazy); "
-    "uzavřené nebo starší podrobnosti přesouvej do memory/archiv.md nebo tematických souborů v memory/. "
-    "Nikdy neukládej hesla, tokeny ani tajné klíče. "
-    "Pokud v konverzaci není nic podstatného k uložení, nic nezapisuj. "
-    "Odpověz velmi stručně jednou větou, co bylo uloženo, nebo přesně: MEMORY_FLUSH_OK"
-)
+HEARTBEAT_PROMPT = t("prompts.heartbeat", "en")
+MORNING_BRIEFING_PROMPT = t("prompts.morning_briefing", "en")
+NIGHTLY_MEMORY_FLUSH_PROMPT = t("prompts.nightly_memory_flush", "en")
 
 
 def is_heartbeat_ok(text: str) -> bool:
@@ -98,6 +78,7 @@ class AssistantScheduler:
 
         owner = self.db.get_owner() if self.db is not None else None
         tz_name = owner.tz if owner is not None else self.settings.tz
+        owner_lang = owner.language if owner is not None else self.settings.language
         tz = self._safe_zone(tz_name)
 
         if self.db is not None:
@@ -134,7 +115,7 @@ class AssistantScheduler:
                 trigger=IntervalTrigger(minutes=max(1, hb_interval)),
                 kwargs={"notify": True},
                 id="heartbeat",
-                name="Heartbeat",
+                name=t("ui.job_name_heartbeat", owner_lang),
                 replace_existing=True,
             )
 
@@ -145,7 +126,7 @@ class AssistantScheduler:
                     trigger=CronTrigger.from_crontab(brief_cron, timezone=tz),
                     kwargs={"notify": True},
                     id="briefing",
-                    name="Ranní briefing",
+                    name=t("ui.job_name_briefing", owner_lang),
                     replace_existing=True,
                 )
             except ValueError as exc:
@@ -157,7 +138,7 @@ class AssistantScheduler:
                     self.run_nightly_reset,
                     trigger=CronTrigger.from_crontab(nightly_cron, timezone=tz),
                     id="nightly_reset",
-                    name="Noční úklid a reset",
+                    name=t("ui.job_name_nightly", owner_lang),
                     replace_existing=True,
                 )
             except ValueError as exc:
@@ -214,6 +195,13 @@ class AssistantScheduler:
         if self.notifier is not None:
             await self.notifier(message)
 
+    def _lang(self) -> str:
+        if self.db is not None:
+            owner = self.db.get_owner()
+            if owner is not None:
+                return owner.language
+        return self.settings.language
+
     async def _run_isolated(self, prompt: str, *, source: str, session_key: str) -> AgyResult:
         if self.db is not None:
             owner = self.db.get_owner()
@@ -226,19 +214,23 @@ class AssistantScheduler:
         )
 
     async def run_heartbeat(self, notify: bool = True) -> AgyResult:
+        lang = self._lang()
         result = await self._run_isolated(
-            HEARTBEAT_PROMPT, source="heartbeat", session_key="cron:heartbeat"
+            t("prompts.heartbeat", lang), source="heartbeat", session_key="cron:heartbeat"
         )
         if result.success and not is_heartbeat_ok(result.text) and notify:
-            await self._send_notification(f"🔔 Heartbeat upozornění:\n\n{result.text}")
+            await self._send_notification(t("backend.heartbeat_alert", lang, text=result.text))
         return result
 
     async def run_morning_briefing(self, notify: bool = True) -> AgyResult:
+        lang = self._lang()
         result = await self._run_isolated(
-            MORNING_BRIEFING_PROMPT, source="briefing", session_key="cron:briefing"
+            t("prompts.morning_briefing", lang), source="briefing", session_key="cron:briefing"
         )
         if result.success and notify:
-            await self._send_notification(f"☀️ Ranní briefing:\n\n{result.text}")
+            await self._send_notification(
+                t("backend.morning_briefing_title", lang, text=result.text)
+            )
         return result
 
     async def run_nightly_reset(self) -> dict[str, object]:
@@ -252,6 +244,8 @@ class AssistantScheduler:
             return {"flushed_sessions": 0, "reset_sessions": 0, "errors": []}
 
         owner = self.db.get_owner()
+        lang = owner.language if owner is not None else self.settings.language
+        flush_prompt = t("prompts.nightly_memory_flush", lang)
         flushed = 0
         errors: list[str] = []
         try:
@@ -264,7 +258,7 @@ class AssistantScheduler:
                 try:
                     ensure_workspace(self.settings, owner)
                     res = await self.runner.run(
-                        NIGHTLY_MEMORY_FLUSH_PROMPT,
+                        flush_prompt,
                         session_key=session_key,
                         source="nightly_reset",
                         context_mode=ctx,

@@ -52,9 +52,9 @@ def test_legacy_multiuser_db_and_home_migration(tmp_path: Path) -> None:
             created_at TEXT NOT NULL
         );
         INSERT INTO users (id, username, email, assistant_name, telegram_bot_token, agy_model, created_at)
-        VALUES (1, 'petr', 'petr@example.com', 'JarvisPetr', 'tg-tok-1', 'gemini-4-neon-medium', '2026-01-01T00:00:00Z');
+        VALUES (1, 'alice', 'alice@example.com', 'AriaBot', 'tg-tok-1', 'gemini-4-neon-medium', '2026-01-01T00:00:00Z');
         INSERT INTO users (id, username, email, assistant_name, created_at)
-        VALUES (2, 'karel', 'karel@example.com', 'KarelBot', '2026-01-02T00:00:00Z');
+        VALUES (2, 'bob', 'bob@example.com', 'BobBot', '2026-01-02T00:00:00Z');
 
         CREATE TABLE user_mcp_servers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,9 +72,9 @@ def test_legacy_multiuser_db_and_home_migration(tmp_path: Path) -> None:
             created_at TEXT NOT NULL
         );
         INSERT INTO user_mcp_servers (user_id, name, scope, transport, url, created_at)
-        VALUES (1, 'google-petr', 'osobni', 'http', 'https://google.example/mcp', '2026-01-01T00:00:00Z');
+        VALUES (1, 'google-personal', 'osobni', 'http', 'https://google.example/mcp', '2026-01-01T00:00:00Z');
         INSERT INTO user_mcp_servers (user_id, name, scope, transport, url, created_at)
-        VALUES (2, 'karel-mcp', 'all', 'http', 'https://karel.example/mcp', '2026-01-02T00:00:00Z');
+        VALUES (2, 'bob-mcp', 'all', 'http', 'https://bob.example/mcp', '2026-01-02T00:00:00Z');
 
         CREATE TABLE sessions (
             session_key TEXT PRIMARY KEY,
@@ -83,10 +83,10 @@ def test_legacy_multiuser_db_and_home_migration(tmp_path: Path) -> None:
             context_mode TEXT NOT NULL DEFAULT 'auto',
             updated_at TEXT NOT NULL
         );
-        INSERT INTO sessions VALUES ('u:1:tg:999:auto', 1, 'conv-petr', 'auto', '2026-01-01T00:00:00Z');
+        INSERT INTO sessions VALUES ('u:1:tg:999:auto', 1, 'conv-alice', 'auto', '2026-01-01T00:00:00Z');
         INSERT INTO sessions VALUES ('u:1:tg:999:firma', 1, 'conv-firma', 'firma-x', '2026-01-01T00:00:00Z');
         INSERT INTO sessions VALUES ('u:1:tg:999:privat', 1, 'conv-privat', 'soukrome', '2026-01-01T00:00:00Z');
-        INSERT INTO sessions VALUES ('u:2:tg:888:auto', 2, 'conv-karel', 'auto', '2026-01-01T00:00:00Z');
+        INSERT INTO sessions VALUES ('u:2:tg:888:auto', 2, 'conv-bob', 'auto', '2026-01-01T00:00:00Z');
         """
     )
     conn.commit()
@@ -104,17 +104,18 @@ def test_legacy_multiuser_db_and_home_migration(tmp_path: Path) -> None:
     db = AssistantDB(db_path)
     owner = db.get_owner()
     assert owner is not None
-    assert owner.username == "petr"
-    assert owner.email == "petr@example.com"
-    assert owner.assistant_name == "JarvisPetr"
+    assert owner.username == "alice"
+    assert owner.email == "alice@example.com"
+    assert owner.assistant_name == "AriaBot"
+    assert owner.language == "en"
     assert owner.telegram_bot_token == "tg-tok-1"
     assert owner.agy_model == "gemini-4-neon-medium"
 
     mcps = db.list_mcp_servers()
-    assert [m.name for m in mcps] == ["google-petr"]
+    assert [m.name for m in mcps] == ["google-personal"]
 
     conv_id, _ = db.get_session("tg:999:auto")
-    assert conv_id == "conv-petr"
+    assert conv_id == "conv-alice"
 
     # Starší názvy kontextů se převedou na pracovni / osobni
     assert db.get_session("tg:999:firma")[1] == "pracovni"
@@ -135,7 +136,7 @@ def test_singleuser_password_and_2fa_flow(tmp_path: Path) -> None:
 
     setup = client.post(
         "/api/auth/initial-setup",
-        json={"email": "petr@gmail.com", "username": "petr", "password": "SuperHeslo123!"},
+        json={"email": "alice@example.com", "username": "alice", "password": "SuperHeslo123!"},
     )
     assert setup.status_code == 200
     tok = setup.json()["session_token"]
@@ -153,7 +154,7 @@ def test_singleuser_password_and_2fa_flow(tmp_path: Path) -> None:
     assert len(recovery_codes) == 8
 
     # Přihlášení s 2FA výzvou
-    login1 = client.post("/api/login", json={"identifier": "petr@gmail.com", "password": "SuperHeslo123!"})
+    login1 = client.post("/api/login", json={"identifier": "alice@example.com", "password": "SuperHeslo123!"})
     assert login1.status_code == 200
     assert login1.json()["requires_2fa"] is True
     challenge = login1.json()["challenge_token"]

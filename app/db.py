@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
-from app.config import Settings, parse_telegram_ids, resolve_notify_chat_id
+from app.config import Settings, normalize_language, parse_telegram_ids, resolve_notify_chat_id
+from app.i18n import t
 
 OWNER_UPDATABLE_FIELDS = frozenset(
     {
@@ -19,6 +20,7 @@ OWNER_UPDATABLE_FIELDS = frozenset(
         "display_name",
         "web_token",
         "assistant_name",
+        "language",
         "tz",
         "default_context_mode",
         "telegram_bot_token",
@@ -50,6 +52,7 @@ class OwnerConfig:
     email: str
     web_token: str
     assistant_name: str
+    language: str
     tz: str
     default_context_mode: str
     telegram_bot_token: str
@@ -198,9 +201,10 @@ class AssistantDB:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     username TEXT NOT NULL DEFAULT 'admin',
                     email TEXT NOT NULL DEFAULT '',
-                    display_name TEXT NOT NULL DEFAULT 'Administrátor',
+                    display_name TEXT NOT NULL DEFAULT 'Administrator',
                     web_token TEXT NOT NULL DEFAULT '',
-                    assistant_name TEXT NOT NULL DEFAULT 'Asistent',
+                    assistant_name TEXT NOT NULL DEFAULT 'Assistant',
+                    language TEXT NOT NULL DEFAULT 'en',
                     tz TEXT NOT NULL DEFAULT 'Europe/Prague',
                     default_context_mode TEXT NOT NULL DEFAULT 'auto',
                     telegram_bot_token TEXT NOT NULL DEFAULT '',
@@ -282,6 +286,7 @@ class AssistantDB:
                 );
                 """
             )
+            self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
             self._migrate_from_legacy_multiuser(conn)
             self._normalize_legacy_context_modes(conn)
             self._ensure_column(conn, "runs", "input_tokens", "INTEGER NOT NULL DEFAULT 0")
@@ -302,21 +307,22 @@ class AssistantDB:
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO owner_config (
-                        id, username, email, display_name, web_token, assistant_name, tz,
+                        id, username, email, display_name, web_token, assistant_name, language, tz,
                         default_context_mode, telegram_bot_token, telegram_allowed_users,
                         telegram_notify_chat_id, heartbeat_enabled, heartbeat_interval_minutes,
                         morning_briefing_enabled, morning_briefing_cron,
                         nightly_reset_enabled, nightly_reset_cron,
                         agy_model, gemini_api_key, password_hash, totp_enabled, totp_secret,
                         totp_pending_secret, totp_recovery_hashes_json, created_at
-                    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["username"] if "username" in keys else "admin",
                         row["email"] if "email" in keys else "",
-                        row["display_name"] if "display_name" in keys else "Administrátor",
+                        row["display_name"] if "display_name" in keys else "Administrator",
                         row["web_token"] if "web_token" in keys else "",
-                        row["assistant_name"] if "assistant_name" in keys else "Asistent",
+                        row["assistant_name"] if "assistant_name" in keys else "Assistant",
+                        normalize_language(row["language"]) if "language" in keys else "en",
                         row["tz"] if "tz" in keys else "Europe/Prague",
                         row["default_context_mode"] if "default_context_mode" in keys else "auto",
                         row["telegram_bot_token"] if "telegram_bot_token" in keys else "",
@@ -489,12 +495,14 @@ class AssistantDB:
 
     @staticmethod
     def _row_to_owner(row: sqlite3.Row) -> OwnerConfig:
+        keys = set(row.keys())
         return OwnerConfig(
             username=row["username"],
             email=row["email"],
             display_name=row["display_name"],
             web_token=row["web_token"],
             assistant_name=row["assistant_name"],
+            language=normalize_language(row["language"] if "language" in keys else "en"),
             tz=row["tz"],
             default_context_mode=row["default_context_mode"],
             telegram_bot_token=row["telegram_bot_token"],
@@ -554,21 +562,25 @@ class AssistantDB:
         if existing is not None:
             return existing
 
+        lang = normalize_language(settings.language)
+        default_display = t("backend.default_display_name", lang)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO owner_config (
-                    id, username, email, display_name, web_token, assistant_name,
+                    id, username, email, display_name, web_token, assistant_name, language,
                     tz, default_context_mode, telegram_bot_token, telegram_allowed_users,
                     telegram_notify_chat_id, heartbeat_enabled, heartbeat_interval_minutes,
                     morning_briefing_enabled, morning_briefing_cron,
                     nightly_reset_enabled, nightly_reset_cron,
                     agy_model, gemini_api_key, created_at
-                ) VALUES (1, 'admin', '', 'Administrátor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (1, 'admin', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    default_display,
                     settings.web_auth_token.strip(),
                     settings.assistant_name,
+                    lang,
                     settings.tz,
                     settings.default_context_mode,
                     settings.telegram_bot_token.strip(),
@@ -610,6 +622,8 @@ class AssistantDB:
                 filtered[key] = max(1, int(value))
             elif key in {"email", "username"} and isinstance(value, str):
                 filtered[key] = value.strip().lower()
+            elif key == "language" and isinstance(value, str):
+                filtered[key] = normalize_language(value)
             elif isinstance(value, str):
                 filtered[key] = value.strip()
             else:

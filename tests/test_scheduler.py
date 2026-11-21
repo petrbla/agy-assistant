@@ -168,3 +168,26 @@ async def test_once_task_deleted_after_run_and_expired_cleaned_up(tmp_path: Path
     notifier.assert_awaited_once()
     assert db.get_scheduled_task(future_task.id) is None
     assert db.get_scheduled_task(cron_task.id) is not None
+
+
+async def test_scheduler_uses_czech_prompts_when_language_cs(tmp_path: Path) -> None:
+    from app.i18n import t
+
+    settings = Settings(workspace_dir=tmp_path / "ws", data_dir=tmp_path / "data", language="cs")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    db.set_conversation_id("tg:1:auto", "conv-cs", "auto")
+
+    runner = AsyncMock()
+    runner.run = AsyncMock(
+        return_value=AgyResult(text="Pozor na schůzku.", conversation_id=None, duration_ms=10, success=True)
+    )
+    notifier = AsyncMock()
+
+    scheduler = AssistantScheduler(settings, runner, notifier=notifier, db=db)
+    await scheduler.run_heartbeat(notify=True)
+    notifier.assert_awaited_once()
+    assert "Heartbeat upozornění" in notifier.await_args.args[0]
+
+    await scheduler.run_nightly_reset()
+    assert runner.run.await_args.args[0] == t("prompts.nightly_memory_flush", "cs")

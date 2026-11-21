@@ -39,32 +39,42 @@ def test_format_usage_report_with_active_conversation(tmp_path: Path) -> None:
     bot = TelegramAssistantBot(settings, db, mem, AsyncMock())
     fake_msg = SimpleNamespace(chat=SimpleNamespace(id=111))
 
-    report = bot._format_usage_report(fake_msg)  # type: ignore[arg-type]
+    report_en = bot._format_usage_report(fake_msg)  # type: ignore[arg-type]
+    assert "gemini-4-neon-medium" in report_en
+    assert "conv-9999999" in report_en
+    assert "1 800 tokens" in report_en
+    assert "15 0 * * *" in report_en
+    assert "/cleanup" in report_en
 
-    assert "gemini-4-neon-medium" in report
-    assert "conv-9999999" in report
-    assert "1 800 tokenů" in report
-    assert "15 0 * * *" in report
-    assert "/new" in report
+    report_cs = bot._format_usage_report(fake_msg, lang="cs")  # type: ignore[arg-type]
+    assert "1 800 tokenů" in report_cs
+    assert "/uklid" in report_cs
 
 
 def test_format_cleanup_summary() -> None:
     empty = TelegramAssistantBot._format_cleanup_summary(
         {"flushed_sessions": 0, "reset_sessions": 0, "errors": []}
     )
-    assert "čistý" in empty
+    assert "already clean" in empty
 
     ok = TelegramAssistantBot._format_cleanup_summary(
         {"flushed_sessions": 2, "reset_sessions": 2, "errors": []}
     )
     assert "2/2" in ok
-    assert "resetován" in ok
+    assert "reset" in ok
 
     partial = TelegramAssistantBot._format_cleanup_summary(
         {"flushed_sessions": 1, "reset_sessions": 2, "errors": ["err"]}
     )
     assert "1/2" in partial
-    assert "Poznámka" in partial
+    assert "Note:" in partial
+
+    ok_cs = TelegramAssistantBot._format_cleanup_summary(
+        {"flushed_sessions": 2, "reset_sessions": 2, "errors": []},
+        lang="cs",
+    )
+    assert "2/2" in ok_cs
+    assert "resetován" in ok_cs
 
 
 def test_format_elapsed_seconds() -> None:

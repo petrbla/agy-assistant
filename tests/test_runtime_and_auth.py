@@ -15,13 +15,19 @@ from app.web import create_app
 
 
 def test_polivka_env_aliases(monkeypatch, tmp_path: Path) -> None:
+    from app.config import normalize_chat_channel
+
     monkeypatch.setenv("JMENO", "Jarvis")
     monkeypatch.setenv("TG_TOKEN", "bot-token-xyz")
     monkeypatch.setenv("TG_ID", "123456789")
+    monkeypatch.setenv("JAZYK", "cs")
     s = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")
     assert s.assistant_name == "Jarvis"
     assert s.telegram_bot_token == "bot-token-xyz"
     assert s.allowed_telegram_user_ids == {123456789}
+    assert s.language == "cs"
+    assert normalize_chat_channel("work") == "pracovni"
+    assert normalize_chat_channel("personal") == "osobni"
 
 
 def test_clean_terminal_output_and_extract_urls() -> None:

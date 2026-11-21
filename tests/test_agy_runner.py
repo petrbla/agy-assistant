@@ -68,22 +68,28 @@ def test_build_command_and_context_prompt(tmp_path: Path) -> None:
         "accept-edit",
     ]
 
-    formatted = runner.format_prompt("Zkontroluj faktury", "pracovni", "telegram")
-    assert "Kontext: Pracovní" in formatted
-    assert "pracovní MCP" in formatted
+    formatted = runner.format_prompt("Check invoices", "pracovni", "telegram")
+    assert "Context: Work" in formatted
+    assert "work MCP" in formatted
+    assert "English" in formatted
 
-    (tmp_path / "SOUL.md").write_text("- **Jméno:** [DOPLNIT: Zatím nemáš jméno]", encoding="utf-8")
+    formatted_cs = runner.format_prompt("Zkontroluj faktury", "pracovni", "telegram", language="cs")
+    assert "Kontext: Pracovní" in formatted_cs
+    assert "pracovní MCP" in formatted_cs
+    assert "česky" in formatted_cs
+
+    (tmp_path / "SOUL.md").write_text("- **Name:** [TODO: Ask the user]", encoding="utf-8")
     assert has_pending_assistant_name(tmp_path) is True
     assert has_pending_onboarding(tmp_path) is True
-    name_prompt = runner.format_prompt("Ahoj", "auto", "web", assistant_name_pending=True)
+    name_prompt = runner.format_prompt("Hi", "auto", "web", assistant_name_pending=True)
     assert "SOUL.md" in name_prompt
     assert "Max" in name_prompt
-    (tmp_path / "SOUL.md").write_text("- **Jméno:** Max", encoding="utf-8")
+    (tmp_path / "SOUL.md").write_text("- **Name:** Nova", encoding="utf-8")
     assert has_pending_assistant_name(tmp_path) is False
 
     (tmp_path / "USER.md").write_text("- **Jméno:** [DOPLNIT: Doptej se na jméno]", encoding="utf-8")
     assert has_pending_onboarding(tmp_path) is True
-    onb_prompt = runner.format_prompt("Ahoj", "auto", "web", onboarding_pending=True)
+    onb_prompt = runner.format_prompt("Ahoj", "auto", "web", language="cs", onboarding_pending=True)
     assert "USER.md" in onb_prompt
     (tmp_path / "USER.md").write_text("- **Jméno:** Jan", encoding="utf-8")
     assert has_pending_onboarding(tmp_path) is False
@@ -273,12 +279,12 @@ async def test_startup_memory_preloaded_only_on_new_chat(tmp_path: Path) -> None
     first_prompt = captured_cmds[0][captured_cmds[0].index("-p") + 1]
     second_prompt = captured_cmds[1][captured_cmds[1].index("-p") + 1]
 
-    assert "Přednačtená paměť" in first_prompt
+    assert "Preloaded memory" in first_prompt
     assert "Aktivni projekt: Alfa." in first_prompt
     assert "Dokoncit fakturu" in first_prompt
     assert "memory/server.md" in first_prompt
     assert "2020-01-01.md" not in first_prompt
-    assert "Přednačtená paměť" not in second_prompt
+    assert "Preloaded memory" not in second_prompt
 
 
 async def test_persistent_warm_session_reuses_single_process(tmp_path: Path) -> None:
@@ -419,7 +425,7 @@ async def test_soul_name_syncs_to_owner_after_chat_turn(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir(parents=True)
     (ws / "SOUL.md").write_text(
-        "# Osobnost asistenta (SOUL.md)\n- **Jméno:** [DOPLNIT: Doptej se]\n",
+        "# Assistant Identity (SOUL.md)\n- **Name:** [TODO: Ask the user]\n",
         encoding="utf-8",
     )
     assert extract_assistant_name_from_soul(ws) is None
@@ -431,7 +437,8 @@ async def test_soul_name_syncs_to_owner_after_chat_turn(tmp_path: Path) -> None:
     )
     db = AssistantDB(settings.db_path)
     owner = db.ensure_owner(settings)
-    assert owner.assistant_name == "Asistent"
+    assert owner.assistant_name == "Assistant"
+    assert owner.language == "en"
 
     runner = AgyRunner(settings, db)
     fake_proc = AsyncMock()
@@ -439,21 +446,24 @@ async def test_soul_name_syncs_to_owner_after_chat_turn(tmp_path: Path) -> None:
 
     async def _fake_communicate():
         (ws / "SOUL.md").write_text(
-            "# Osobnost asistenta (SOUL.md)\n- **Jméno:** Viktor\n",
+            "# Assistant Identity (SOUL.md)\n- **Name:** Nova\n",
             encoding="utf-8",
         )
-        return (json.dumps({"response": "Budu se jmenovat Viktor.", "conversationId": "c-n1"}).encode(), b"")
+        return (json.dumps({"response": "I'll go by Nova.", "conversationId": "c-n1"}).encode(), b"")
 
     fake_proc.communicate = AsyncMock(side_effect=_fake_communicate)
 
     with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
-        res = await runner.run("Říkejme ti Viktor", session_key="web:auto", source="web")
+        res = await runner.run("Call yourself Nova", session_key="web:auto", source="web")
 
     assert res.success is True
-    assert extract_assistant_name_from_soul(ws) == "Viktor"
+    assert extract_assistant_name_from_soul(ws) == "Nova"
     updated_owner = db.get_owner()
     assert updated_owner is not None
-    assert updated_owner.assistant_name == "Viktor"
+    assert updated_owner.assistant_name == "Nova"
+
+    (ws / "SOUL.md").write_text("# Osobnost\n- **Jméno:** Viktor\n", encoding="utf-8")
+    assert extract_assistant_name_from_soul(ws) == "Viktor"
 
 
 

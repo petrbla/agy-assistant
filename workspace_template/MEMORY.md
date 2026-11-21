@@ -1,13 +1,13 @@
-# Dlouhodobá paměť (MEMORY.md)
+# Long-Term Memory (MEMORY.md)
 
-Tento soubor slouží jako trvalá paměť asistenta. Průběžně sem ukládej důležitá fakta, rozhodnutí a preference, které mají přetrvat napříč konverzacemi.
+This file serves as the assistant's persistent memory. Store important facts, decisions, and preferences that should persist across conversations.
 
-## Aktivní projekty a priority
-- *Zatím nevyplněno – doplň při prvních konverzacích s uživatelem.*
+## Active Projects & Priorities
+- *Not filled in yet – populate during the first conversations with the user.*
 
-## Naučené preference a procesy
-- Komunikace v češtině, stručné výstupy.
-- Striktní rozdělení MCP nástrojů mezi **pracovní** a **osobní**.
+## Learned Preferences & Processes
+- Clear, concise responses.
+- Strict separation of MCP tools between **work** and **personal**.
 
-## Důležité kontakty a odkazy
-- *Doplň podle potřeby.*
+## Important Contacts & Links
+- *Add as needed.*
