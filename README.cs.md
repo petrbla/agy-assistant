@@ -23,7 +23,7 @@ Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalš
 
 ## Struktura projektu
 
-- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`)
+- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`, `version_check.py`)
 - `app/locales/` – jazykové JSON soubory (`en.json`, `cs.json`)
 - `app/static/` – Web UI (`index.html`, `styles.css`, `app.js`)
 - `workspace_template/` – výchozí anglické šablony paměti a skillů (při prvním startu se zkopírují do `workspace/`)

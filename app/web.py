@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from dataclasses import asdict
@@ -24,6 +25,7 @@ from app.memory import WorkspaceMemory
 from app.plugins import PluginManager
 from app.runtime_config import save_runtime_overrides
 from app.scheduler import AssistantScheduler
+from app.version_check import AppVersionChecker
 from app.security import (
     build_otpauth_uri,
     create_2fa_challenge,
@@ -254,6 +256,7 @@ def create_app(
     scheduler: AssistantScheduler | None = None,
     auth_manager: AgyAuthManager | None = None,
     plugin_manager: PluginManager | None = None,
+    app_version_checker: AppVersionChecker | None = None,
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Vytvoří čistou single-user FastAPI aplikaci pro Web UI a REST API."""
@@ -263,6 +266,8 @@ def create_app(
     db.ensure_owner(settings)
     if plugin_manager is None:
         plugin_manager = PluginManager(settings, db)
+    if app_version_checker is None:
+        app_version_checker = AppVersionChecker(settings)
     signing_key = load_or_create_signing_key(settings.data_dir)
     if (
         scheduler is not None
@@ -563,24 +568,29 @@ def create_app(
 
     @app.get("/api/status")
     async def get_status(owner: OwnerConfig = Depends(require_auth)) -> dict[str, object]:
-        if isinstance(runner, AgyRunner):
-            ver_info = await runner.get_version_info(force_refresh=False)
-        else:
+        async def _load_agy_ver() -> dict[str, object]:
+            if isinstance(runner, AgyRunner):
+                return await runner.get_version_info(force_refresh=False)
             ver = await runner.check_version()
-            ver_info = {
+            return {
                 "agy_available": ver is not None,
                 "agy_version": ver,
                 "agy_latest_version": None,
                 "agy_up_to_date": None,
                 "agy_update_available": False,
             }
+
+        ver_info, app_ver_info = await asyncio.gather(
+            _load_agy_ver(),
+            app_version_checker.get_version_info(force_refresh=False),
+        )
         mem = get_memory(settings, owner)
         _, web_ctx = db.get_session("web:default", default_context=owner.default_context_mode)
         jobs = scheduler.list_jobs() if scheduler else []
         return {
             **_owner_public_dict(owner, settings),
             **ver_info,
-            "app_version": __version__,
+            **app_ver_info,
             "telegram_enabled": bool(owner.telegram_bot_token.strip()),
             "allowed_telegram_users_count": len(owner.allowed_telegram_user_ids),
             "web_context_mode": web_ctx,
@@ -907,6 +917,13 @@ def create_app(
             "has_gemini_api_key": False,
             "agy_authenticated": False,
         }
+
+    @app.get("/api/app/version")
+    async def get_app_version(
+        refresh: bool = True,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        return await app_version_checker.get_version_info(force_refresh=refresh)
 
     @app.get("/api/agy/version")
     async def get_agy_version(

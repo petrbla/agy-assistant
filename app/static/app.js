@@ -22,6 +22,7 @@
   let isAuthenticated = false;
   let inAgyOnboarding = false;
   let lastStatus = null;
+  let lastAppVerInfo = null;
   let lastOauthState = null;
   let authScreenStatusKey = "";
 
@@ -66,9 +67,84 @@
     return cleaned;
   }
 
-  function updateAppVersionBadge(ver) {
+  function updateAppVersionBadge(verOrInfo) {
+    if (!verOrInfo) return;
+    let info;
+    if (typeof verOrInfo === "string") {
+      info = lastAppVerInfo && lastAppVerInfo.app_version === verOrInfo
+        ? { ...lastAppVerInfo }
+        : { app_version: verOrInfo };
+    } else if (typeof verOrInfo === "object" && verOrInfo.app_version) {
+      if ("app_up_to_date" in verOrInfo || "app_latest_version" in verOrInfo) {
+        info = {
+          app_version: verOrInfo.app_version,
+          app_latest_version: verOrInfo.app_latest_version ?? null,
+          app_up_to_date: verOrInfo.app_up_to_date ?? null,
+          app_update_available: Boolean(verOrInfo.app_update_available),
+        };
+      } else {
+        info = lastAppVerInfo && lastAppVerInfo.app_version === verOrInfo.app_version
+          ? { ...lastAppVerInfo }
+          : { app_version: verOrInfo.app_version };
+      }
+    } else {
+      return;
+    }
+    lastAppVerInfo = info;
+
     const el = $("appVersionBadge");
-    if (el && ver) el.textContent = `v${ver}`;
+    if (el && info.app_version) {
+      if (info.app_update_available && info.app_latest_version) {
+        el.textContent = `v${info.app_version} → v${info.app_latest_version}`;
+        el.className = "version-tag warn";
+        el.title = t("tooltip_app_ver_update", {
+          current: info.app_version,
+          latest: info.app_latest_version,
+        });
+      } else if (info.app_up_to_date === true) {
+        el.textContent = `v${info.app_version} ✓`;
+        el.className = "version-tag ok";
+        el.title = t("tooltip_app_ver_current", { ver: info.app_version });
+      } else {
+        el.textContent = `v${info.app_version}`;
+        el.className = "version-tag";
+        el.title = t("tooltip_app_ver_check", { ver: info.app_version });
+      }
+    }
+
+    const badge = $("appVerBadge");
+    if (badge && info.app_version) {
+      if (info.app_update_available && info.app_latest_version) {
+        badge.textContent = t("app_ver_available", { ver: info.app_latest_version });
+        badge.className = "pill warn";
+        badge.classList.remove("hidden");
+      } else if (info.app_up_to_date === true) {
+        badge.textContent = t("app_ver_current", { ver: info.app_version });
+        badge.className = "pill ok";
+        badge.classList.remove("hidden");
+      } else {
+        badge.textContent = t("app_ver_plain", { ver: info.app_version });
+        badge.className = "pill";
+        badge.classList.remove("hidden");
+      }
+    }
+
+    const banner = $("appUpdateBanner");
+    if (banner) {
+      const dismissedVer = sessionStorage.getItem("agy_dismissed_app_ver") || "";
+      const showBanner = Boolean(
+        info.app_update_available
+        && info.app_latest_version
+        && dismissedVer !== info.app_latest_version
+      );
+      banner.classList.toggle("hidden", !showBanner);
+      if (showBanner && $("appUpdateBannerText")) {
+        $("appUpdateBannerText").textContent = t("app_update_banner", {
+          current: info.app_version,
+          latest: info.app_latest_version,
+        });
+      }
+    }
   }
 
   function renderLanguageControls(langs = availableLanguages) {
@@ -146,6 +222,7 @@
     const [curBase, curEff] = splitModel(currentModel);
     if (curBase) syncEffortUi(curBase, curEff);
     if (pluginsCatalog.length) renderPlugins();
+    if (lastAppVerInfo) updateAppVersionBadge(lastAppVerInfo);
     if (lastPluginConnectState && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("hidden")) {
       renderPluginConnectState(lastPluginConnectState);
     }
@@ -376,6 +453,7 @@
       isAuthenticated = false;
       inAgyOnboarding = false;
       lastStatus = null;
+      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("hidden");
       authScreenStatusKey = "status_signed_out";
       $("statusPill").textContent = t(authScreenStatusKey);
       $("statusPill").className = "pill";
@@ -500,12 +578,14 @@
     localStorage.removeItem("agy_web_token");
     sessionStorage.removeItem("agy_onboarding_skipped");
     lastStatus = null;
+    lastAppVerInfo = null;
+    if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("hidden");
     await loadAuthAndBootstrap();
   };
 
   function applyStatus(s) {
     lastStatus = s;
-    updateAppVersionBadge(s.app_version);
+    updateAppVersionBadge(s);
     $("brandTitle").textContent = displayBrandTitle(s.assistant_name);
     const dot = $("brandDot");
     const pill = $("statusPill");
@@ -1373,14 +1453,68 @@
     await loadSettings();
     try { applyStatus(await api("/api/status")); } catch (_) {}
   };
+  if ($("dismissAppUpdateBtn")) {
+    $("dismissAppUpdateBtn").onclick = () => {
+      if (lastAppVerInfo && lastAppVerInfo.app_latest_version) {
+        sessionStorage.setItem("agy_dismissed_app_ver", lastAppVerInfo.app_latest_version);
+      }
+      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("hidden");
+    };
+  }
+  if ($("appVersionBadge")) {
+    $("appVersionBadge").onclick = async () => {
+      if (!isAuthenticated || inAgyOnboarding) return;
+      try {
+        const info = await api("/api/app/version?refresh=true");
+        sessionStorage.removeItem("agy_dismissed_app_ver");
+        if (lastStatus) Object.assign(lastStatus, info);
+        updateAppVersionBadge(info);
+        if (info.app_update_available && info.app_latest_version) {
+          toast(
+            t("toast_app_update_avail", {
+              current: info.app_version,
+              latest: info.app_latest_version,
+            }),
+            "warn"
+          );
+        } else if (info.app_up_to_date === true) {
+          toast(t("toast_app_up_to_date", { ver: info.app_version }), "ok");
+        } else {
+          toast(t("toast_app_check_failed", { ver: info.app_version }), "warn");
+        }
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    };
+  }
   $("checkVerBtn").onclick = async () => {
-    const info = await api("/api/agy/version?refresh=true");
-    updateAgyBadges(info);
-    toast(
-      info.agy_update_available
-        ? t("toast_ver_update_avail", { ver: info.agy_latest_version })
-        : `agy ${info.agy_version || t("toast_ver_unavailable")}`
-    );
+    try {
+      const [agyInfo, appInfo] = await Promise.all([
+        api("/api/agy/version?refresh=true"),
+        api("/api/app/version?refresh=true"),
+      ]);
+      sessionStorage.removeItem("agy_dismissed_app_ver");
+      if (lastStatus) Object.assign(lastStatus, agyInfo, appInfo);
+      updateAgyBadges(agyInfo);
+      updateAppVersionBadge(appInfo);
+      const appPart = appInfo.app_update_available && appInfo.app_latest_version
+        ? t("toast_app_update_avail", {
+            current: appInfo.app_version,
+            latest: appInfo.app_latest_version,
+          })
+        : appInfo.app_up_to_date === true
+          ? t("toast_app_up_to_date", { ver: appInfo.app_version })
+          : t("app_ver_plain", { ver: appInfo.app_version });
+      const agyPart = agyInfo.agy_update_available && agyInfo.agy_latest_version
+        ? t("toast_ver_update_avail", { ver: agyInfo.agy_latest_version })
+        : `agy ${agyInfo.agy_version || t("toast_ver_unavailable")}`;
+      toast(
+        `${appPart} · ${agyPart}`,
+        appInfo.app_update_available || agyInfo.agy_update_available ? "warn" : "ok"
+      );
+    } catch (err) {
+      toast(err.message, "err");
+    }
   };
   $("updateAgyBtn").onclick = async () => {
     if (!confirm(t("confirm_agy_update"))) return;

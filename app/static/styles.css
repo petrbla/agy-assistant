@@ -101,8 +101,24 @@ html, body {
   color: var(--text-muted);
   background: var(--bg-subtle);
   border: 1px solid var(--border);
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.version-tag:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.version-tag.ok {
+  background: var(--success-soft);
+  border-color: transparent;
+  color: var(--success);
+}
+.version-tag.warn {
+  background: var(--warning-soft);
+  border-color: transparent;
+  color: var(--warning);
 }
 
 .nav-tabs {

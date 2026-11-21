@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     web_auth_token: str = ""
+    # Kontrola nové verze aplikace (prázdné = vypnuto)
+    app_version_check_url: str = (
+        "https://raw.githubusercontent.com/petrbla/agy-assistant/main/VERSION"
+    )
 
     # Plánovač
     tz: str = "Europe/Prague"

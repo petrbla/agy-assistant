@@ -9,14 +9,22 @@ from app.agy_runner import AgyResult
 from app.config import Settings
 from app.db import AssistantDB
 from app.memory import WorkspaceMemory
+from app.version_check import AppVersionChecker, fetch_latest_app_version_sync
 from app.web import create_app
 
 
-def _build_client(tmp_path: Path, auth_token: str = "") -> TestClient:
+def _build_client(
+    tmp_path: Path,
+    auth_token: str = "",
+    *,
+    app_version_check_url: str = "",
+    app_version_checker: AppVersionChecker | None = None,
+) -> TestClient:
     settings = Settings(
         workspace_dir=tmp_path,
         data_dir=tmp_path / "data",
         web_auth_token=auth_token,
+        app_version_check_url=app_version_check_url,
     )
     (tmp_path / "MEMORY.md").write_text("# Paměť", encoding="utf-8")
     db = AssistantDB(settings.db_path)
@@ -31,7 +39,14 @@ def _build_client(tmp_path: Path, auth_token: str = "") -> TestClient:
             success=True,
         )
     )
-    app = create_app(settings, db, memory, runner, scheduler=None)
+    app = create_app(
+        settings,
+        db,
+        memory,
+        runner,
+        scheduler=None,
+        app_version_checker=app_version_checker,
+    )
     return TestClient(app)
 
 
@@ -52,6 +67,8 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert "agyOnboardingCard" in home_res.text
     assert "chatAgyAuthBanner" in home_res.text
     assert "appVersionBadge" in home_res.text
+    assert "appVerBadge" in home_res.text
+    assert "appUpdateBanner" in home_res.text
     assert "/static/favicon.svg" in home_res.text
     fav_svg = client.get("/static/favicon.svg")
     assert fav_svg.status_code == 200 and "<svg" in fav_svg.text
@@ -65,6 +82,7 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert auth_st.status_code == 200
     assert auth_st.json()["app_version"] == __version__
     assert client.get("/api/status").status_code == 401
+    assert client.get("/api/app/version").status_code == 401
 
     ok = client.get("/api/status", headers={"Authorization": "Bearer tajne123"})
     assert ok.status_code == 200
@@ -230,4 +248,100 @@ def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_p
     assert client.get("/api/status", headers={"Authorization": f"Bearer {tok1}"}).status_code == 401
     assert client.get("/api/status", headers={"Authorization": f"Bearer {tok2}"}).status_code == 401
     assert client.get("/api/status", headers={"Authorization": f"Bearer {new_tok}"}).status_code == 200
+
+
+async def test_app_version_checker_and_api(tmp_path: Path) -> None:
+    assert fetch_latest_app_version_sync("") is None
+    assert fetch_latest_app_version_sync("file:///etc/passwd") is None
+
+    calls = 0
+    remote_value: str | None = "0.0.6"
+
+    def fake_fetch(_url: str) -> str | None:
+        nonlocal calls
+        calls += 1
+        return remote_value
+
+    settings = Settings(
+        workspace_dir=tmp_path,
+        data_dir=tmp_path / "data",
+        app_version_check_url="https://example.invalid/VERSION",
+    )
+    checker = AppVersionChecker(
+        settings,
+        current_version="0.0.6",
+        fetcher=fake_fetch,
+    )
+
+    info1 = await checker.get_version_info(force_refresh=False)
+    assert info1 == {
+        "app_version": "0.0.6",
+        "app_latest_version": "0.0.6",
+        "app_up_to_date": True,
+        "app_update_available": False,
+    }
+    assert calls == 1
+
+    # Cache zabrání opakovanému stažení při force_refresh=False
+    info_cached = await checker.get_version_info(force_refresh=False)
+    assert info_cached["app_up_to_date"] is True
+    assert calls == 1
+
+    # Novější verze po vynuceném obnovení
+    remote_value = "0.0.7"
+    info_update = await checker.get_version_info(force_refresh=True)
+    assert info_update == {
+        "app_version": "0.0.6",
+        "app_latest_version": "0.0.7",
+        "app_up_to_date": False,
+        "app_update_available": True,
+    }
+    assert calls == 2
+
+    # Chyba / nedostupný vzdálený zdroj -> graceful fallback bez výjimky
+    remote_value = None
+    info_err = await checker.get_version_info(force_refresh=True)
+    assert info_err == {
+        "app_version": "0.0.6",
+        "app_latest_version": None,
+        "app_up_to_date": None,
+        "app_update_available": False,
+    }
+    assert calls == 3
+
+    # Ověření API endpointů /api/app/version a /api/status s tokenem i bez něj
+    remote_value = "0.0.7"
+    api_dir = tmp_path / "api"
+    api_dir.mkdir(parents=True, exist_ok=True)
+    client = _build_client(
+        api_dir,
+        auth_token="tajne-verze",
+        app_version_check_url="https://example.invalid/VERSION",
+        app_version_checker=checker,
+    )
+    assert client.get("/api/app/version").status_code == 401
+
+    ver_res = client.get(
+        "/api/app/version?refresh=true",
+        headers={"Authorization": "Bearer tajne-verze"},
+    )
+    assert ver_res.status_code == 200
+    assert ver_res.json() == {
+        "app_version": "0.0.6",
+        "app_latest_version": "0.0.7",
+        "app_up_to_date": False,
+        "app_update_available": True,
+    }
+
+    st_res = client.get(
+        "/api/status",
+        headers={"Authorization": "Bearer tajne-verze"},
+    )
+    assert st_res.status_code == 200
+    st_json = st_res.json()
+    assert st_json["app_version"] == "0.0.6"
+    assert st_json["app_latest_version"] == "0.0.7"
+    assert st_json["app_up_to_date"] is False
+    assert st_json["app_update_available"] is True
+
 

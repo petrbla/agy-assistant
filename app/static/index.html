@@ -15,7 +15,7 @@
       <div class="brand">
         <span id="brandDot" class="brand-dot"></span>
         <span id="brandTitle">Antigravity Assistant</span>
-        <span id="appVersionBadge" class="version-tag"></span>
+        <button id="appVersionBadge" type="button" class="version-tag"></button>
         <span id="statusPill" class="pill" data-i18n="status_loading">Loading…</span>
       </div>
 
@@ -152,6 +152,11 @@
 
   <!-- MAIN APP -->
   <main id="appMain" class="container hidden">
+    <div id="appUpdateBanner" class="alert alert-warning row-between hidden" style="margin-bottom:14px;">
+      <span id="appUpdateBannerText"></span>
+      <button id="dismissAppUpdateBtn" type="button" class="btn btn-sm" data-i18n="btn_close">Close</button>
+    </div>
+
     <!-- 1. CHAT -->
     <section id="tab-chat">
       <div id="chatAgyAuthBanner" class="alert alert-warning row-between hidden" style="margin-bottom:14px;">
@@ -345,6 +350,7 @@
           </div>
           <div class="row">
             <span id="agyAuthBadge" class="pill" data-i18n="agy_unverified">Not verified</span>
+            <span id="appVerBadge" class="pill hidden"></span>
             <span id="agyVerBadge" class="pill" data-i18n="agy_ver_loading">Version…</span>
             <button id="checkVerBtn" type="button" class="btn btn-sm" data-i18n="btn_check_ver">Check version</button>
             <button id="updateAgyBtn" type="button" class="btn btn-sm btn-primary hidden" data-i18n="btn_update_agy">Update agy</button>

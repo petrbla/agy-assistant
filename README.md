@@ -23,7 +23,7 @@ Designed as **single-user**: 1 container = 1 user. Deploy another container for 
 
 ## Project Structure
 
-- `app/` – Python orchestrator (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`)
+- `app/` – Python orchestrator (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`, `version_check.py`)
 - `app/locales/` – JSON translation files (`en.json`, `cs.json`)
 - `app/static/` – Web UI (`index.html`, `styles.css`, `app.js`)
 - `workspace_template/` – default English memory & skill templates (copied to persistent `workspace/` on first start)
