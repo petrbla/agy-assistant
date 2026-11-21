@@ -15,7 +15,7 @@ ChatChannel = Literal["auto", "pracovni", "osobni"]
 
 
 def normalize_language(raw: str | None) -> str:
-    """Převede kód nebo název jazyka na dostupný kód (`en` / `cs`)."""
+    """Převede kód nebo název jazyka na dostupný kód (`en`, `cs`, `de`, `sk`, `es`, `pl`, ...)."""
     return resolve_language(raw)
 
 

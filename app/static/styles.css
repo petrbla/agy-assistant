@@ -128,31 +128,49 @@ html, body {
   gap: 8px;
 }
 
-.lang-seg {
+.lang-picker {
+  position: relative;
   display: inline-flex;
   align-items: center;
   background: var(--bg-subtle);
-  padding: 3px;
-  border-radius: 9px;
   border: 1px solid var(--border);
-  gap: 2px;
-}
-.lang-seg button {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
+  border-radius: 9px;
+  padding: 4px 10px;
+  font-size: 12px;
   font-weight: 700;
+  color: var(--text);
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.lang-seg button:hover { color: var(--text); }
-.lang-seg button.active {
+.lang-picker:hover {
+  background: var(--bg-elev);
+}
+.lang-picker:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.lang-picker-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.lang-picker-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 13px;
   background: var(--bg-elev);
   color: var(--text);
-  box-shadow: var(--shadow-sm);
+  border: none;
+}
+.lang-picker-select option {
+  background: var(--bg-elev);
+  color: var(--text);
 }
 
 .pill {

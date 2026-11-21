@@ -96,7 +96,7 @@ def sync_soul_assistant_name(
 ) -> None:
     """Propíše explicitně zadané jméno asistenta do `SOUL.md`."""
     cleaned = name.strip()
-    if not cleaned or cleaned.lower() in {"assistant", "asistent", "jarvis"}:
+    if not cleaned or cleaned.lower() in {"assistant", "asistent", "assistent", "asistente", "asystent", "jarvis"}:
         return
     soul_path = workspace_dir / "SOUL.md"
     if not soul_path.is_file():
@@ -104,7 +104,7 @@ def sync_soul_assistant_name(
     content = soul_path.read_text(encoding="utf-8")
     updated = content.replace("{{JMENO}}", cleaned).replace("{{NAME}}", cleaned)
     pattern = re.compile(
-        r"^(\s*(?:[-*]\s*)?\*\*(?:Name|Jméno):\*\*)\s*(.+?)\s*$",
+        r"^(\s*(?:[-*]\s*)?\*\*(?:Name|Jméno|Meno|Nombre|Imię):\*\*)\s*(.+?)\s*$",
         re.MULTILINE,
     )
     match = pattern.search(updated)

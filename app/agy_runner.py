@@ -461,7 +461,7 @@ def extract_assistant_name_from_soul(workspace_dir: Path) -> str | None:
     except OSError:
         return None
     match = re.search(
-        r"^\s*(?:[-*]\s*)?\*\*(?:Name|Jméno):\*\*\s*(.+?)\s*$",
+        r"^\s*(?:[-*]\s*)?\*\*(?:Name|Jméno|Meno|Nombre|Imię):\*\*\s*(.+?)\s*$",
         content,
         flags=re.MULTILINE | re.IGNORECASE,
     )

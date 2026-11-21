@@ -23,9 +23,16 @@
       </nav>
 
       <div class="topbar-right">
-        <div id="langSeg" class="lang-seg" role="group" aria-label="Language">
-          <button type="button" data-lang="en" class="active">EN</button>
-          <button type="button" data-lang="cs">CS</button>
+        <div class="lang-picker" title="Language" data-i18n-title="label_language">
+          <span class="lang-picker-face" aria-hidden="true">🌐 <span id="langCodeLabel">EN</span> ▾</span>
+          <select id="langSelect" class="lang-picker-select" aria-label="Language">
+            <option value="en">EN · English</option>
+            <option value="cs">CS · Čeština</option>
+            <option value="de">DE · Deutsch</option>
+            <option value="es">ES · Español</option>
+            <option value="pl">PL · Polski</option>
+            <option value="sk">SK · Slovenčina</option>
+          </select>
         </div>
         <button id="themeBtn" type="button" class="btn btn-icon" title="Toggle light / dark theme" data-i18n-title="theme_toggle_title">☀️</button>
         <button id="logoutBtn" type="button" class="btn btn-sm hidden" data-i18n="logout">Sign out</button>
@@ -336,6 +343,10 @@
                   <select id="cfgLanguage" class="select">
                     <option value="en">English</option>
                     <option value="cs">Čeština</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                    <option value="pl">Polski</option>
+                    <option value="sk">Slovenčina</option>
                   </select>
                 </div>
                 <div class="field">

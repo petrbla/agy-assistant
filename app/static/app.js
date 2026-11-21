@@ -12,6 +12,10 @@
   let availableLanguages = [
     { code: "en", name: "English", short: "EN", date_locale: "en-US" },
     { code: "cs", name: "Čeština", short: "CS", date_locale: "cs-CZ" },
+    { code: "de", name: "Deutsch", short: "DE", date_locale: "de-DE" },
+    { code: "es", name: "Español", short: "ES", date_locale: "es-ES" },
+    { code: "pl", name: "Polski", short: "PL", date_locale: "pl-PL" },
+    { code: "sk", name: "Slovenčina", short: "SK", date_locale: "sk-SK" },
   ];
   let uiDict = {};
   const localeCache = {};
@@ -49,7 +53,8 @@
 
   function displayBrandTitle(name) {
     const cleaned = (name || "").trim();
-    if (!cleaned || cleaned === "Assistant" || cleaned === "Asistent") {
+    const defaults = new Set(["assistant", "asistent", "assistent", "asistente", "asystent"]);
+    if (!cleaned || defaults.has(cleaned.toLowerCase())) {
       return t("brand_default");
     }
     return cleaned;
@@ -59,20 +64,26 @@
     if (Array.isArray(langs) && langs.length) {
       availableLanguages = langs;
     }
-    const seg = $("langSeg");
-    if (seg) {
-      seg.innerHTML = "";
-      availableLanguages.forEach((item) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.dataset.lang = item.code;
-        b.textContent = item.short || item.code.toUpperCase();
-        b.title = item.name || item.code;
-        b.classList.toggle("active", item.code === currentLang);
-        b.onclick = () => applyLanguage(item.code, { persistBackend: true });
-        seg.appendChild(b);
-      });
+    const activeItem = availableLanguages.find((item) => item.code === currentLang);
+    const shortLabel = (activeItem && activeItem.short) || currentMeta.short || currentLang.toUpperCase();
+    const codeLbl = $("langCodeLabel");
+    if (codeLbl) {
+      codeLbl.textContent = shortLabel;
     }
+
+    const topSel = $("langSelect");
+    if (topSel) {
+      topSel.innerHTML = "";
+      availableLanguages.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = item.code;
+        opt.textContent = `${item.short || item.code.toUpperCase()} · ${item.name || item.code}`;
+        topSel.appendChild(opt);
+      });
+      topSel.value = currentLang;
+      topSel.onchange = () => applyLanguage(topSel.value, { persistBackend: true });
+    }
+
     const sel = $("cfgLanguage");
     if (sel) {
       sel.innerHTML = "";
@@ -102,6 +113,8 @@
       const k = el.getAttribute("data-i18n-title");
       if (k && typeof uiDict[k] === "string") el.title = uiDict[k];
     });
+    const langSel = $("langSelect");
+    if (langSel) langSel.setAttribute("aria-label", t("label_language"));
 
     if (authScreenStatusKey) {
       $("statusPill").textContent = t(authScreenStatusKey);

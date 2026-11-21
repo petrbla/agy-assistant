@@ -15,7 +15,7 @@ from app.web import create_app
 
 
 def test_polivka_env_aliases(monkeypatch, tmp_path: Path) -> None:
-    from app.config import normalize_chat_channel
+    from app.config import normalize_chat_channel, normalize_language
 
     monkeypatch.setenv("JMENO", "Jarvis")
     monkeypatch.setenv("TG_TOKEN", "bot-token-xyz")
@@ -28,6 +28,15 @@ def test_polivka_env_aliases(monkeypatch, tmp_path: Path) -> None:
     assert s.language == "cs"
     assert normalize_chat_channel("work") == "pracovni"
     assert normalize_chat_channel("personal") == "osobni"
+
+    assert normalize_language("deutsch") == "de"
+    assert normalize_language("německy") == "de"
+    assert normalize_language("slovenčina") == "sk"
+    assert normalize_language("español") == "es"
+    assert normalize_language("polski") == "pl"
+    assert normalize_language("cz") == "cs"
+    assert normalize_language("english") == "en"
+    assert s.template_dir_for_language("de") == s.template_dir
 
 
 def test_clean_terminal_output_and_extract_urls() -> None:

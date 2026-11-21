@@ -67,6 +67,7 @@ def test_chat_and_file_endpoints(tmp_path: Path) -> None:
 
 def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_path: Path) -> None:
     import json
+    import re
 
     root = Path(__file__).resolve().parent.parent
     template_mcp_en = root / "workspace_template" / ".agents" / "mcp_config.example.json"
@@ -76,23 +77,43 @@ def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_p
     assert isinstance(parsed_en.get("mcpServers"), dict) and "n8n-work" in parsed_en["mcpServers"]
     assert isinstance(parsed_cs.get("mcpServers"), dict) and "n8n-prace" in parsed_cs["mcpServers"]
 
-    # Parita všech klíčů v app/locales/en.json a app/locales/cs.json
-    en_locale = json.loads((root / "app" / "locales" / "en.json").read_text(encoding="utf-8"))
-    cs_locale = json.loads((root / "app" / "locales" / "cs.json").read_text(encoding="utf-8"))
-    assert set(en_locale.keys()) == set(cs_locale.keys()) == {"_meta", "ui", "backend", "prompts"}
-    for sec in ("_meta", "ui", "backend", "prompts"):
-        assert set(en_locale[sec].keys()) == set(cs_locale[sec].keys()), f"Rozdíl v sekci {sec}"
+    # Parita všech klíčů a placeholderů napříč všemi jazyky v app/locales/*.json
+    locales_dir = root / "app" / "locales"
+    locale_files = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(locales_dir.glob("*.json"))}
+    assert set(locale_files.keys()) == {"en", "cs", "de", "es", "pl", "sk"}
+    en_locale = locale_files["en"]
+    for lang_code, loc_data in locale_files.items():
+        assert set(loc_data.keys()) == {"_meta", "ui", "backend", "prompts"}, f"Chybějící/nadbytečná sekce v {lang_code}"
+        for sec in ("_meta", "ui", "backend", "prompts"):
+            assert set(loc_data[sec].keys()) == set(en_locale[sec].keys()), f"Rozdíl klíčů v {lang_code}.{sec}"
+            if sec in ("ui", "backend", "prompts"):
+                for k, val in loc_data[sec].items():
+                    assert isinstance(val, str) and val.strip(), f"Prázdná hodnota {lang_code}.{sec}.{k}"
+                    en_phs = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", en_locale[sec][k]))
+                    loc_phs = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", val))
+                    assert loc_phs == en_phs, f"Neshoda placeholderů v {lang_code}.{sec}.{k}: {loc_phs} != {en_phs}"
+        assert "HEARTBEAT_OK" in loc_data["prompts"]["heartbeat"], f"Chybí HEARTBEAT_OK v {lang_code}"
+        assert "MEMORY_FLUSH_OK" in loc_data["prompts"]["nightly_memory_flush"], f"Chybí MEMORY_FLUSH_OK v {lang_code}"
+        assert "schedule_request.json" in loc_data["prompts"]["schedule_hint"], f"Chybí schedule_request.json v {lang_code}"
 
     client = _build_client(tmp_path)
     i18n_list = client.get("/api/i18n")
     assert i18n_list.status_code == 200
     assert i18n_list.json()["default_language"] == "en"
-    assert [x["code"] for x in i18n_list.json()["available_languages"]] == ["en", "cs"]
+    assert [x["code"] for x in i18n_list.json()["available_languages"]] == ["en", "cs", "de", "es", "pl", "sk"]
 
-    bundle_cs = client.get("/api/i18n/cs")
-    assert bundle_cs.status_code == 200
-    assert bundle_cs.json()["language"] == "cs"
-    assert bundle_cs.json()["ui"]["nav_settings"] == "Nastavení"
+    expected_nav_settings = {
+        "cs": "Nastavení",
+        "de": "Einstellungen",
+        "sk": "Nastavenia",
+        "es": "Configuración",
+        "pl": "Ustawienia",
+    }
+    for code, expected_label in expected_nav_settings.items():
+        bundle = client.get(f"/api/i18n/{code}")
+        assert bundle.status_code == 200
+        assert bundle.json()["language"] == code
+        assert bundle.json()["ui"]["nav_settings"] == expected_label
 
     # Path-traversal / neznámý kód na /api/i18n nikam mimo locales nesáhne
     bundle_slash = client.get("/api/i18n/..%2F..%2Fetc%2Fpasswd")
@@ -131,6 +152,14 @@ def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_p
     assert client.get("/api/status", headers={"Authorization": f"Bearer {tok2}"}).status_code == 200
 
     # Přepnutí jazyka přes /api/settings
+    lang_upd_de = client.post(
+        "/api/settings",
+        headers={"Authorization": f"Bearer {tok1}"},
+        json={"language": "de"},
+    )
+    assert lang_upd_de.status_code == 200
+    assert lang_upd_de.json()["language"] == "de"
+
     lang_upd = client.post(
         "/api/settings",
         headers={"Authorization": f"Bearer {tok1}"},
