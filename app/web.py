@@ -157,6 +157,13 @@ class PluginAccountUpdateRequest(BaseModel):
     custom_rules: str | None = Field(default=None, max_length=1000)
 
 
+class PluginCustomUrlRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=1000)
+    auth_token: str = Field(default="", max_length=2000)
+    scope: Literal["all", "pracovni", "osobni"] = "all"
+    clear_token: bool = False
+
+
 class PluginConnectCallbackRequest(BaseModel):
     callback_url: str = Field(min_length=1, max_length=4000)
 
@@ -924,6 +931,41 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             res = plugin_manager.delete_account(plugin_name, account_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.post("/api/plugins/{plugin_name}/custom-url")
+    async def configure_plugin_custom_url(
+        plugin_name: str,
+        payload: PluginCustomUrlRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.configure_custom_url(
+                plugin_name,
+                url=payload.url,
+                auth_token=payload.auth_token,
+                scope=payload.scope,
+                clear_token=payload.clear_token,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.delete("/api/plugins/{plugin_name}/custom-url")
+    async def delete_plugin_custom_url(
+        plugin_name: str,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.delete_custom_url(plugin_name)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         _sync_all_plugin_contexts()

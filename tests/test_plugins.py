@@ -779,3 +779,108 @@ def test_plugin_multi_account_profiles_and_detail_rules(tmp_path: Path) -> None:
     )
     assert not home_work.exists()
 
+
+def test_plugin_custom_url_configure_sync_and_delete(tmp_path: Path) -> None:
+    import pytest
+
+    from app.plugins import validate_custom_mcp_url
+
+    assert (
+        validate_custom_mcp_url("https://n8n.example.com/mcp-server/http")
+        == "https://n8n.example.com/mcp-server/http"
+    )
+    assert validate_custom_mcp_url("http://127.0.0.1:5678/mcp") == "http://127.0.0.1:5678/mcp"
+    for bad in ("", "ftp://example.com", "https://bad url.com/mcp", "not-a-url"):
+        with pytest.raises(ValueError):
+            validate_custom_mcp_url(bad)
+
+    home_dir = tmp_path / "home"
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    (ws_dir / "MEMORY.md").write_text("# Mem", encoding="utf-8")
+
+    s = Settings(
+        workspace_dir=ws_dir,
+        data_dir=tmp_path / "data",
+        home_dir=home_dir,
+        web_auth_token="tajne-url",
+    )
+    db = AssistantDB(s.db_path)
+    app = create_app(s, db, WorkspaceMemory(ws_dir), AsyncMock())
+    client = TestClient(app)
+    hdr = {"Authorization": "Bearer tajne-url"}
+
+    # Bez autorizace nesmí endpointy projít
+    assert (
+        client.post(
+            "/api/plugins/n8n-skills/custom-url",
+            json={"url": "https://n8n.example.com/mcp-server/http"},
+        ).status_code
+        == 401
+    )
+    assert client.delete("/api/plugins/n8n-skills/custom-url").status_code == 401
+
+    # Uložení vlastní URL + Bearer tokenu pro n8n-skills
+    save_res = client.post(
+        "/api/plugins/n8n-skills/custom-url",
+        headers=hdr,
+        json={
+            "url": "https://n8n.example.com/mcp-server/http",
+            "auth_token": "tok-n8n-123",
+            "scope": "pracovni",
+        },
+    )
+    assert save_res.status_code == 200
+    body = save_res.json()
+    assert body["plugin"] == "n8n-skills"
+    assert body["custom_mcp"]["name"] == "n8n"
+    assert body["custom_mcp"]["url"] == "https://n8n.example.com/mcp-server/http"
+    assert body["custom_mcp"]["scope"] == "pracovni"
+    assert body["custom_mcp"]["has_auth_token"] is True
+
+    # Propis do mcp_config.json a zobrazení v GET /api/plugins
+    mcp_cfg = json.loads(
+        (home_dir / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8")
+    )
+    assert mcp_cfg["mcpServers"]["n8n"]["url"] == "https://n8n.example.com/mcp-server/http"
+    assert mcp_cfg["mcpServers"]["n8n"]["headers"]["Authorization"] == "Bearer tok-n8n-123"
+
+    cat = client.get("/api/plugins", headers=hdr).json()["plugins"]
+    n8n_entry = next(p for p in cat if p["name"] == "n8n-skills")
+    assert n8n_entry["supports_custom_url"] is True
+    assert n8n_entry["custom_url_connected"] is True
+    assert n8n_entry["connected"] is True
+    assert n8n_entry["custom_mcp"]["url"] == "https://n8n.example.com/mcp-server/http"
+
+    # Aktualizace URL s prázdným auth_token zachová původní token
+    upd_res = client.post(
+        "/api/plugins/n8n-skills/custom-url",
+        headers=hdr,
+        json={
+            "url": "https://n8n2.example.com/mcp-server/http",
+            "auth_token": "",
+            "scope": "all",
+        },
+    )
+    assert upd_res.status_code == 200
+    assert upd_res.json()["custom_mcp"]["has_auth_token"] is True
+    mcp_cfg2 = json.loads(
+        (home_dir / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8")
+    )
+    assert mcp_cfg2["mcpServers"]["n8n"]["url"] == "https://n8n2.example.com/mcp-server/http"
+    assert mcp_cfg2["mcpServers"]["n8n"]["headers"]["Authorization"] == "Bearer tok-n8n-123"
+
+    # Odebrání vlastní URL odstraní server z DB i mcp_config.json
+    del_res = client.delete("/api/plugins/n8n-skills/custom-url", headers=hdr)
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted"] is True
+    mcp_cfg3 = json.loads(
+        (home_dir / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8")
+    )
+    assert "n8n" not in mcp_cfg3["mcpServers"]
+    cat_after = client.get("/api/plugins", headers=hdr).json()["plugins"]
+    n8n_after = next(p for p in cat_after if p["name"] == "n8n-skills")
+    assert n8n_after["custom_url_connected"] is False
+    assert n8n_after["custom_mcp"] is None
+
+

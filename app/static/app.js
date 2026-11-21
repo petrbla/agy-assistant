@@ -54,6 +54,7 @@
     info: "bi-info-circle",
     sparkles: "bi-stars",
     logOut: "bi-box-arrow-right",
+    link: "bi-link-45deg",
   };
 
   function uiIcon(name, extraCls = "") {
@@ -63,11 +64,12 @@
   }
 
   function badgeCls(kind = "") {
-    if (kind === "ok" || kind === "success") return "badge rounded-pill text-bg-success";
-    if (kind === "warn" || kind === "warning") return "badge rounded-pill text-bg-warning";
-    if (kind === "err" || kind === "danger") return "badge rounded-pill text-bg-danger";
-    if (kind === "accent" || kind === "primary") return "badge rounded-pill text-bg-primary";
-    return "badge rounded-pill text-bg-secondary";
+    const base = "badge rounded-pill text-nowrap flex-shrink-0";
+    if (kind === "ok" || kind === "success") return `${base} text-bg-success`;
+    if (kind === "warn" || kind === "warning") return `${base} text-bg-warning`;
+    if (kind === "err" || kind === "danger") return `${base} text-bg-danger`;
+    if (kind === "accent" || kind === "primary") return `${base} text-bg-primary`;
+    return `${base} text-bg-secondary`;
   }
 
   let pluginsCatalog = [];
@@ -75,6 +77,7 @@
   let showAllPlugins = false;
   const expandedAccountDetails = new Set();
   const addAccountOpenFor = new Set();
+  const customUrlOpenFor = new Set();
   let pluginConnectTimer = null;
   let lastPluginConnectState = null;
   let activeConnectPlugin = null;
@@ -649,6 +652,8 @@
     const onboardBadge = $("onboardAgyBadge");
     const finishBtn = $("finishAgyOnboardBtn");
     const logoutBtn = $("logoutAgyBtn");
+    const authBody = $("agyAuthBody");
+    const authHeader = $("agyAuthHeader");
     const parts = [];
     if (info.has_agy_oauth) parts.push(t("agy_auth_oauth"));
     if (info.has_gemini_api_key) parts.push(t("agy_auth_api_key"));
@@ -662,6 +667,8 @@
       }
       if (finishBtn) finishBtn.classList.remove("d-none");
       logoutBtn.classList.remove("d-none");
+      if (authBody) authBody.classList.add("d-none");
+      if (authHeader) authHeader.classList.add("border-bottom-0");
     } else if (typeof info.has_agy_oauth === "boolean") {
       authBadge.textContent = t("agy_auth_signed_out");
       authBadge.className = badgeCls("err");
@@ -671,6 +678,8 @@
       }
       if (finishBtn) finishBtn.classList.add("d-none");
       logoutBtn.classList.add("d-none");
+      if (authBody) authBody.classList.remove("d-none");
+      if (authHeader) authHeader.classList.remove("border-bottom-0");
     }
 
     const verBadge = $("agyVerBadge");
@@ -1654,7 +1663,7 @@
   }
 
   function pluginSortRank(p) {
-    if (p.installed && p.enabled && p.connected) return 0;
+    if (p.custom_url_connected || (p.installed && p.enabled && p.connected)) return 0;
     if (p.installed && p.enabled) return 1;
     if (p.installed) return 2;
     const featIdx = FEATURED_PLUGINS.indexOf(p.name);
@@ -1668,28 +1677,35 @@
     grid.innerHTML = "";
     const query = ($("pluginSearchInput")?.value || "").trim().toLowerCase();
 
-    const filtered = pluginsCatalog.filter((p) => {
-      if (activePluginCategory === "installed" && !p.installed) return false;
-      if (activePluginCategory !== "all" && activePluginCategory !== "installed" && p.category !== activePluginCategory) {
-        return false;
-      }
-      if (!query) return true;
-      const hay = `${p.name} ${p.display_name} ${pluginDescription(p)} ${p.marketplace}`.toLowerCase();
-      return hay.includes(query);
-    });
+    if ($("pluginsFilterBar")) $("pluginsFilterBar").classList.toggle("d-none", !showAllPlugins);
+    if ($("customPluginWrap")) $("customPluginWrap").classList.toggle("d-none", !showAllPlugins);
 
-    const sorted = [...filtered].sort((a, b) => pluginSortRank(a) - pluginSortRank(b));
-    const isDefaultCatalogView = activePluginCategory === "all" && !query;
-    const alwaysVisible = isDefaultCatalogView
-      ? sorted.filter((p) => p.installed || FEATURED_PLUGINS.includes(p.name))
-      : sorted;
-    const hiddenCount = Math.max(0, sorted.length - alwaysVisible.length);
-    const displayList = (isDefaultCatalogView && !showAllPlugins) ? alwaysVisible : sorted;
+    const hiddenCount = pluginsCatalog.filter(
+      (p) => !p.installed && !p.custom_url_connected && !FEATURED_PLUGINS.includes(p.name)
+    ).length;
+    let displayList;
+    if (!showAllPlugins) {
+      displayList = pluginsCatalog
+        .filter((p) => p.installed || Boolean(p.custom_url_connected) || FEATURED_PLUGINS.includes(p.name))
+        .sort((a, b) => pluginSortRank(a) - pluginSortRank(b));
+    } else {
+      displayList = pluginsCatalog
+        .filter((p) => {
+          if (activePluginCategory === "installed" && !p.installed && !p.custom_url_connected) return false;
+          if (activePluginCategory !== "all" && activePluginCategory !== "installed" && p.category !== activePluginCategory) {
+            return false;
+          }
+          if (!query) return true;
+          const hay = `${p.name} ${p.display_name} ${pluginDescription(p)} ${p.marketplace}`.toLowerCase();
+          return hay.includes(query);
+        })
+        .sort((a, b) => pluginSortRank(a) - pluginSortRank(b));
+    }
 
     const moreWrap = $("pluginsMoreWrap");
     const moreBtn = $("toggleMorePluginsBtn");
     if (moreWrap && moreBtn) {
-      if (isDefaultCatalogView && hiddenCount > 0) {
+      if (showAllPlugins || hiddenCount > 0) {
         moreWrap.classList.remove("d-none");
         moreBtn.innerHTML = showAllPlugins
           ? `${uiIcon("chevronUp", "me-1")}<span>${escapeHtml(t("plugins_show_less"))}</span>`
@@ -1709,7 +1725,7 @@
 
     displayList.forEach((p) => {
       const card = document.createElement("div");
-      card.className = p.installed && p.enabled
+      card.className = (p.installed && p.enabled) || p.custom_url_connected
         ? "card h-100 shadow-sm border-primary plugin-card"
         : "card h-100 shadow-sm plugin-card";
 
@@ -1753,7 +1769,7 @@
       if (p.installed && connectedCount > 1) {
         badge.className = badgeCls("ok");
         badge.textContent = t("plugin_status_connected_multi", { count: connectedCount });
-      } else if (p.installed && p.connected) {
+      } else if (p.custom_url_connected || (p.installed && p.connected)) {
         badge.className = badgeCls("ok");
         badge.textContent = t("plugin_status_connected");
         if (p.account_label) badge.title = p.account_label;
@@ -1788,28 +1804,56 @@
         return b;
       };
 
+      const appendCustomUrlButton = (primaryStyle) => {
+        if (!p.supports_custom_url) return;
+        const hasUrl = Boolean(p.custom_mcp && p.custom_mcp.url);
+        actions.appendChild(
+          makeBtn(
+            `${uiIcon("link", "me-1")}<span>${escapeHtml(hasUrl ? t("plugin_btn_edit_url") : t("plugin_btn_custom_url"))}</span>`,
+            primaryStyle ? "btn-primary" : "",
+            async () => {
+              if (customUrlOpenFor.has(p.name)) customUrlOpenFor.delete(p.name);
+              else customUrlOpenFor.add(p.name);
+              renderPlugins();
+            }
+          )
+        );
+      };
+
       if (!p.installed) {
+        if (p.supports_custom_url) {
+          appendCustomUrlButton(true);
+        }
         if (p.supports_oauth) {
           actions.appendChild(
-            makeBtn(escapeHtml(t("plugin_btn_connect")), "btn-primary", () =>
-              openPluginConnectModal(p, { forceReconnect: false })
+            makeBtn(
+              escapeHtml(t("plugin_btn_connect")),
+              p.supports_custom_url ? "" : "btn-primary",
+              () => openPluginConnectModal(p, { forceReconnect: false })
             )
           );
         }
         actions.appendChild(
-          makeBtn(escapeHtml(t("plugin_btn_install")), p.supports_oauth ? "" : "btn-primary", async () => {
-            try {
-              toast(t("toast_plugin_installing", { name: p.display_name || p.name }), "warn");
-              await api("/api/plugins/install", {
-                method: "POST",
-                body: JSON.stringify({ target: p.install_target || p.name }),
-              });
-              toast(t("toast_plugin_installed", { name: p.display_name || p.name }));
-              await loadPlugins();
-            } catch (err) { toast(err.message, "err"); }
-          })
+          makeBtn(
+            escapeHtml(t("plugin_btn_install")),
+            p.supports_oauth || p.supports_custom_url ? "" : "btn-primary",
+            async () => {
+              try {
+                toast(t("toast_plugin_installing", { name: p.display_name || p.name }), "warn");
+                await api("/api/plugins/install", {
+                  method: "POST",
+                  body: JSON.stringify({ target: p.install_target || p.name }),
+                });
+                toast(t("toast_plugin_installed", { name: p.display_name || p.name }));
+                await loadPlugins();
+              } catch (err) { toast(err.message, "err"); }
+            }
+          )
         );
       } else {
+        if (p.supports_custom_url) {
+          appendCustomUrlButton(false);
+        }
         if (p.supports_oauth) {
           actions.appendChild(
             makeBtn(
@@ -1852,6 +1896,166 @@
       }
 
       cardBody.append(head, desc, actions);
+
+      // Uložená vlastní MCP URL instance
+      if (p.custom_mcp && p.custom_mcp.url) {
+        const urlBox = document.createElement("div");
+        urlBox.className = "p-2 rounded border bg-body-tertiary d-flex flex-column gap-1 mt-1";
+
+        const urlHead = document.createElement("div");
+        urlHead.className = "d-flex align-items-center justify-content-between gap-2";
+
+        const urlBadges = document.createElement("div");
+        urlBadges.className = "d-flex align-items-center flex-wrap gap-1 min-w-0";
+        const linkMeta = document.createElement("span");
+        linkMeta.className = "small fw-semibold d-inline-flex align-items-center gap-1";
+        linkMeta.innerHTML = `${uiIcon("link", "text-primary")}<span>${escapeHtml(t("plugin_custom_url_title"))}</span>`;
+        const scPill = document.createElement("span");
+        scPill.className = badgeCls();
+        scPill.textContent = scopeLabel(p.custom_mcp.scope);
+        urlBadges.append(linkMeta, scPill);
+
+        if (p.custom_mcp.has_auth_token) {
+          const tokPill = document.createElement("span");
+          tokPill.className = badgeCls("primary");
+          tokPill.textContent = t("plugin_custom_url_token_set");
+          urlBadges.appendChild(tokPill);
+        }
+
+        const rmUrlBtn = document.createElement("button");
+        rmUrlBtn.type = "button";
+        rmUrlBtn.className = "btn btn-sm btn-outline-danger btn-icon-sm flex-shrink-0";
+        rmUrlBtn.innerHTML = uiIcon("trash");
+        rmUrlBtn.title = t("btn_delete");
+        rmUrlBtn.setAttribute("aria-label", t("btn_delete"));
+        rmUrlBtn.onclick = async () => {
+          if (!confirm(t("plugin_custom_url_remove_confirm", { name: p.display_name || p.name }))) return;
+          rmUrlBtn.disabled = true;
+          try {
+            await api(`/api/plugins/${encodeURIComponent(p.name)}/custom-url`, { method: "DELETE" });
+            customUrlOpenFor.delete(p.name);
+            toast(t("toast_plugin_url_removed", { name: p.display_name || p.name }));
+            await loadPlugins();
+            await loadMcp();
+          } catch (err) {
+            toast(err.message, "err");
+          } finally {
+            rmUrlBtn.disabled = false;
+          }
+        };
+
+        urlHead.append(urlBadges, rmUrlBtn);
+
+        const urlVal = document.createElement("div");
+        urlVal.className = "small font-monospace text-body-secondary text-break";
+        urlVal.textContent = p.custom_mcp.url;
+
+        urlBox.append(urlHead, urlVal);
+        cardBody.appendChild(urlBox);
+      }
+
+      // Inline formulář pro zadání / úpravu vlastní MCP URL a volitelného tokenu
+      if (p.supports_custom_url && customUrlOpenFor.has(p.name)) {
+        const urlForm = document.createElement("form");
+        urlForm.className = "p-2 rounded border bg-body-tertiary d-flex flex-column gap-2 mt-1";
+
+        const urlTitle = document.createElement("div");
+        urlTitle.className = "plugin-perm-title";
+        urlTitle.textContent = t("plugin_custom_url_title");
+
+        const urlGroup = document.createElement("div");
+        const urlLbl = document.createElement("label");
+        urlLbl.className = "form-label small text-body-secondary mb-1";
+        urlLbl.textContent = t("plugin_custom_url_label");
+        const urlInp = document.createElement("input");
+        urlInp.type = "url";
+        urlInp.required = true;
+        urlInp.className = "form-control form-control-sm font-monospace";
+        urlInp.placeholder = p.custom_url_placeholder || "https://mcp.example.com/mcp";
+        urlInp.value = (p.custom_mcp && p.custom_mcp.url) || "";
+        urlGroup.append(urlLbl, urlInp);
+
+        const extraGrid = document.createElement("div");
+        extraGrid.className = "row g-2";
+
+        const tokCol = document.createElement("div");
+        tokCol.className = "col-sm-7";
+        const tokLbl = document.createElement("label");
+        tokLbl.className = "form-label small text-body-secondary mb-1";
+        tokLbl.textContent = t("plugin_custom_url_token_label");
+        const tokInp = document.createElement("input");
+        tokInp.type = "password";
+        tokInp.className = "form-control form-control-sm";
+        tokInp.placeholder = t("plugin_custom_url_token_ph");
+        tokCol.append(tokLbl, tokInp);
+
+        const scCol = document.createElement("div");
+        scCol.className = "col-sm-5";
+        const scLbl = document.createElement("label");
+        scLbl.className = "form-label small text-body-secondary mb-1";
+        scLbl.textContent = t("plugin_detail_scope");
+        const urlScopeSel = document.createElement("select");
+        urlScopeSel.className = "form-select form-select-sm";
+        [
+          ["all", t("scope_all_chats")],
+          ["pracovni", t("scope_work")],
+          ["osobni", t("scope_personal")],
+        ].forEach(([val, txt]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = txt;
+          urlScopeSel.appendChild(opt);
+        });
+        urlScopeSel.value = (p.custom_mcp && ["pracovni", "osobni"].includes(p.custom_mcp.scope))
+          ? p.custom_mcp.scope
+          : "all";
+        scCol.append(scLbl, urlScopeSel);
+        extraGrid.append(tokCol, scCol);
+
+        const urlBtns = document.createElement("div");
+        urlBtns.className = "d-flex align-items-center flex-wrap gap-2";
+        const saveUrlBtn = document.createElement("button");
+        saveUrlBtn.type = "submit";
+        saveUrlBtn.className = "btn btn-sm btn-primary";
+        saveUrlBtn.textContent = t("plugin_custom_url_save");
+        const cancelUrlBtn = document.createElement("button");
+        cancelUrlBtn.type = "button";
+        cancelUrlBtn.className = "btn btn-sm btn-outline-secondary";
+        cancelUrlBtn.textContent = t("plugin_account_btn_cancel");
+        cancelUrlBtn.onclick = () => {
+          customUrlOpenFor.delete(p.name);
+          renderPlugins();
+        };
+        urlBtns.append(saveUrlBtn, cancelUrlBtn);
+
+        urlForm.onsubmit = async (e) => {
+          e.preventDefault();
+          const urlVal = urlInp.value.trim();
+          if (!urlVal) return;
+          saveUrlBtn.disabled = true;
+          try {
+            await api(`/api/plugins/${encodeURIComponent(p.name)}/custom-url`, {
+              method: "POST",
+              body: JSON.stringify({
+                url: urlVal,
+                auth_token: tokInp.value.trim(),
+                scope: urlScopeSel.value,
+              }),
+            });
+            customUrlOpenFor.delete(p.name);
+            toast(t("toast_plugin_url_saved", { name: p.display_name || p.name }));
+            await loadPlugins();
+            await loadMcp();
+          } catch (err) {
+            toast(err.message, "err");
+          } finally {
+            saveUrlBtn.disabled = false;
+          }
+        };
+
+        urlForm.append(urlTitle, urlGroup, extraGrid, urlBtns);
+        cardBody.appendChild(urlForm);
+      }
 
       // Inline formulář pro přidání nového účtu (např. Pracovní / Osobní)
       if (p.installed && addAccountOpenFor.has(p.name)) {
@@ -2215,6 +2419,16 @@
   if ($("toggleMorePluginsBtn")) {
     $("toggleMorePluginsBtn").onclick = () => {
       showAllPlugins = !showAllPlugins;
+      if (!showAllPlugins) {
+        activePluginCategory = "all";
+        if ($("pluginSearchInput")) $("pluginSearchInput").value = "";
+        document.querySelectorAll("#pluginCategoryBar .filter-pill").forEach((b) => {
+          const isAll = (b.dataset.cat || "all") === "all";
+          b.classList.toggle("active", isAll);
+          b.classList.toggle("btn-primary", isAll);
+          b.classList.toggle("btn-outline-secondary", !isAll);
+        });
+      }
       renderPlugins();
     };
   }

@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.auth_session import clean_terminal_output, extract_osc8_urls, extract_urls
 from app.config import Settings, normalize_chat_channel
-from app.db import AssistantDB, PluginAccountRecord, PluginConfigRecord
+from app.db import AssistantDB, McpServerRecord, PluginAccountRecord, PluginConfigRecord
 
 try:
     import fcntl
@@ -90,6 +90,9 @@ class PluginCatalogItem:
     description: str
     logo_url: str = ""
     supports_oauth: bool = False
+    supports_custom_url: bool = False
+    mcp_server_name: str = ""
+    custom_url_placeholder: str = ""
     cli_bin: str = ""
     permissions: tuple[PluginPermissionSpec, ...] = ()
 
@@ -323,6 +326,9 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         desc_key="plugin_desc_n8n",
         description="Build, test, and debug n8n workflows and automations.",
         supports_oauth=True,
+        supports_custom_url=True,
+        mcp_server_name="n8n",
+        custom_url_placeholder="https://n8n.example.com/mcp-server/http",
     ),
     PluginCatalogItem(
         name="canva",
@@ -444,6 +450,9 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         desc_key="plugin_desc_grafana",
         description="Query Grafana metrics, logs, dashboards, and alerts.",
         supports_oauth=True,
+        supports_custom_url=True,
+        mcp_server_name="grafana",
+        custom_url_placeholder="https://grafana.example.com/mcp",
     ),
     PluginCatalogItem(
         name="google-cloud-developer",
@@ -480,6 +489,9 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         desc_key="plugin_desc_looker",
         description="Explore Looker data, run Looks, and build dashboards.",
         supports_oauth=True,
+        supports_custom_url=True,
+        mcp_server_name="looker",
+        custom_url_placeholder="https://looker.example.com/mcp",
     ),
     PluginCatalogItem(
         name="neo4j",
@@ -492,6 +504,9 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         desc_key="plugin_desc_neo4j",
         description="Write Cypher queries, design graph models, and manage Neo4j Aura.",
         supports_oauth=False,
+        supports_custom_url=True,
+        mcp_server_name="neo4j",
+        custom_url_placeholder="https://neo4j.example.com/mcp",
     ),
 )
 
@@ -523,6 +538,17 @@ def validate_plugin_target(target: str) -> str:
         validate_plugin_name(parts[1])
         return cleaned
     return validate_plugin_name(cleaned)
+
+
+def validate_custom_mcp_url(url: str) -> str:
+    """Ověří URL vlastního HTTP MCP serveru (`http://` nebo `https://`)."""
+    cleaned = (url or "").strip()
+    if not cleaned or len(cleaned) > 1000 or any(ch.isspace() or ord(ch) < 32 for ch in cleaned):
+        raise ValueError("Neplatná URL MCP serveru.")
+    parsed = urlparse(cleaned)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        raise ValueError("URL musí začínat http:// nebo https:// a obsahovat adresu serveru.")
+    return cleaned
 
 
 _SIGNED_IN_LINE_RE = re.compile(
@@ -1405,6 +1431,86 @@ class PluginManager:
         if prof_dir != self.settings.effective_home_dir and prof_dir.is_dir():
             shutil.rmtree(prof_dir, ignore_errors=True)
 
+    def _custom_mcp_server_name(self, plugin_name: str) -> str:
+        safe_name = validate_plugin_name(plugin_name).lower()
+        item = _PLUGIN_CATALOG_BY_NAME.get(safe_name)
+        if item is not None and item.mcp_server_name:
+            return item.mcp_server_name.lower()
+        return safe_name
+
+    def _find_custom_mcp_server(
+        self,
+        plugin_name: str,
+        servers: list[McpServerRecord] | None = None,
+    ) -> McpServerRecord | None:
+        safe_name = validate_plugin_name(plugin_name).lower()
+        mcp_name = self._custom_mcp_server_name(safe_name)
+        rows = servers if servers is not None else self.db.list_mcp_servers()
+        by_name = {srv.name.strip().lower(): srv for srv in rows if srv.transport == "http"}
+        return by_name.get(mcp_name) or by_name.get(safe_name)
+
+    @staticmethod
+    def _custom_mcp_public_dict(srv: McpServerRecord | None) -> dict[str, Any] | None:
+        if srv is None:
+            return None
+        return {
+            "id": srv.id,
+            "name": srv.name,
+            "url": srv.url,
+            "scope": srv.scope,
+            "has_auth_token": bool(srv.auth_token.strip()),
+            "enabled": bool(srv.enabled),
+        }
+
+    def configure_custom_url(
+        self,
+        plugin_name: str,
+        *,
+        url: str,
+        auth_token: str = "",
+        scope: str = "all",
+        clear_token: bool = False,
+    ) -> dict[str, Any]:
+        """Uloží vlastní HTTP MCP URL (+ volitelný Bearer token) přímo ke kartě pluginu."""
+        safe_name = validate_plugin_name(plugin_name).lower()
+        clean_url = validate_custom_mcp_url(url)
+        clean_scope = scope if scope in ("all", "pracovni", "osobni") else "all"
+        mcp_name = self._custom_mcp_server_name(safe_name)
+        existing = self._find_custom_mcp_server(safe_name)
+        new_token = (auth_token or "").strip()
+        if clear_token:
+            eff_token = ""
+        elif new_token:
+            eff_token = new_token
+        elif existing is not None:
+            eff_token = existing.auth_token
+        else:
+            eff_token = ""
+        saved = self.db.upsert_mcp_server(
+            server_id=existing.id if existing is not None else None,
+            name=existing.name if existing is not None else mcp_name,
+            scope=clean_scope,
+            transport="http",
+            url=clean_url,
+            auth_token=eff_token,
+            headers_json=existing.headers_json if existing is not None else "{}",
+            enabled=True,
+        )
+        return {
+            "status": "ok",
+            "plugin": safe_name,
+            "custom_mcp": self._custom_mcp_public_dict(saved),
+        }
+
+    def delete_custom_url(self, plugin_name: str) -> dict[str, Any]:
+        """Odebere vlastní HTTP MCP URL navázanou na daný plugin."""
+        safe_name = validate_plugin_name(plugin_name).lower()
+        existing = self._find_custom_mcp_server(safe_name)
+        deleted = False
+        if existing is not None:
+            deleted = self.db.delete_mcp_server(existing.id)
+        return {"status": "ok", "plugin": safe_name, "deleted": deleted}
+
     async def list_catalog_with_status(self) -> dict[str, Any]:
         """Sloučí kurátorovaný katalog, nainstalované pluginy, účty a stav připojení."""
         installed_list = await self.list_installed()
@@ -1416,6 +1522,7 @@ class PluginManager:
         for acct in all_accounts:
             accounts_by_plugin.setdefault(acct.plugin_name.lower(), []).append(acct)
         oauth_tokens = detect_mcp_oauth_connected_plugins(self.settings.effective_home_dir)
+        mcp_servers = self.db.list_mcp_servers()
 
         plugins_out: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -1472,6 +1579,13 @@ class PluginManager:
                 if accts_out
                 else normalize_plugin_permissions(item.name, rec.permissions_json if rec else None)
             )
+            custom_srv = (
+                self._find_custom_mcp_server(low, mcp_servers) if item.supports_custom_url else None
+            )
+            custom_mcp_dict = self._custom_mcp_public_dict(custom_srv)
+            custom_url_conn = bool(
+                custom_mcp_dict and custom_mcp_dict["enabled"] and custom_mcp_dict["url"]
+            )
             plugins_out.append(
                 {
                     "name": item.name,
@@ -1489,10 +1603,14 @@ class PluginManager:
                     "desc_key": item.desc_key,
                     "description": item.description,
                     "supports_oauth": item.supports_oauth,
+                    "supports_custom_url": bool(item.supports_custom_url),
+                    "custom_url_placeholder": item.custom_url_placeholder,
+                    "custom_mcp": custom_mcp_dict,
+                    "custom_url_connected": custom_url_conn,
                     "installed": inst is not None,
                     "enabled": bool(inst["enabled"]) if inst is not None else False,
                     "version": str((inst or {}).get("version") or ""),
-                    "connected": any_conn if inst is not None else False,
+                    "connected": (any_conn if inst is not None else False) or custom_url_conn,
                     "connected_at": rec.connected_at if rec is not None else "",
                     "account_label": first_label,
                     "accounts": accts_out,
@@ -1510,6 +1628,11 @@ class PluginManager:
             has_mcp = bool(inst.get("mcpServers") or disk.get("mcp_servers"))
             supports_oauth = bool(inst.get("has_auth_json") or has_mcp)
             accts_out, any_conn, first_label = _build_accounts_payload(low, inst, disk)
+            custom_srv = self._find_custom_mcp_server(low, mcp_servers)
+            custom_mcp_dict = self._custom_mcp_public_dict(custom_srv)
+            custom_url_conn = bool(
+                custom_mcp_dict and custom_mcp_dict["enabled"] and custom_mcp_dict["url"]
+            )
             plugins_out.append(
                 {
                     "name": inst["name"],
@@ -1523,10 +1646,14 @@ class PluginManager:
                     "desc_key": "",
                     "description": str(inst.get("description") or ""),
                     "supports_oauth": supports_oauth,
+                    "supports_custom_url": True,
+                    "custom_url_placeholder": "https://mcp.example.com/mcp",
+                    "custom_mcp": custom_mcp_dict,
+                    "custom_url_connected": custom_url_conn,
                     "installed": True,
                     "enabled": bool(inst.get("enabled", True)),
                     "version": str(inst.get("version") or ""),
-                    "connected": any_conn,
+                    "connected": any_conn or custom_url_conn,
                     "connected_at": rec.connected_at if rec is not None else "",
                     "account_label": first_label,
                     "accounts": accts_out,
