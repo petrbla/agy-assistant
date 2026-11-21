@@ -66,6 +66,11 @@
     return cleaned;
   }
 
+  function updateAppVersionBadge(ver) {
+    const el = $("appVersionBadge");
+    if (el && ver) el.textContent = `v${ver}`;
+  }
+
   function renderLanguageControls(langs = availableLanguages) {
     if (Array.isArray(langs) && langs.length) {
       availableLanguages = langs;
@@ -336,6 +341,7 @@
     showAuthErr("");
     try {
       const st = await fetch("/api/auth/state").then((r) => r.json());
+      updateAppVersionBadge(st.app_version);
       if (Array.isArray(st.available_languages)) {
         availableLanguages = st.available_languages;
       }
@@ -499,6 +505,7 @@
 
   function applyStatus(s) {
     lastStatus = s;
+    updateAppVersionBadge(s.app_version);
     $("brandTitle").textContent = displayBrandTitle(s.assistant_name);
     const dot = $("brandDot");
     const pill = $("statusPill");

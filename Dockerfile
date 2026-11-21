@@ -52,6 +52,7 @@ RUN sed -i 's/\r$//' /usr/local/sbin/agy-cli-update \
     && chmod 0440 /etc/sudoers.d/asistent
 
 # Kód aplikace a výchozí šablony workspace (EN výchozí + CS, DE, SK, ES, PL)
+COPY VERSION /app/VERSION
 COPY app /app/app
 COPY workspace_template /app/workspace_template
 COPY workspace_template_cs /app/workspace_template_cs

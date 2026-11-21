@@ -36,23 +36,38 @@ def _build_client(tmp_path: Path, auth_token: str = "") -> TestClient:
 
 
 def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
+    from app import __version__
+
+    root = Path(__file__).resolve().parent.parent
+    version_file = root / "VERSION"
+    assert version_file.is_file()
+    assert version_file.read_text(encoding="utf-8").strip() == __version__ == "0.0.3"
+    assert "COPY VERSION /app/VERSION" in (root / "Dockerfile").read_text(encoding="utf-8")
+
     client = _build_client(tmp_path, auth_token="tajne123")
     home_res = client.get("/")
     assert home_res.status_code == 200
     assert "agyOnboardingCard" in home_res.text
     assert "chatAgyAuthBanner" in home_res.text
+    assert "appVersionBadge" in home_res.text
     assert "/static/favicon.svg" in home_res.text
     fav_svg = client.get("/static/favicon.svg")
     assert fav_svg.status_code == 200 and "<svg" in fav_svg.text
     assert client.get("/favicon.ico").status_code == 200
     assert client.get("/static/styles.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
-    assert client.get("/api/health").status_code == 200
+    health_res = client.get("/api/health")
+    assert health_res.status_code == 200
+    assert health_res.json()["version"] == __version__
+    auth_st = client.get("/api/auth/state")
+    assert auth_st.status_code == 200
+    assert auth_st.json()["app_version"] == __version__
     assert client.get("/api/status").status_code == 401
 
     ok = client.get("/api/status", headers={"Authorization": "Bearer tajne123"})
     assert ok.status_code == 200
     assert ok.json()["agy_available"] is True
+    assert ok.json()["app_version"] == __version__
 
 
 def test_chat_and_file_endpoints(tmp_path: Path) -> None:

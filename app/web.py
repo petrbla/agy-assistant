@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app import __version__
 from app.agy_runner import AgyRunner, is_version_up_to_date
 from app.auth_session import AgyAuthManager
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
@@ -255,7 +256,7 @@ def create_app(
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Vytvoří čistou single-user FastAPI aplikaci pro Web UI a REST API."""
-    app = FastAPI(title="Asistent Antigravity", version="1.0.0")
+    app = FastAPI(title="Asistent Antigravity", version=__version__)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     db.ensure_owner(settings)
@@ -351,7 +352,7 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     @app.get("/api/i18n")
     async def list_i18n_languages() -> dict[str, object]:
@@ -377,6 +378,7 @@ def create_app(
             "assistant_name": owner.assistant_name,
             "language": normalize_language(owner.language),
             "available_languages": list_available_languages(),
+            "app_version": __version__,
         }
 
     @app.post("/api/auth/initial-setup")
@@ -577,6 +579,7 @@ def create_app(
         return {
             **_owner_public_dict(owner, settings),
             **ver_info,
+            "app_version": __version__,
             "telegram_enabled": bool(owner.telegram_bot_token.strip()),
             "allowed_telegram_users_count": len(owner.allowed_telegram_user_ids),
             "web_context_mode": web_ctx,

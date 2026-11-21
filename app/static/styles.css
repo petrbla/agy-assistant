@@ -94,6 +94,16 @@ html, body {
 .brand-dot.ok { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
 .brand-dot.warn { background: var(--warning); box-shadow: 0 0 0 4px var(--warning-soft); }
 .brand-dot.err { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
+.version-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
 
 .nav-tabs {
   display: flex;
