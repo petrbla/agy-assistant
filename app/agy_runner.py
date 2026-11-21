@@ -20,6 +20,11 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import ContextMode, Settings, normalize_language
 from app.db import AssistantDB
 from app.i18n import get_context_hint, get_language_hint, t
+from app.plugins import (
+    build_plugin_permissions_prompt_hint,
+    detect_installed_plugins_from_disk,
+    should_set_agy_unattended,
+)
 from app.user_env import prepare_agy_home
 
 logger = logging.getLogger(__name__)
@@ -513,7 +518,7 @@ class _WarmAgyProcess:
         *,
         session_key: str,
         proc: asyncio.subprocess.Process,
-        signature: tuple[str, str, str, str],
+        signature: tuple[str, ...],
         conversation_id: str | None = None,
     ) -> None:
         self.session_key = session_key
@@ -752,6 +757,7 @@ class AgyRunner:
         assistant_name_pending: bool = False,
         include_schedule_hint: bool = False,
         startup_memory: str = "",
+        plugin_permissions_hint: str = "",
     ) -> str:
         """Připojí lehkou hlavičku kontextu, jazyka, zdroje a případnou přednačtenou paměť."""
         parts = [t("prompts.source_label", language, source=source)]
@@ -768,6 +774,8 @@ class AgyRunner:
             parts.append(t("prompts.onboarding_profile", language))
         if startup_memory.strip():
             parts.append(startup_memory.strip())
+        if plugin_permissions_hint.strip():
+            parts.append(plugin_permissions_hint.strip())
         parts.append(prompt.strip())
         return "\n".join(parts)
 
@@ -1044,6 +1052,14 @@ class AgyRunner:
             )
             prepare_agy_home(self.settings, self.db, context_mode=effective_ctx)
 
+            installed_map = detect_installed_plugins_from_disk(self.settings.effective_home_dir)
+            enabled_plugins = {
+                name for name, info in installed_map.items() if bool(info.get("enabled", True))
+            }
+            plugin_cfgs = self.db.list_plugin_configs()
+            plugin_perm_hint = build_plugin_permissions_prompt_hint(enabled_plugins, plugin_cfgs)
+            unattended = should_set_agy_unattended(enabled_plugins, plugin_cfgs)
+
             is_new_chat = conv_id is None and source in ("web", "telegram")
             assistant_name_pending = is_new_chat and has_pending_assistant_name(eff_cwd)
             onboarding_pending = is_new_chat and has_pending_onboarding(eff_cwd)
@@ -1064,8 +1080,13 @@ class AgyRunner:
                 assistant_name_pending=assistant_name_pending,
                 include_schedule_hint=include_schedule_hint,
                 startup_memory=startup_memory,
+                plugin_permissions_hint=plugin_perm_hint,
             )
             env = self.settings.subprocess_env(gemini_api_key=eff_key)
+            if unattended:
+                env["AGY_UNATTENDED"] = "1"
+            else:
+                env.pop("AGY_UNATTENDED", None)
 
             started = time.monotonic()
             use_warm = (
@@ -1075,7 +1096,15 @@ class AgyRunner:
                 and source in ("web", "telegram", "nightly_reset")
             )
             if use_warm:
-                sig = (eff_model, effective_ctx, eff_key or "", str(eff_cwd), eff_lang)
+                sig = (
+                    eff_model,
+                    effective_ctx,
+                    eff_key or "",
+                    str(eff_cwd),
+                    eff_lang,
+                    "1" if unattended else "0",
+                    plugin_perm_hint,
+                )
                 warm = self._warm_procs.get(session_key)
                 if warm is not None and (not warm.is_alive() or warm.signature != sig):
                     await self.close_session(session_key)

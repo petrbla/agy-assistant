@@ -9,7 +9,9 @@ from app.agy_runner import AgyRunner
 from app.auth_session import AgyAuthManager
 from app.config import Settings
 from app.db import AssistantDB
+from app.i18n import t  # noqa: F401 - zachování importní konzistence
 from app.memory import WorkspaceMemory
+from app.plugins import PluginManager
 from app.runtime_config import apply_runtime_overrides
 from app.scheduler import AssistantScheduler
 from app.telegram_bot import TelegramBotController
@@ -48,6 +50,7 @@ async def serve() -> None:
     memory = WorkspaceMemory(settings.workspace_dir, timezone_name=owner.tz)
     runner = AgyRunner(settings, db)
     auth_manager = AgyAuthManager(settings)
+    plugin_manager = PluginManager(settings, db)
     scheduler = AssistantScheduler(settings, runner, db=db)
     runner.on_schedule_updated = scheduler.sync_jobs
     bot_controller = TelegramBotController(settings, db, runner, scheduler)
@@ -64,6 +67,7 @@ async def serve() -> None:
         runner,
         scheduler=scheduler,
         auth_manager=auth_manager,
+        plugin_manager=plugin_manager,
         on_settings_updated=on_settings_updated,
     )
 
@@ -82,6 +86,7 @@ async def serve() -> None:
     finally:
         await runner.close_all()
         await auth_manager.stop()
+        await plugin_manager.stop_connect()
         scheduler.shutdown()
         await bot_controller.stop()
 

@@ -48,9 +48,15 @@ Telegram (tg:<chat>:<kanál>)   Web UI (web:<kanál>)   Plánovač (cron:*, task
 - `owner_config` (1 řádek, `id = 1`): identita, jazyk (`language`), heslo, 2FA, Telegram, model, Gemini klíč, nastavení plánovače.
 - `auth_sessions`: hash přihlašovacích tokenů Web UI + expirace.
 - `mcp_servers`: konfigurace MCP serverů (`scope`, `transport`, `url`, `auth_token`, `command`, …).
+- `plugin_configs`: oprávnění a stav OAuth připojení nainstalovaných Antigravity pluginů (`permissions_json`, `connected`, `connected_at`).
 - `sessions`: `session_key`, `conversation_id`, `context_mode`.
 - `runs`: historie běhů vč. tokenů.
 - `scheduled_tasks`: vlastní úlohy (`cron` / `once`).
+
+## Pluginy a jemná oprávnění (`app/plugins.py`, `/api/plugins*`)
+
+- Správa oficiálních i partnerských `agy` pluginů (vč. Google Workspace: `gmail`, `gcalendar`, `gdrive`, `gdocs`, `gsheets`, `gslides`, a partnerských pluginů či GitHub URL) přes `agy plugin ...` a interaktivní PTY connect tok (`/plugin` → `Sign in`) s přísně validovaným předáním lokálního `http://127.0.0.1:<port>/callback` v backendu.
+- Přepínače „Co asistent smí“ se propisují do `permissions.deny` v `settings.json`, `AGY_UNATTENDED=1` (pro Gmail bez oprávnění k odesílání) a do prompt politiky v `AgyRunner`.
 
 ## Bezpečnost
 

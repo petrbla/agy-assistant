@@ -36,6 +36,11 @@
   let fileDirty = false;
   let isSending = false;
   let authPollTimer = null;
+  let pluginsCatalog = [];
+  let activePluginCategory = "all";
+  let pluginConnectTimer = null;
+  let lastPluginConnectState = null;
+  let activeConnectPlugin = null;
   const chatLogs = { auto: [], pracovni: [], osobni: [] };
 
   function t(key, vars = {}) {
@@ -135,6 +140,10 @@
     if (defaultOpt) defaultOpt.textContent = t("model_default");
     const [curBase, curEff] = splitModel(currentModel);
     if (curBase) syncEffortUi(curBase, curEff);
+    if (pluginsCatalog.length) renderPlugins();
+    if (lastPluginConnectState && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("hidden")) {
+      renderPluginConnectState(lastPluginConnectState);
+    }
   }
 
   async function loadLocaleBundle(lang) {
@@ -175,7 +184,7 @@
         toast(t("toast_language_switched", { name: currentMeta.name }));
       }
       if (isAuthenticated && activeTab === "ops") loadOps();
-      if (isAuthenticated && activeTab === "settings") loadMcp();
+      if (isAuthenticated && activeTab === "settings") { loadMcp(); loadPlugins(); }
     } catch (err) {
       toast(err.message, "err");
     }
@@ -286,7 +295,7 @@
     });
     if (tab === "memory") loadFiles();
     if (tab === "ops") loadOps();
-    if (tab === "settings") { loadSettings(); loadMcp(); }
+    if (tab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
   }
   document.querySelectorAll(".nav-tab").forEach((b) => {
     b.onclick = () => switchTab(b.dataset.tab);
@@ -479,6 +488,7 @@
 
   $("logoutBtn").onclick = async () => {
     if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; }
+    if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
     inAgyOnboarding = false;
     try { await fetch("/api/logout", { method: "POST", headers: getHeaders() }); } catch (_) {}
     localStorage.removeItem("agy_web_token");
@@ -1443,6 +1453,413 @@
       toast(err.message, "err");
     }
   };
+
+  // Plugins & Integrations
+  function pluginDescription(p) {
+    if (p.desc_key && typeof uiDict[p.desc_key] === "string") return t(p.desc_key);
+    return p.description || p.install_target || p.name;
+  }
+
+  async function loadPlugins() {
+    if (!$("pluginsGrid")) return;
+    try {
+      const data = await api("/api/plugins");
+      pluginsCatalog = Array.isArray(data.plugins) ? data.plugins : [];
+      renderPlugins();
+    } catch (_) {}
+  }
+
+  function renderPlugins() {
+    const grid = $("pluginsGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    const query = ($("pluginSearchInput")?.value || "").trim().toLowerCase();
+
+    const filtered = pluginsCatalog.filter((p) => {
+      if (activePluginCategory === "installed" && !p.installed) return false;
+      if (activePluginCategory !== "all" && activePluginCategory !== "installed" && p.category !== activePluginCategory) {
+        return false;
+      }
+      if (!query) return true;
+      const hay = `${p.name} ${p.display_name} ${pluginDescription(p)} ${p.marketplace}`.toLowerCase();
+      return hay.includes(query);
+    });
+
+    if (!filtered.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = t("plugins_empty");
+      grid.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach((p) => {
+      const card = document.createElement("div");
+      card.className = "plugin-card";
+
+      const head = document.createElement("div");
+      head.className = "plugin-head";
+
+      const titleWrap = document.createElement("div");
+      titleWrap.className = "plugin-title-wrap";
+      const iconEl = document.createElement("span");
+      iconEl.className = "plugin-icon";
+      iconEl.textContent = p.icon || "🧩";
+      const textBox = document.createElement("div");
+      const metaText = p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace;
+      textBox.innerHTML = `<div class="plugin-name">${escapeHtml(p.display_name || p.name)}</div><div class="plugin-meta mono">${escapeHtml(metaText)}</div>`;
+      titleWrap.append(iconEl, textBox);
+
+      const badge = document.createElement("span");
+      if (p.installed && p.connected) {
+        badge.className = "pill ok";
+        badge.textContent = t("plugin_status_connected");
+      } else if (p.installed && p.enabled) {
+        badge.className = "pill accent";
+        badge.textContent = t("plugin_status_installed");
+      } else if (p.installed) {
+        badge.className = "pill warn";
+        badge.textContent = t("plugin_status_disabled");
+      } else {
+        badge.className = "pill";
+        badge.textContent = t("plugin_status_available");
+      }
+      head.append(titleWrap, badge);
+
+      const desc = document.createElement("p");
+      desc.className = "plugin-desc";
+      desc.textContent = pluginDescription(p);
+
+      const actions = document.createElement("div");
+      actions.className = "plugin-actions";
+
+      const makeBtn = (label, cls, handler) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = `btn btn-sm ${cls}`.trim();
+        b.textContent = label;
+        b.onclick = async () => {
+          b.disabled = true;
+          try { await handler(); } finally { b.disabled = false; }
+        };
+        return b;
+      };
+
+      if (!p.installed) {
+        if (p.supports_oauth) {
+          actions.appendChild(
+            makeBtn(t("plugin_btn_connect"), "btn-primary", () => openPluginConnectModal(p))
+          );
+        }
+        actions.appendChild(
+          makeBtn(t("plugin_btn_install"), p.supports_oauth ? "" : "btn-primary", async () => {
+            try {
+              toast(t("toast_plugin_installing", { name: p.display_name || p.name }), "warn");
+              await api("/api/plugins/install", {
+                method: "POST",
+                body: JSON.stringify({ target: p.install_target || p.name }),
+              });
+              toast(t("toast_plugin_installed", { name: p.display_name || p.name }));
+              await loadPlugins();
+            } catch (err) { toast(err.message, "err"); }
+          })
+        );
+      } else {
+        if (p.supports_oauth) {
+          actions.appendChild(
+            makeBtn(
+              p.connected ? t("plugin_btn_reconnect") : t("plugin_btn_connect"),
+              p.connected ? "" : "btn-primary",
+              () => openPluginConnectModal(p)
+            )
+          );
+        }
+        actions.appendChild(
+          makeBtn(p.enabled ? t("plugin_btn_disable") : t("plugin_btn_enable"), "", async () => {
+            try {
+              await api(`/api/plugins/${encodeURIComponent(p.name)}/toggle`, {
+                method: "POST",
+                body: JSON.stringify({ enabled: !p.enabled }),
+              });
+              toast(t(p.enabled ? "toast_plugin_disabled" : "toast_plugin_enabled", { name: p.display_name || p.name }));
+              await loadPlugins();
+            } catch (err) { toast(err.message, "err"); }
+          })
+        );
+        actions.appendChild(
+          makeBtn(t("plugin_btn_uninstall"), "btn-danger", async () => {
+            if (!confirm(t("confirm_uninstall_plugin", { name: p.display_name || p.name }))) return;
+            try {
+              await api(`/api/plugins/${encodeURIComponent(p.name)}`, { method: "DELETE" });
+              toast(t("toast_plugin_uninstalled", { name: p.display_name || p.name }));
+              await loadPlugins();
+            } catch (err) { toast(err.message, "err"); }
+          })
+        );
+      }
+
+      card.append(head, desc, actions);
+
+      if (p.installed && Array.isArray(p.permissions_schema) && p.permissions_schema.length) {
+        const permsBox = document.createElement("div");
+        permsBox.className = "plugin-perms";
+        const permTitle = document.createElement("div");
+        permTitle.className = "plugin-perm-title";
+        permTitle.textContent = t("plugin_perms_title");
+        permsBox.appendChild(permTitle);
+
+        p.permissions_schema.forEach((spec) => {
+          const row = document.createElement("div");
+          row.className = "plugin-perm-row";
+          const lbl = document.createElement("label");
+          lbl.className = "switch";
+          const span = document.createElement("span");
+          span.textContent = t(spec.label_key);
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = Boolean((p.permissions || {})[spec.key]);
+          cb.onchange = async () => {
+            const prev = !cb.checked;
+            const updatedPerms = { ...(p.permissions || {}), [spec.key]: cb.checked };
+            try {
+              const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/permissions`, {
+                method: "PUT",
+                body: JSON.stringify({ permissions: updatedPerms }),
+              });
+              p.permissions = res.permissions || updatedPerms;
+              toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
+            } catch (err) {
+              cb.checked = prev;
+              toast(err.message, "err");
+            }
+          };
+          lbl.append(span, cb);
+          row.appendChild(lbl);
+          permsBox.appendChild(row);
+        });
+        card.appendChild(permsBox);
+      }
+
+      grid.appendChild(card);
+    });
+  }
+
+  document.querySelectorAll("#pluginCategoryBar .filter-pill").forEach((btn) => {
+    btn.onclick = () => {
+      activePluginCategory = btn.dataset.cat || "all";
+      document.querySelectorAll("#pluginCategoryBar .filter-pill").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+      });
+      renderPlugins();
+    };
+  });
+  if ($("pluginSearchInput")) $("pluginSearchInput").oninput = renderPlugins;
+  if ($("refreshPluginsBtn")) $("refreshPluginsBtn").onclick = loadPlugins;
+
+  if ($("customPluginForm")) {
+    $("customPluginForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const target = $("customPluginTarget").value.trim();
+      if (!target) return;
+      try {
+        toast(t("toast_plugin_installing", { name: target }), "warn");
+        await api("/api/plugins/install", {
+          method: "POST",
+          body: JSON.stringify({ target }),
+        });
+        $("customPluginTarget").value = "";
+        toast(t("toast_plugin_installed", { name: target }));
+        await loadPlugins();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  function renderPluginConnectState(st) {
+    lastPluginConnectState = st;
+    const badge = $("pluginConnectBadge");
+    const urlWrap = $("pluginConnectUrlWrap");
+    const cbForm = $("pluginCallbackForm");
+    const codeForm = $("pluginCodeForm");
+    const outEl = $("pluginConnectOutput");
+
+    if (badge) {
+      if (st.connected) {
+        badge.className = "pill ok";
+        badge.textContent = t("plugin_connect_done");
+      } else if (st.error) {
+        badge.className = "pill err";
+        badge.textContent = st.error;
+      } else if (st.auth_url) {
+        badge.className = "pill accent";
+        badge.textContent = t("plugin_connect_waiting_user");
+      } else {
+        badge.className = "pill";
+        badge.textContent = t("plugin_connect_preparing");
+      }
+    }
+
+    if (urlWrap) {
+      urlWrap.innerHTML = "";
+      if (st.auth_url) {
+        const a = document.createElement("a");
+        a.href = st.auth_url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.className = "btn btn-primary";
+        const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || st.plugin_name || "Google";
+        a.textContent = t("plugin_connect_open_google", { name: disp });
+        urlWrap.appendChild(a);
+      } else {
+        const hint = document.createElement("span");
+        hint.className = "muted";
+        hint.textContent = t("plugin_connect_starting_hint");
+        urlWrap.appendChild(hint);
+      }
+    }
+
+    if (cbForm) cbForm.classList.toggle("hidden", st.flow_type !== "localhost_callback" || Boolean(st.connected));
+    if (codeForm) codeForm.classList.toggle("hidden", st.flow_type !== "code_paste" || Boolean(st.connected));
+
+    if (outEl) {
+      outEl.textContent = st.error
+        ? t("chat_error_prefix", { msg: st.error })
+        : (st.output || t("oauth_starting"));
+      outEl.scrollTop = outEl.scrollHeight;
+    }
+  }
+
+  async function openPluginConnectModal(plugin) {
+    activeConnectPlugin = plugin;
+    const modal = $("pluginConnectModal");
+    if (!modal) return;
+    $("pluginConnectTitle").textContent = t("plugin_connect_title", { name: plugin.display_name || plugin.name });
+    $("pluginCallbackInput").value = "";
+    $("pluginCodeInput").value = "";
+    $("pluginManualInput").value = "";
+    renderPluginConnectState({
+      running: true,
+      plugin_name: plugin.name,
+      flow_type: "",
+      auth_url: "",
+      output: "",
+      connected: false,
+      error: null,
+    });
+    modal.classList.remove("hidden");
+
+    if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
+    try {
+      const st = await api(`/api/plugins/${encodeURIComponent(plugin.name)}/connect/start`, {
+        method: "POST",
+        body: JSON.stringify({ install_target: plugin.install_target || null }),
+      });
+      renderPluginConnectState(st);
+      await loadPlugins();
+      pluginConnectTimer = setInterval(async () => {
+        try {
+          const cur = await api("/api/plugins/connect/status");
+          renderPluginConnectState(cur);
+          if (cur.connected) {
+            clearInterval(pluginConnectTimer);
+            pluginConnectTimer = null;
+            await loadPlugins();
+          } else if (!cur.running && pluginConnectTimer) {
+            clearInterval(pluginConnectTimer);
+            pluginConnectTimer = null;
+          }
+        } catch (_) {}
+      }, 1000);
+    } catch (err) {
+      toast(err.message, "err");
+      renderPluginConnectState({
+        running: false,
+        plugin_name: plugin.name,
+        flow_type: "",
+        auth_url: "",
+        output: "",
+        connected: false,
+        error: err.message,
+      });
+    }
+  }
+
+  async function closePluginConnectModal() {
+    if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
+    const modal = $("pluginConnectModal");
+    if (modal) modal.classList.add("hidden");
+    activeConnectPlugin = null;
+    try { await api("/api/plugins/connect/stop", { method: "POST" }); } catch (_) {}
+  }
+
+  if ($("closePluginConnectBtn")) $("closePluginConnectBtn").onclick = closePluginConnectModal;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("hidden")) {
+      closePluginConnectModal();
+    }
+  });
+
+  if ($("pluginCallbackForm")) {
+    $("pluginCallbackForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const urlVal = $("pluginCallbackInput").value.trim();
+      if (!urlVal) return;
+      try {
+        const res = await api("/api/plugins/connect/callback", {
+          method: "POST",
+          body: JSON.stringify({ callback_url: urlVal }),
+        });
+        const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin";
+        toast(t("toast_plugin_connected", { name: disp }));
+        await closePluginConnectModal();
+        await loadPlugins();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  if ($("pluginCodeForm")) {
+    $("pluginCodeForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const val = $("pluginCodeInput").value.trim();
+      if (!val) return;
+      try {
+        const st = await api("/api/plugins/connect/input", {
+          method: "POST",
+          body: JSON.stringify({ value: val }),
+        });
+        $("pluginCodeInput").value = "";
+        renderPluginConnectState(st);
+        toast(t("toast_plugin_code_sent"));
+        await loadPlugins();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  document.querySelectorAll(".plugin-key-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      try {
+        const st = await api("/api/plugins/connect/input", {
+          method: "POST",
+          body: JSON.stringify({ key: btn.dataset.key }),
+        });
+        renderPluginConnectState(st);
+      } catch (err) { toast(err.message, "err"); }
+    };
+  });
+
+  if ($("pluginManualInputForm")) {
+    $("pluginManualInputForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const val = $("pluginManualInput").value;
+      try {
+        const st = await api("/api/plugins/connect/input", {
+          method: "POST",
+          body: JSON.stringify({ value: val }),
+        });
+        $("pluginManualInput").value = "";
+        renderPluginConnectState(st);
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
 
   // Security (Password & 2FA)
   function updateSecurityUi(s) {

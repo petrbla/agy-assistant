@@ -70,8 +70,10 @@ def sync_agy_settings_file(
     home_dir: Path | None = None,
     model: str | None = None,
     gemini_api_key: str | None = None,
+    managed_deny_rules: list[str] | None = None,
+    managed_deny_prefixes: tuple[str, ...] = (),
 ) -> None:
-    """Sladí ~/.gemini/antigravity-cli/settings.json podle nastavení API klíče a modelu."""
+    """Sladí `~/.gemini/antigravity-cli/settings.json` podle nastavení klíče, modelu a oprávnění."""
     base_home = home_dir or Path.home()
     agy_settings = base_home / ".gemini" / "antigravity-cli" / "settings.json"
     agy_settings.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +101,26 @@ def sync_agy_settings_file(
         data["model"] = effective_model
     elif model is not None:
         data.pop("model", None)
+
+    if managed_deny_rules is not None:
+        raw_perms = data.get("permissions")
+        perms: dict[str, Any] = dict(raw_perms) if isinstance(raw_perms, dict) else {}
+        raw_deny = perms.get("deny")
+        preserved = [
+            str(entry)
+            for entry in (raw_deny if isinstance(raw_deny, list) else [])
+            if isinstance(entry, str)
+            and not any(entry.startswith(prefix) for prefix in managed_deny_prefixes)
+        ]
+        merged_deny = list(dict.fromkeys([*preserved, *managed_deny_rules]))
+        if merged_deny:
+            perms["deny"] = merged_deny
+        else:
+            perms.pop("deny", None)
+        if perms:
+            data["permissions"] = perms
+        else:
+            data.pop("permissions", None)
 
     serialized = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     try:

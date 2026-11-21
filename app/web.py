@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Literal
 from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ from app.config import ContextMode, Settings, normalize_chat_channel, normalize_
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
 from app.i18n import get_ui_bundle, list_available_languages, t
 from app.memory import WorkspaceMemory
+from app.plugins import PluginManager
 from app.runtime_config import save_runtime_overrides
 from app.scheduler import AssistantScheduler
 from app.security import (
@@ -106,6 +107,31 @@ class AuthStartRequest(BaseModel):
 
 class AuthInputRequest(BaseModel):
     value: str = Field(default="", max_length=2000)
+
+
+class PluginInstallRequest(BaseModel):
+    target: str = Field(min_length=1, max_length=300)
+
+
+class PluginToggleRequest(BaseModel):
+    enabled: bool
+
+
+class PluginPermissionsRequest(BaseModel):
+    permissions: dict[str, bool]
+
+
+class PluginConnectStartRequest(BaseModel):
+    install_target: str | None = Field(default=None, max_length=300)
+
+
+class PluginConnectCallbackRequest(BaseModel):
+    callback_url: str = Field(min_length=1, max_length=4000)
+
+
+class PluginConnectInputRequest(BaseModel):
+    value: str = Field(default="", max_length=2000)
+    key: str = Field(default="", max_length=32)
 
 
 class ScheduledTaskUpsertRequest(BaseModel):
@@ -225,6 +251,7 @@ def create_app(
     runner: AgyRunner,
     scheduler: AssistantScheduler | None = None,
     auth_manager: AgyAuthManager | None = None,
+    plugin_manager: PluginManager | None = None,
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Vytvoří čistou single-user FastAPI aplikaci pro Web UI a REST API."""
@@ -232,6 +259,8 @@ def create_app(
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     db.ensure_owner(settings)
+    if plugin_manager is None:
+        plugin_manager = PluginManager(settings, db)
     signing_key = load_or_create_signing_key(settings.data_dir)
     if (
         scheduler is not None
@@ -691,6 +720,123 @@ def create_app(
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return {"status": "ok"}
+
+    @app.get("/api/plugins")
+    async def list_plugins(_: OwnerConfig = Depends(require_auth)) -> dict[str, Any]:
+        return await plugin_manager.list_catalog_with_status()
+
+    @app.post("/api/plugins/install")
+    async def install_plugin(
+        payload: PluginInstallRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = await plugin_manager.install_plugin(payload.target)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        prepare_agy_home(settings, db)
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.get("/api/plugins/connect/status")
+    async def plugin_connect_status(_: OwnerConfig = Depends(require_auth)) -> dict[str, Any]:
+        return asdict(plugin_manager.get_connect_state())
+
+    @app.post("/api/plugins/connect/callback")
+    async def plugin_connect_callback(
+        payload: PluginConnectCallbackRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = await plugin_manager.submit_callback_url(payload.callback_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.post("/api/plugins/connect/input")
+    async def plugin_connect_input(
+        payload: PluginConnectInputRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            if payload.key.strip():
+                state = await plugin_manager.send_connect_key(payload.key)
+            else:
+                state = await plugin_manager.send_connect_input(payload.value)
+            return asdict(state)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/plugins/connect/stop")
+    async def plugin_connect_stop(_: OwnerConfig = Depends(require_auth)) -> dict[str, str]:
+        await plugin_manager.stop_connect()
+        return {"status": "ok"}
+
+    @app.post("/api/plugins/{plugin_name}/toggle")
+    async def toggle_plugin(
+        plugin_name: str,
+        payload: PluginToggleRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = await plugin_manager.set_plugin_enabled(plugin_name, payload.enabled)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        prepare_agy_home(settings, db)
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.put("/api/plugins/{plugin_name}/permissions")
+    async def update_plugin_permissions(
+        plugin_name: str,
+        payload: PluginPermissionsRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.update_permissions(plugin_name, payload.permissions)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        prepare_agy_home(settings, db)
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.post("/api/plugins/{plugin_name}/connect/start")
+    async def plugin_connect_start(
+        plugin_name: str,
+        payload: PluginConnectStartRequest = Body(default_factory=PluginConnectStartRequest),
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            prepare_agy_home(settings, db)
+            state = await plugin_manager.start_connect(
+                plugin_name, install_target=payload.install_target
+            )
+            return asdict(state)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/plugins/{plugin_name}")
+    async def uninstall_plugin(
+        plugin_name: str,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = await plugin_manager.uninstall_plugin(plugin_name)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        prepare_agy_home(settings, db)
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
 
     @app.post("/api/auth/start")
     async def auth_start(

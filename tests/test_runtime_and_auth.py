@@ -151,6 +151,14 @@ def test_extract_urls_reassembles_wrapped_oauth_and_osc8() -> None:
         "https://accounts.google.com/o/oauth2/auth?access_type=offline&state=2FrnI5aRQYA_gbMeTRoU_g"
     ]
 
+    # 7. Deduplikace zkrácené a kompletní v2 Google OAuth URL (např. při plugin Sign in)
+    v2_short = (
+        "https://accounts.google.com/o/oauth2/v2/auth?access_type=offline"
+        "&client_id=test-client.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44535%2Fcallback"
+    )
+    v2_full = v2_short + "&response_type=code&scope=email&state=TESTSTATE123"
+    assert _merge_unique_urls([v2_short, v2_full]) == [v2_full]
+
 
 def test_runtime_overrides_persist_and_sync_settings(tmp_path: Path) -> None:
     settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")

@@ -29,7 +29,10 @@ _URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#@!$&'*+,;=%]+")
 _URL_CHAR_RE = re.compile(r"^[A-Za-z0-9\-._~:/?#@!$&'*+,;=%]+$")
 _TRAILING_URL_SEP_RE = re.compile(r"(?:%[0-9A-Fa-f]?|[&=+/\-_.:~])$")
 _BOX_BORDER_RE = re.compile(r"^[│|┃║\s]+$")
-_GOOGLE_OAUTH_PREFIX = "https://accounts.google.com/o/oauth2/auth"
+_GOOGLE_OAUTH_PREFIXES = (
+    "https://accounts.google.com/o/oauth2/auth",
+    "https://accounts.google.com/o/oauth2/v2/auth",
+)
 
 
 def clean_terminal_output(raw: str) -> str:
@@ -58,7 +61,9 @@ def _merge_unique_urls(candidates: list[str]) -> list[str]:
                 break
         if not replaced:
             kept.append(url)
-    google_idxs = [idx for idx, u in enumerate(kept) if u.startswith(_GOOGLE_OAUTH_PREFIX)]
+    google_idxs = [
+        idx for idx, u in enumerate(kept) if any(u.startswith(p) for p in _GOOGLE_OAUTH_PREFIXES)
+    ]
     if len(google_idxs) > 1:
         longest_google = max((kept[idx] for idx in google_idxs), key=len)
         first_idx = google_idxs[0]

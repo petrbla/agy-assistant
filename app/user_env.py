@@ -11,6 +11,11 @@ from typing import Any
 from app.config import Settings, normalize_chat_channel
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
 from app.memory import WorkspaceMemory
+from app.plugins import (
+    MANAGED_PLUGIN_DENY_PREFIXES,
+    compute_plugin_deny_rules,
+    detect_installed_plugins_from_disk,
+)
 from app.runtime_config import sync_agy_settings_file
 
 logger = logging.getLogger(__name__)
@@ -399,11 +404,18 @@ def prepare_agy_home(
     db: AssistantDB,
     context_mode: str = "auto",
 ) -> Path:
-    """Připraví HOME adresář pro `agy` (settings.json, mcp_config.json a model)."""
+    """Připraví HOME adresář pro `agy` (settings.json, mcp_config.json, model a oprávnění pluginů)."""
     home_dir = settings.effective_home_dir
     owner = db.get_owner()
     model = owner.agy_model if owner is not None else settings.agy_model
     api_key = owner.gemini_api_key if owner is not None else settings.gemini_api_key
+
+    installed = detect_installed_plugins_from_disk(home_dir)
+    enabled_names = {
+        name for name, info in installed.items() if bool(info.get("enabled", True))
+    }
+    plugin_configs = db.list_plugin_configs()
+    deny_rules = compute_plugin_deny_rules(enabled_names, plugin_configs)
 
     home_dir.mkdir(parents=True, exist_ok=True)
     sync_agy_settings_file(
@@ -411,6 +423,8 @@ def prepare_agy_home(
         home_dir=home_dir,
         model=model,
         gemini_api_key=api_key,
+        managed_deny_rules=deny_rules,
+        managed_deny_prefixes=MANAGED_PLUGIN_DENY_PREFIXES,
     )
     sync_mcp_config(settings, db, context_mode=context_mode)
     return home_dir

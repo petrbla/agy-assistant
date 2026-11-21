@@ -381,6 +381,37 @@
         </div>
       </div>
 
+      <div id="pluginsCard" class="card" style="margin-top:18px;">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title" data-i18n="plugins_title">Integrations &amp; Plugins</h2>
+            <p class="card-subtitle" data-i18n="plugins_subtitle">Connect Google Workspace (Gmail, Calendar, Drive, Docs) and popular apps without Google Cloud Console, and toggle what the assistant is allowed to do.</p>
+          </div>
+          <div class="row">
+            <button id="refreshPluginsBtn" type="button" class="btn btn-sm" data-i18n="btn_refresh">Refresh</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="plugins-toolbar">
+            <div id="pluginCategoryBar" class="filter-pills">
+              <button type="button" class="filter-pill active" data-cat="all" data-i18n="plugin_cat_all">All</button>
+              <button type="button" class="filter-pill" data-cat="google" data-i18n="plugin_cat_google">Google Workspace</button>
+              <button type="button" class="filter-pill" data-cat="productivity" data-i18n="plugin_cat_productivity">Productivity</button>
+              <button type="button" class="filter-pill" data-cat="business" data-i18n="plugin_cat_business">Business &amp; Design</button>
+              <button type="button" class="filter-pill" data-cat="dev" data-i18n="plugin_cat_dev">Cloud &amp; Dev</button>
+              <button type="button" class="filter-pill" data-cat="installed" data-i18n="plugin_cat_installed">Installed</button>
+            </div>
+            <input id="pluginSearchInput" type="text" class="input" style="max-width:240px;" placeholder="Filter plugins…" data-i18n-placeholder="plugin_search_placeholder" />
+          </div>
+          <div id="pluginsGrid" class="plugins-grid"></div>
+          <hr class="divider" />
+          <form id="customPluginForm" class="row">
+            <input id="customPluginTarget" type="text" class="input grow mono" required placeholder="plugin-name@antigravity-plugins-partners or https://github.com/owner/repo" data-i18n-placeholder="plugin_custom_placeholder" />
+            <button type="submit" class="btn btn-sm btn-primary" data-i18n="plugin_btn_install_custom">Install other plugin</button>
+          </form>
+        </div>
+      </div>
+
       <div class="grid-2" style="margin-top:18px;">
         <!-- Assistant, Telegram & Scheduler -->
         <div class="card">
@@ -619,6 +650,56 @@
       </div>
     </section>
   </main>
+
+  <div id="pluginConnectModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pluginConnectTitle">
+    <div class="modal-card">
+      <div class="card-header">
+        <div class="row">
+          <h2 id="pluginConnectTitle" class="card-title">Connect plugin</h2>
+          <span id="pluginConnectBadge" class="pill" data-i18n="plugin_connect_preparing">Preparing…</span>
+        </div>
+        <button id="closePluginConnectBtn" type="button" class="btn btn-sm" data-i18n="btn_close">Close</button>
+      </div>
+      <div class="card-body">
+        <div id="pluginConnectStep1" class="field">
+          <p class="field-hint" style="margin-bottom:8px;" data-i18n="plugin_connect_step1_desc">1. Click the button below to open the official sign-in screen and authorize access.</p>
+          <div id="pluginConnectUrlWrap" class="row"></div>
+        </div>
+
+        <form id="pluginCallbackForm" class="hidden">
+          <div class="alert alert-info" style="margin:10px 0;" data-i18n="plugin_connect_callback_hint">After approving access in Google, the browser shows a “127.0.0.1 refused to connect” page — that is expected! Copy the entire address from your browser's address bar (starting with http://127.0.0.1:…) and paste it below:</div>
+          <div class="row">
+            <input id="pluginCallbackInput" type="text" class="input grow mono" required placeholder="http://127.0.0.1:12345/callback?state=…&amp;code=…" />
+            <button type="submit" class="btn btn-primary btn-sm" data-i18n="plugin_connect_finish_btn">Complete connection</button>
+          </div>
+        </form>
+
+        <form id="pluginCodeForm" class="hidden" style="margin-top:10px;">
+          <p class="field-hint" style="margin-bottom:6px;" data-i18n="plugin_connect_code_hint">2. Paste the authorization code from your browser below:</p>
+          <div class="row">
+            <input id="pluginCodeInput" type="text" class="input grow mono" required placeholder="Paste authorization code from browser…" data-i18n-placeholder="oauth_code_placeholder" />
+            <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_send_code">Send code</button>
+          </div>
+        </form>
+
+        <details class="help-box" style="margin-top:14px;">
+          <summary data-i18n="plugin_connect_terminal_toggle">Advanced: interactive CLI output &amp; keys</summary>
+          <pre id="pluginConnectOutput" class="term" style="margin-top:8px;"></pre>
+          <div class="row" style="margin-top:8px;">
+            <button type="button" class="btn btn-sm plugin-key-btn" data-key="up">↑</button>
+            <button type="button" class="btn btn-sm plugin-key-btn" data-key="down">↓</button>
+            <button type="button" class="btn btn-sm plugin-key-btn" data-key="enter">Enter</button>
+            <button type="button" class="btn btn-sm plugin-key-btn" data-key="tab">Tab</button>
+            <button type="button" class="btn btn-sm plugin-key-btn" data-key="esc">Esc</button>
+          </div>
+          <form id="pluginManualInputForm" class="row" style="margin-top:8px;">
+            <input id="pluginManualInput" type="text" class="input grow mono" placeholder="Optional manual text / token…" data-i18n-placeholder="plugin_connect_manual_placeholder" />
+            <button type="submit" class="btn btn-sm" data-i18n="btn_enter">Enter</button>
+          </form>
+        </details>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

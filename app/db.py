@@ -101,6 +101,17 @@ class McpServerRecord:
 
 
 @dataclass(frozen=True)
+class PluginConfigRecord:
+    """Konfigurace oprávnění a stavu připojení jednoho pluginu `agy`."""
+
+    plugin_name: str
+    permissions_json: str
+    connected: bool
+    connected_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class RunRecord:
     """Záznam o jednom spuštění asistenta."""
 
@@ -283,6 +294,14 @@ class AssistantDB:
                     enabled INTEGER NOT NULL DEFAULT 1,
                     last_run_at TEXT,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS plugin_configs (
+                    plugin_name TEXT PRIMARY KEY,
+                    permissions_json TEXT NOT NULL DEFAULT '{}',
+                    connected INTEGER NOT NULL DEFAULT 0,
+                    connected_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL
                 );
                 """
             )
@@ -556,6 +575,16 @@ class AssistantDB:
             created_at=row["created_at"],
         )
 
+    @staticmethod
+    def _row_to_plugin_config(row: sqlite3.Row) -> PluginConfigRecord:
+        return PluginConfigRecord(
+            plugin_name=row["plugin_name"],
+            permissions_json=row["permissions_json"],
+            connected=bool(row["connected"]),
+            connected_at=row["connected_at"],
+            updated_at=row["updated_at"],
+        )
+
     def ensure_owner(self, settings: Settings) -> OwnerConfig:
         """Zajistí existenci záznamu vlastníka v `owner_config` (inicializuje ze `Settings`)."""
         existing = self.get_owner()
@@ -818,6 +847,98 @@ class AssistantDB:
     def delete_mcp_server(self, server_id: int) -> bool:
         with self._connect() as conn:
             cur = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
+            return cur.rowcount > 0
+
+    def list_plugin_configs(self) -> dict[str, PluginConfigRecord]:
+        """Vrátí uložené konfigurace pluginů indexované malým názvem pluginu."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM plugin_configs ORDER BY plugin_name ASC").fetchall()
+            return {row["plugin_name"].lower(): self._row_to_plugin_config(row) for row in rows}
+
+    def get_plugin_config(self, plugin_name: str) -> PluginConfigRecord | None:
+        clean_name = plugin_name.strip().lower()
+        if not clean_name:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM plugin_configs WHERE plugin_name = ?",
+                (clean_name,),
+            ).fetchone()
+            return self._row_to_plugin_config(row) if row else None
+
+    def upsert_plugin_config(
+        self,
+        plugin_name: str,
+        *,
+        permissions_json: str | None = None,
+        connected: bool | None = None,
+        connected_at: str | None = None,
+    ) -> PluginConfigRecord:
+        """Uloží nebo aktualizuje oprávnění a stav připojení konkrétního pluginu."""
+        clean_name = plugin_name.strip().lower()
+        if not clean_name:
+            raise ValueError("Název pluginu nesmí být prázdný.")
+        existing = self.get_plugin_config(clean_name)
+        eff_perms = (
+            permissions_json
+            if permissions_json is not None
+            else (existing.permissions_json if existing is not None else "{}")
+        )
+        eff_connected = (
+            bool(connected)
+            if connected is not None
+            else (existing.connected if existing is not None else False)
+        )
+        if connected_at is not None:
+            eff_connected_at = connected_at
+        elif connected is True:
+            eff_connected_at = (
+                existing.connected_at
+                if (existing is not None and existing.connected and existing.connected_at)
+                else self._now_iso()
+            )
+        elif connected is False:
+            eff_connected_at = ""
+        else:
+            eff_connected_at = existing.connected_at if existing is not None else ""
+
+        now_iso = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO plugin_configs (
+                    plugin_name, permissions_json, connected, connected_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(plugin_name) DO UPDATE SET
+                    permissions_json = excluded.permissions_json,
+                    connected = excluded.connected,
+                    connected_at = excluded.connected_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    clean_name,
+                    eff_perms or "{}",
+                    1 if eff_connected else 0,
+                    eff_connected_at,
+                    now_iso,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM plugin_configs WHERE plugin_name = ?",
+                (clean_name,),
+            ).fetchone()
+        assert row is not None
+        return self._row_to_plugin_config(row)
+
+    def delete_plugin_config(self, plugin_name: str) -> bool:
+        clean_name = plugin_name.strip().lower()
+        if not clean_name:
+            return False
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM plugin_configs WHERE plugin_name = ?",
+                (clean_name,),
+            )
             return cur.rowcount > 0
 
     def list_scheduled_tasks(self, *, enabled_only: bool = False) -> list[ScheduledTaskRecord]:
