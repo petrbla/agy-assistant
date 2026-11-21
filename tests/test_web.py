@@ -36,12 +36,14 @@ def _build_client(tmp_path: Path, auth_token: str = "") -> TestClient:
 
 
 def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
+    import re
     from app import __version__
 
     root = Path(__file__).resolve().parent.parent
     version_file = root / "VERSION"
     assert version_file.is_file()
-    assert version_file.read_text(encoding="utf-8").strip() == __version__ == "0.0.3"
+    assert version_file.read_text(encoding="utf-8").strip() == __version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)
     assert "COPY VERSION /app/VERSION" in (root / "Dockerfile").read_text(encoding="utf-8")
 
     client = _build_client(tmp_path, auth_token="tajne123")

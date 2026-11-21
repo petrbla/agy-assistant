@@ -93,6 +93,8 @@ class PluginConnectState:
     expected_state: str = ""
     output: str = ""
     connected: bool = False
+    already_connected: bool = False
+    account: str = ""
     exit_code: int | None = None
     error: str | None = None
 
@@ -469,6 +471,27 @@ def validate_plugin_target(target: str) -> str:
         validate_plugin_name(parts[1])
         return cleaned
     return validate_plugin_name(cleaned)
+
+
+_SIGNED_IN_LINE_RE = re.compile(
+    r"(?i)(?:sign-in\s*:\s*(?:✓\s*)?|✓\s*)signed\s+in([^\r\n]*)"
+)
+_SIGNED_IN_AS_RE = re.compile(r"(?i)(?:^|\s)as\s+([^\s\r\n│|]+)")
+
+
+def extract_signed_in_account(text: str) -> tuple[bool, str]:
+    """Rozpozná z výstupu TUI, že je plugin k účtu již přihlášen, a vrátí případný účet/e-mail."""
+    if not text:
+        return False, ""
+    matches = list(_SIGNED_IN_LINE_RE.finditer(text))
+    for match in reversed(matches):
+        prefix = text[max(0, match.start() - 16) : match.start()].lower()
+        if "not " in prefix:
+            continue
+        rest = (match.group(1) or "").split("│", 1)[0]
+        as_match = _SIGNED_IN_AS_RE.search(rest)
+        return True, (as_match.group(1).strip() if as_match else "")
+    return False, ""
 
 
 def _pick_best_oauth_url(urls: list[str]) -> str:
@@ -961,6 +984,7 @@ class PluginManager:
                     "version": str((inst or {}).get("version") or ""),
                     "connected": _is_connected(low, inst, disk) if inst is not None else False,
                     "connected_at": rec.connected_at if rec is not None else "",
+                    "account_label": rec.account_label if rec is not None else "",
                     "permissions_schema": [asdict(sp) for sp in item.permissions],
                     "permissions": perms,
                     "custom": False,
@@ -990,6 +1014,7 @@ class PluginManager:
                     "version": str(inst.get("version") or ""),
                     "connected": _is_connected(low, inst, disk),
                     "connected_at": rec.connected_at if rec is not None else "",
+                    "account_label": rec.account_label if rec is not None else "",
                     "permissions_schema": [],
                     "permissions": {},
                     "custom": True,
@@ -1077,12 +1102,18 @@ class PluginManager:
             expected_state=self._connect_state.expected_state,
             output=self._connect_state.output,
             connected=self._connect_state.connected,
+            already_connected=self._connect_state.already_connected,
+            account=self._connect_state.account,
             exit_code=self._connect_state.exit_code,
             error=self._connect_state.error,
         )
 
     async def start_connect(
-        self, plugin_name: str, *, install_target: str | None = None
+        self,
+        plugin_name: str,
+        *,
+        install_target: str | None = None,
+        force_reconnect: bool = False,
     ) -> PluginConnectState:
         """Spustí interaktivní `agy` relaci v PTY a otevře přihlášení daného pluginu."""
         safe_name = validate_plugin_name(plugin_name)
@@ -1151,7 +1182,9 @@ class PluginManager:
         self._raw_output = ""
         self._connect_state = PluginConnectState(running=True, plugin_name=safe_name)
         self._reader_task = asyncio.create_task(self._read_loop())
-        self._nav_task = asyncio.create_task(self._auto_navigate_to_signin(safe_name))
+        self._nav_task = asyncio.create_task(
+            self._auto_navigate_to_signin(safe_name, force_reconnect=force_reconnect)
+        )
         return self.get_connect_state()
 
     async def _read_loop(self) -> None:
@@ -1199,8 +1232,10 @@ class PluginManager:
         if self._master_fd is not None and self._connect_state.running:
             os.write(self._master_fd, data.encode("utf-8"))
 
-    async def _auto_navigate_to_signin(self, plugin_name: str) -> None:
-        """Automaticky otevře `/plugin`, vyhledá plugin a spustí volbu Sign in."""
+    async def _auto_navigate_to_signin(
+        self, plugin_name: str, *, force_reconnect: bool = False
+    ) -> None:
+        """Automaticky otevře `/plugin`, rozpozná stav účtu a případně spustí OAuth přihlášení."""
         try:
             # 1. Počkej, až TUI naběhne (první výstup + krátká prodleva nebo max 8 s)
             for _ in range(40):
@@ -1236,19 +1271,69 @@ class PluginManager:
                 return
             self._write_pty("\r")
 
-            # 3. Vyčkej na vypsání OAuth URL; pokud se objeví nabídka Sign in / Connect, potvrď ji
-            nudged_enter = False
+            # 3. Vyčkej až 4 s na rozbalení detailu (nebo rovnou OAuth URL)
+            for _ in range(20):
+                if not self._connect_state.running or self._connect_state.auth_url:
+                    return
+                low = self._connect_state.output.lower()
+                if any(
+                    tok in low
+                    for tok in ("marketplace:", "path:", "version:", "sign-in:", "sign in", "sign out")
+                ):
+                    await asyncio.sleep(0.3)
+                    break
+                await asyncio.sleep(0.2)
+
+            if not self._connect_state.running or self._connect_state.auth_url:
+                return
+
+            is_signed_in, account = extract_signed_in_account(self._connect_state.output)
+            if is_signed_in and not force_reconnect:
+                self.db.upsert_plugin_config(plugin_name, connected=True, account_label=account)
+                self._connect_state.connected = True
+                self._connect_state.already_connected = True
+                self._connect_state.account = account
+                if self._proc is not None and self._proc.poll() is None:
+                    with contextlib.suppress(OSError):
+                        self._proc.terminate()
+                return
+
+            if is_signed_in and force_reconnect:
+                # Stávající účet odhlásit (`Confirm Sign Out` -> `y`) a pak spustit nové přihlášení
+                self._write_pty("\r")
+                for _ in range(15):
+                    if not self._connect_state.running:
+                        return
+                    if "confirm sign out" in self._connect_state.output.lower():
+                        break
+                    await asyncio.sleep(0.2)
+                self._write_pty("y")
+                await asyncio.sleep(1.5)
+                self._raw_output = ""
+                self._connect_state.output = ""
+                if not self._connect_state.running or self._connect_state.auth_url:
+                    return
+
+            # 4. Spusť přihlášení (`Sign in`) a čekej na OAuth URL
+            self._write_pty("\r")
             nudged_down = False
             for step in range(25):
                 if not self._connect_state.running or self._connect_state.auth_url:
                     return
-                low = self._connect_state.output.lower()
-                if not nudged_enter and step >= 3 and (
-                    "sign in" in low or "connect" in low or "authenticate" in low
-                ):
-                    self._write_pty("\r")
-                    nudged_enter = True
-                elif nudged_enter and not nudged_down and step >= 13:
+                if not force_reconnect:
+                    signed_now, acct_now = extract_signed_in_account(self._connect_state.output)
+                    if signed_now:
+                        self.db.upsert_plugin_config(
+                            plugin_name, connected=True, account_label=acct_now
+                        )
+                        self._connect_state.connected = True
+                        self._connect_state.already_connected = True
+                        self._connect_state.account = acct_now
+                        if self._proc is not None and self._proc.poll() is None:
+                            with contextlib.suppress(OSError):
+                                self._proc.terminate()
+                        return
+                if not nudged_down and step >= 12:
                     self._write_pty("\x1b[B\r")
                     nudged_down = True
                 await asyncio.sleep(0.2)

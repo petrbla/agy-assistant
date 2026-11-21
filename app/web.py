@@ -124,6 +124,7 @@ class PluginPermissionsRequest(BaseModel):
 
 class PluginConnectStartRequest(BaseModel):
     install_target: str | None = Field(default=None, max_length=300)
+    force_reconnect: bool = False
 
 
 class PluginConnectCallbackRequest(BaseModel):
@@ -821,7 +822,9 @@ def create_app(
         try:
             prepare_agy_home(settings, db)
             state = await plugin_manager.start_connect(
-                plugin_name, install_target=payload.install_target
+                plugin_name,
+                install_target=payload.install_target,
+                force_reconnect=payload.force_reconnect,
             )
             return asdict(state)
         except (ValueError, RuntimeError) as exc:

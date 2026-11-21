@@ -109,6 +109,7 @@ class PluginConfigRecord:
     connected: bool
     connected_at: str
     updated_at: str
+    account_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -301,11 +302,13 @@ class AssistantDB:
                     permissions_json TEXT NOT NULL DEFAULT '{}',
                     connected INTEGER NOT NULL DEFAULT 0,
                     connected_at TEXT NOT NULL DEFAULT '',
+                    account_label TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 );
                 """
             )
             self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
+            self._ensure_column(conn, "plugin_configs", "account_label", "TEXT NOT NULL DEFAULT ''")
             self._migrate_from_legacy_multiuser(conn)
             self._normalize_legacy_context_modes(conn)
             self._ensure_column(conn, "runs", "input_tokens", "INTEGER NOT NULL DEFAULT 0")
@@ -577,12 +580,14 @@ class AssistantDB:
 
     @staticmethod
     def _row_to_plugin_config(row: sqlite3.Row) -> PluginConfigRecord:
+        keys = set(row.keys())
         return PluginConfigRecord(
             plugin_name=row["plugin_name"],
             permissions_json=row["permissions_json"],
             connected=bool(row["connected"]),
             connected_at=row["connected_at"],
             updated_at=row["updated_at"],
+            account_label=row["account_label"] if "account_label" in keys else "",
         )
 
     def ensure_owner(self, settings: Settings) -> OwnerConfig:
@@ -873,6 +878,7 @@ class AssistantDB:
         permissions_json: str | None = None,
         connected: bool | None = None,
         connected_at: str | None = None,
+        account_label: str | None = None,
     ) -> PluginConfigRecord:
         """Uloží nebo aktualizuje oprávnění a stav připojení konkrétního pluginu."""
         clean_name = plugin_name.strip().lower()
@@ -902,17 +908,25 @@ class AssistantDB:
         else:
             eff_connected_at = existing.connected_at if existing is not None else ""
 
+        if account_label is not None:
+            eff_account = account_label.strip()
+        elif connected is False:
+            eff_account = ""
+        else:
+            eff_account = existing.account_label if existing is not None else ""
+
         now_iso = self._now_iso()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO plugin_configs (
-                    plugin_name, permissions_json, connected, connected_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?)
+                    plugin_name, permissions_json, connected, connected_at, account_label, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(plugin_name) DO UPDATE SET
                     permissions_json = excluded.permissions_json,
                     connected = excluded.connected,
                     connected_at = excluded.connected_at,
+                    account_label = excluded.account_label,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -920,6 +934,7 @@ class AssistantDB:
                     eff_perms or "{}",
                     1 if eff_connected else 0,
                     eff_connected_at,
+                    eff_account,
                     now_iso,
                 ),
             )

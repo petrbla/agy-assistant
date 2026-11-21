@@ -1513,7 +1513,8 @@
       iconEl.className = "plugin-icon";
       iconEl.textContent = p.icon || "🧩";
       const textBox = document.createElement("div");
-      const metaText = p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace;
+      const acctPart = p.installed && p.connected && p.account_label ? ` · ${p.account_label}` : "";
+      const metaText = (p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace) + acctPart;
       textBox.innerHTML = `<div class="plugin-name">${escapeHtml(p.display_name || p.name)}</div><div class="plugin-meta mono">${escapeHtml(metaText)}</div>`;
       titleWrap.append(iconEl, textBox);
 
@@ -1521,6 +1522,7 @@
       if (p.installed && p.connected) {
         badge.className = "pill ok";
         badge.textContent = t("plugin_status_connected");
+        if (p.account_label) badge.title = p.account_label;
       } else if (p.installed && p.enabled) {
         badge.className = "pill accent";
         badge.textContent = t("plugin_status_installed");
@@ -1555,7 +1557,9 @@
       if (!p.installed) {
         if (p.supports_oauth) {
           actions.appendChild(
-            makeBtn(t("plugin_btn_connect"), "btn-primary", () => openPluginConnectModal(p))
+            makeBtn(t("plugin_btn_connect"), "btn-primary", () =>
+              openPluginConnectModal(p, { forceReconnect: false })
+            )
           );
         }
         actions.appendChild(
@@ -1577,7 +1581,7 @@
             makeBtn(
               p.connected ? t("plugin_btn_reconnect") : t("plugin_btn_connect"),
               p.connected ? "" : "btn-primary",
-              () => openPluginConnectModal(p)
+              () => openPluginConnectModal(p, { forceReconnect: Boolean(p.connected) })
             )
           );
         }
@@ -1724,6 +1728,9 @@
       }
     }
 
+    if ($("pluginConnectStep1")) {
+      $("pluginConnectStep1").classList.toggle("hidden", Boolean(st.connected));
+    }
     if (cbForm) cbForm.classList.toggle("hidden", st.flow_type !== "localhost_callback" || Boolean(st.connected));
     if (codeForm) codeForm.classList.toggle("hidden", st.flow_type !== "code_paste" || Boolean(st.connected));
 
@@ -1735,7 +1742,7 @@
     }
   }
 
-  async function openPluginConnectModal(plugin) {
+  async function openPluginConnectModal(plugin, { forceReconnect = false } = {}) {
     activeConnectPlugin = plugin;
     const modal = $("pluginConnectModal");
     if (!modal) return;
@@ -1755,21 +1762,38 @@
     modal.classList.remove("hidden");
 
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
+    let connectSuccessHandled = false;
+    const handleConnected = async (curState) => {
+      if (connectSuccessHandled) return;
+      connectSuccessHandled = true;
+      if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
+      const acctSuffix = curState.account ? ` (${curState.account})` : "";
+      const disp = ((plugin && plugin.display_name) || curState.plugin_name || "Plugin") + acctSuffix;
+      toast(t("toast_plugin_connected", { name: disp }));
+      await loadPlugins();
+      setTimeout(() => { closePluginConnectModal(); }, 900);
+    };
+
     try {
       const st = await api(`/api/plugins/${encodeURIComponent(plugin.name)}/connect/start`, {
         method: "POST",
-        body: JSON.stringify({ install_target: plugin.install_target || null }),
+        body: JSON.stringify({
+          install_target: plugin.install_target || null,
+          force_reconnect: Boolean(forceReconnect),
+        }),
       });
       renderPluginConnectState(st);
       await loadPlugins();
+      if (st.connected) {
+        await handleConnected(st);
+        return;
+      }
       pluginConnectTimer = setInterval(async () => {
         try {
           const cur = await api("/api/plugins/connect/status");
           renderPluginConnectState(cur);
           if (cur.connected) {
-            clearInterval(pluginConnectTimer);
-            pluginConnectTimer = null;
-            await loadPlugins();
+            await handleConnected(cur);
           } else if (!cur.running && pluginConnectTimer) {
             clearInterval(pluginConnectTimer);
             pluginConnectTimer = null;

@@ -20,6 +20,7 @@ from app.plugins import (
     build_plugin_permissions_prompt_hint,
     compute_plugin_deny_rules,
     extract_oauth_callback_info,
+    extract_signed_in_account,
     forward_localhost_callback_sync,
     should_set_agy_unattended,
     validate_localhost_callback_url,
@@ -407,3 +408,52 @@ def test_plugins_rest_api_endpoints(tmp_path: Path) -> None:
     uninst = client.delete("/api/plugins/gmail", headers=hdr)
     assert uninst.status_code == 200
     assert db.get_plugin_config("gmail") is None
+
+
+def test_extract_signed_in_account_and_account_label_persistence(tmp_path: Path) -> None:
+    tui_signed_in = (
+        "Description: Search, read, draft, and send emails in Gmail.\n"
+        "Skills:      gmail\n"
+        "Sign-in:     ✓ signed in to Google as user@example.com\n"
+        "Marketplace: antigravity-plugins-official\n"
+    )
+    assert extract_signed_in_account(tui_signed_in) == (True, "user@example.com")
+    assert extract_signed_in_account("Sign-in: ✓ signed in") == (True, "")
+
+    for negative in (
+        "",
+        "Sign in...",
+        "Not signed in",
+        "Sign out...",
+        "Sign-in: Not signed in yet",
+    ):
+        assert extract_signed_in_account(negative) == (False, "")
+
+    home_dir = tmp_path / "home"
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    (ws_dir / "MEMORY.md").write_text("# Mem", encoding="utf-8")
+    s = Settings(workspace_dir=ws_dir, data_dir=tmp_path / "data", home_dir=home_dir)
+    db = AssistantDB(s.db_path)
+
+    saved = db.upsert_plugin_config("gmail", connected=True, account_label="user@example.com")
+    assert saved.account_label == "user@example.com"
+
+    pdir = home_dir / ".gemini" / "config" / "plugins" / "gmail"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / "plugin.json").write_text(json.dumps({"name": "gmail"}), encoding="utf-8")
+
+    pm = PluginManager(s, db)
+
+    async def _list_only(*cli_args: str, timeout: float = 45.0) -> tuple[int, str]:
+        if cli_args == ("list", "--json"):
+            return 0, json.dumps([{"name": "gmail", "enabled": True, "version": "0.0.7"}])
+        return 1, ""
+
+    pm._run_agy_plugin_cmd = _list_only  # type: ignore[method-assign]
+    client = TestClient(create_app(s, db, WorkspaceMemory(ws_dir), AsyncMock(), plugin_manager=pm))
+    res = client.get("/api/plugins")
+    assert res.status_code == 200
+    gmail_item = next(p for p in res.json()["plugins"] if p["name"] == "gmail")
+    assert gmail_item["connected"] is True
+    assert gmail_item["account_label"] == "user@example.com"
