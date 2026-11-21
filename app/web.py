@@ -127,6 +127,23 @@ class PluginPermissionsRequest(BaseModel):
 class PluginConnectStartRequest(BaseModel):
     install_target: str | None = Field(default=None, max_length=300)
     force_reconnect: bool = False
+    account_id: int | None = None
+    interactive_config: bool = False
+
+
+class PluginAccountCreateRequest(BaseModel):
+    label: str = Field(default="", max_length=80)
+    scope: Literal["all", "pracovni", "osobni"] = "all"
+    permissions: dict[str, bool] | None = None
+    custom_rules: str = Field(default="", max_length=1000)
+
+
+class PluginAccountUpdateRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=80)
+    scope: Literal["all", "pracovni", "osobni"] | None = None
+    enabled: bool | None = None
+    permissions: dict[str, bool] | None = None
+    custom_rules: str | None = Field(default=None, max_length=1000)
 
 
 class PluginConnectCallbackRequest(BaseModel):
@@ -279,6 +296,10 @@ def create_app(
     async def _notify_settings_updated() -> None:
         if on_settings_updated is not None:
             await on_settings_updated()
+
+    def _sync_all_plugin_contexts() -> None:
+        for ctx in ("auto", "pracovni", "osobni"):
+            prepare_agy_home(settings, db, context_mode=ctx)
 
     def _extract_bearer(authorization: str | None, x_auth_token: str | None) -> str:
         bearer = ""
@@ -750,7 +771,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        prepare_agy_home(settings, db)
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return res
@@ -770,6 +791,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return res
@@ -803,7 +825,7 @@ def create_app(
             res = await plugin_manager.set_plugin_enabled(plugin_name, payload.enabled)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        prepare_agy_home(settings, db)
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return res
@@ -818,7 +840,67 @@ def create_app(
             res = plugin_manager.update_permissions(plugin_name, payload.permissions)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        prepare_agy_home(settings, db)
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.post("/api/plugins/{plugin_name}/accounts")
+    async def create_plugin_account(
+        plugin_name: str,
+        payload: PluginAccountCreateRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.create_account(
+                plugin_name,
+                label=payload.label,
+                scope=payload.scope,
+                permissions=payload.permissions,
+                custom_rules=payload.custom_rules,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.put("/api/plugins/{plugin_name}/accounts/{account_id}")
+    async def update_plugin_account(
+        plugin_name: str,
+        account_id: int,
+        payload: PluginAccountUpdateRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.update_account(
+                plugin_name,
+                account_id,
+                label=payload.label,
+                scope=payload.scope,
+                enabled=payload.enabled,
+                permissions=payload.permissions,
+                custom_rules=payload.custom_rules,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.delete("/api/plugins/{plugin_name}/accounts/{account_id}")
+    async def delete_plugin_account(
+        plugin_name: str,
+        account_id: int,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.delete_account(plugin_name, account_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return res
@@ -830,11 +912,13 @@ def create_app(
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, Any]:
         try:
-            prepare_agy_home(settings, db)
+            _sync_all_plugin_contexts()
             state = await plugin_manager.start_connect(
                 plugin_name,
                 install_target=payload.install_target,
                 force_reconnect=payload.force_reconnect,
+                account_id=payload.account_id,
+                interactive_config=payload.interactive_config,
             )
             return asdict(state)
         except (ValueError, RuntimeError) as exc:
@@ -849,7 +933,7 @@ def create_app(
             res = await plugin_manager.uninstall_plugin(plugin_name)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        prepare_agy_home(settings, db)
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return res

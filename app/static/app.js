@@ -37,8 +37,36 @@
   let fileDirty = false;
   let isSending = false;
   let authPollTimer = null;
+  const FEATURED_PLUGINS = ["gmail", "gcalendar", "gdrive"];
+  const TABLER_ICONS = {
+    sun: "ti-sun",
+    moon: "ti-moon",
+    globe: "ti-world",
+    chevronDown: "ti-chevron-down",
+    chevronUp: "ti-chevron-up",
+    play: "ti-player-play",
+    pause: "ti-player-pause",
+    trash: "ti-trash",
+    sliders: "ti-adjustments-horizontal",
+    plus: "ti-plus",
+    puzzle: "ti-puzzle",
+    x: "ti-x",
+    info: "ti-info-circle",
+    sparkles: "ti-sparkles",
+    logOut: "ti-logout",
+  };
+
+  function uiIcon(name, extraCls = "") {
+    const tiCls = TABLER_ICONS[name] || "ti-point";
+    const cls = extraCls ? `ti ${tiCls} ui-ico ${extraCls}` : `ti ${tiCls} ui-ico`;
+    return `<i class="${cls}" aria-hidden="true"></i>`;
+  }
+
   let pluginsCatalog = [];
   let activePluginCategory = "all";
+  let showAllPlugins = false;
+  const expandedAccountDetails = new Set();
+  const addAccountOpenFor = new Set();
   let pluginConnectTimer = null;
   let lastPluginConnectState = null;
   let activeConnectPlugin = null;
@@ -277,7 +305,7 @@
     const theme = tMode === "light" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("agy_theme", theme);
-    $("themeBtn").textContent = theme === "dark" ? "☀️" : "🌙";
+    $("themeBtn").innerHTML = theme === "dark" ? uiIcon("sun") : uiIcon("moon");
   }
   applyTheme(localStorage.getItem("agy_theme") || "dark");
   $("themeBtn").onclick = () => {
@@ -1099,12 +1127,13 @@
           `<td>${statePill}</td>`;
         const td = document.createElement("td");
         td.className = "task-actions";
-        const mk = (label, cls, title, fn) => {
+        const mk = (iconName, cls, title, fn) => {
           const b = document.createElement("button");
           b.type = "button";
           b.className = "btn btn-sm " + cls;
-          b.textContent = label;
+          b.innerHTML = uiIcon(iconName, "ui-ico-sm");
           b.title = title;
+          b.setAttribute("aria-label", title);
           b.onclick = async () => {
             try { await fn(); } catch (err) { toast(err.message, "err"); }
             loadOps();
@@ -1112,15 +1141,15 @@
           return b;
         };
         td.append(
-          mk("▶", "btn-icon-sm", t("task_action_run"), async () => {
+          mk("play", "btn-icon-sm", t("task_action_run"), async () => {
             await api(`/api/tasks/${task.id}/run`, { method: "POST" });
             toast(t("toast_task_run", { name: task.name }));
           }),
-          mk(task.enabled ? "⏸" : "⏵", "btn-icon-sm", task.enabled ? t("task_action_pause") : t("task_action_resume"), async () => {
+          mk(task.enabled ? "pause" : "play", "btn-icon-sm", task.enabled ? t("task_action_pause") : t("task_action_resume"), async () => {
             await api(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !task.enabled }) });
             toast(task.enabled ? t("toast_task_paused") : t("toast_task_resumed"));
           }),
-          mk("✕", "btn-icon-sm btn-danger", t("task_action_delete"), async () => {
+          mk("trash", "btn-icon-sm btn-danger", t("task_action_delete"), async () => {
             if (!confirm(t("confirm_delete_task", { name: task.name }))) throw new Error(t("toast_cancelled"));
             await api(`/api/tasks/${task.id}`, { method: "DELETE" });
             toast(t("toast_task_deleted"));
@@ -1610,6 +1639,21 @@
     } catch (_) {}
   }
 
+  function scopeLabel(sc) {
+    if (sc === "pracovni") return t("scope_work");
+    if (sc === "osobni") return t("scope_personal");
+    return t("scope_all_chats");
+  }
+
+  function pluginSortRank(p) {
+    if (p.installed && p.enabled && p.connected) return 0;
+    if (p.installed && p.enabled) return 1;
+    if (p.installed) return 2;
+    const featIdx = FEATURED_PLUGINS.indexOf(p.name);
+    if (featIdx >= 0) return 3 + featIdx;
+    return 100;
+  }
+
   function renderPlugins() {
     const grid = $("pluginsGrid");
     if (!grid) return;
@@ -1626,7 +1670,28 @@
       return hay.includes(query);
     });
 
-    if (!filtered.length) {
+    const sorted = [...filtered].sort((a, b) => pluginSortRank(a) - pluginSortRank(b));
+    const isDefaultCatalogView = activePluginCategory === "all" && !query;
+    const alwaysVisible = isDefaultCatalogView
+      ? sorted.filter((p) => p.installed || FEATURED_PLUGINS.includes(p.name))
+      : sorted;
+    const hiddenCount = Math.max(0, sorted.length - alwaysVisible.length);
+    const displayList = (isDefaultCatalogView && !showAllPlugins) ? alwaysVisible : sorted;
+
+    const moreWrap = $("pluginsMoreWrap");
+    const moreBtn = $("toggleMorePluginsBtn");
+    if (moreWrap && moreBtn) {
+      if (isDefaultCatalogView && hiddenCount > 0) {
+        moreWrap.classList.remove("hidden");
+        moreBtn.innerHTML = showAllPlugins
+          ? `${uiIcon("chevronUp", "ui-ico-sm")} <span>${escapeHtml(t("plugins_show_less"))}</span>`
+          : `${uiIcon("chevronDown", "ui-ico-sm")} <span>${escapeHtml(t("plugins_show_more", { count: hiddenCount }))}</span>`;
+      } else {
+        moreWrap.classList.add("hidden");
+      }
+    }
+
+    if (!displayList.length) {
       const empty = document.createElement("div");
       empty.className = "muted";
       empty.textContent = t("plugins_empty");
@@ -1634,9 +1699,9 @@
       return;
     }
 
-    filtered.forEach((p) => {
+    displayList.forEach((p) => {
       const card = document.createElement("div");
-      card.className = "plugin-card";
+      card.className = p.installed && p.enabled ? "plugin-card is-active" : "plugin-card";
 
       const head = document.createElement("div");
       head.className = "plugin-head";
@@ -1654,21 +1719,27 @@
         img.referrerPolicy = "no-referrer";
         img.onerror = () => {
           iconEl.classList.remove("has-logo");
-          iconEl.textContent = p.icon || "🧩";
+          iconEl.innerHTML = uiIcon("puzzle", "ui-ico-lg");
         };
         iconEl.classList.add("has-logo");
         iconEl.appendChild(img);
       } else {
-        iconEl.textContent = p.icon || "🧩";
+        iconEl.innerHTML = uiIcon("puzzle", "ui-ico-lg");
       }
+
+      const accounts = Array.isArray(p.accounts) ? p.accounts : [];
+      const connectedCount = accounts.filter((a) => a.connected).length;
       const textBox = document.createElement("div");
-      const acctPart = p.installed && p.connected && p.account_label ? ` · ${p.account_label}` : "";
+      const acctPart = p.installed && connectedCount === 1 && p.account_label ? ` · ${p.account_label}` : "";
       const metaText = (p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace) + acctPart;
       textBox.innerHTML = `<div class="plugin-name">${escapeHtml(p.display_name || p.name)}</div><div class="plugin-meta mono">${escapeHtml(metaText)}</div>`;
       titleWrap.append(iconEl, textBox);
 
       const badge = document.createElement("span");
-      if (p.installed && p.connected) {
+      if (p.installed && connectedCount > 1) {
+        badge.className = "pill ok";
+        badge.textContent = t("plugin_status_connected_multi", { count: connectedCount });
+      } else if (p.installed && p.connected) {
         badge.className = "pill ok";
         badge.textContent = t("plugin_status_connected");
         if (p.account_label) badge.title = p.account_label;
@@ -1691,11 +1762,11 @@
       const actions = document.createElement("div");
       actions.className = "plugin-actions";
 
-      const makeBtn = (label, cls, handler) => {
+      const makeBtn = (labelHtml, cls, handler) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = `btn btn-sm ${cls}`.trim();
-        b.textContent = label;
+        b.innerHTML = labelHtml;
         b.onclick = async () => {
           b.disabled = true;
           try { await handler(); } finally { b.disabled = false; }
@@ -1706,13 +1777,13 @@
       if (!p.installed) {
         if (p.supports_oauth) {
           actions.appendChild(
-            makeBtn(t("plugin_btn_connect"), "btn-primary", () =>
+            makeBtn(escapeHtml(t("plugin_btn_connect")), "btn-primary", () =>
               openPluginConnectModal(p, { forceReconnect: false })
             )
           );
         }
         actions.appendChild(
-          makeBtn(t("plugin_btn_install"), p.supports_oauth ? "" : "btn-primary", async () => {
+          makeBtn(escapeHtml(t("plugin_btn_install")), p.supports_oauth ? "" : "btn-primary", async () => {
             try {
               toast(t("toast_plugin_installing", { name: p.display_name || p.name }), "warn");
               await api("/api/plugins/install", {
@@ -1728,26 +1799,34 @@
         if (p.supports_oauth) {
           actions.appendChild(
             makeBtn(
-              p.connected ? t("plugin_btn_reconnect") : t("plugin_btn_connect"),
-              p.connected ? "" : "btn-primary",
-              () => openPluginConnectModal(p, { forceReconnect: Boolean(p.connected) })
+              `${uiIcon("plus", "ui-ico-sm")} <span>${escapeHtml(t("plugin_btn_add_account"))}</span>`,
+              "",
+              async () => {
+                if (addAccountOpenFor.has(p.name)) addAccountOpenFor.delete(p.name);
+                else addAccountOpenFor.add(p.name);
+                renderPlugins();
+              }
             )
           );
         }
         actions.appendChild(
-          makeBtn(p.enabled ? t("plugin_btn_disable") : t("plugin_btn_enable"), "", async () => {
+          makeBtn(escapeHtml(p.enabled ? t("plugin_btn_disable") : t("plugin_btn_enable")), "", async () => {
             try {
-              await api(`/api/plugins/${encodeURIComponent(p.name)}/toggle`, {
+              const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/toggle`, {
                 method: "POST",
                 body: JSON.stringify({ enabled: !p.enabled }),
               });
+              if (res && res.needs_config) {
+                await openPluginConnectModal(p, { interactiveConfig: true });
+                return;
+              }
               toast(t(p.enabled ? "toast_plugin_disabled" : "toast_plugin_enabled", { name: p.display_name || p.name }));
               await loadPlugins();
             } catch (err) { toast(err.message, "err"); }
           })
         );
         actions.appendChild(
-          makeBtn(t("plugin_btn_uninstall"), "btn-danger", async () => {
+          makeBtn(escapeHtml(t("plugin_btn_uninstall")), "btn-danger", async () => {
             if (!confirm(t("confirm_uninstall_plugin", { name: p.display_name || p.name }))) return;
             try {
               await api(`/api/plugins/${encodeURIComponent(p.name)}`, { method: "DELETE" });
@@ -1760,44 +1839,338 @@
 
       card.append(head, desc, actions);
 
-      if (p.installed && Array.isArray(p.permissions_schema) && p.permissions_schema.length) {
-        const permsBox = document.createElement("div");
-        permsBox.className = "plugin-perms";
-        const permTitle = document.createElement("div");
-        permTitle.className = "plugin-perm-title";
-        permTitle.textContent = t("plugin_perms_title");
-        permsBox.appendChild(permTitle);
+      // Inline formulář pro přidání nového účtu (např. Pracovní / Osobní)
+      if (p.installed && addAccountOpenFor.has(p.name)) {
+        const addBox = document.createElement("form");
+        addBox.className = "plugin-add-account-form";
+        const addTitle = document.createElement("div");
+        addTitle.className = "plugin-perm-title";
+        addTitle.textContent = t("plugin_account_add_title");
 
-        p.permissions_schema.forEach((spec) => {
-          const row = document.createElement("div");
-          row.className = "plugin-perm-row";
-          const lbl = document.createElement("label");
-          lbl.className = "switch";
-          const span = document.createElement("span");
-          span.textContent = t(spec.label_key);
-          const cb = document.createElement("input");
-          cb.type = "checkbox";
-          cb.checked = Boolean((p.permissions || {})[spec.key]);
-          cb.onchange = async () => {
-            const prev = !cb.checked;
-            const updatedPerms = { ...(p.permissions || {}), [spec.key]: cb.checked };
-            try {
-              const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/permissions`, {
-                method: "PUT",
-                body: JSON.stringify({ permissions: updatedPerms }),
-              });
-              p.permissions = res.permissions || updatedPerms;
-              toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
-            } catch (err) {
-              cb.checked = prev;
-              toast(err.message, "err");
-            }
-          };
-          lbl.append(span, cb);
-          row.appendChild(lbl);
-          permsBox.appendChild(row);
+        const rowFields = document.createElement("div");
+        rowFields.className = "row";
+        const labelInp = document.createElement("input");
+        labelInp.type = "text";
+        labelInp.className = "input grow";
+        labelInp.placeholder = t("plugin_account_label_ph");
+
+        const scopeSel = document.createElement("select");
+        scopeSel.className = "select";
+        scopeSel.style.maxWidth = "155px";
+        [
+          ["pracovni", t("scope_work")],
+          ["osobni", t("scope_personal")],
+          ["all", t("scope_all_chats")],
+        ].forEach(([val, txt]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = txt;
+          scopeSel.appendChild(opt);
         });
-        card.appendChild(permsBox);
+        const hasPersonalOrAll = accounts.some((a) => a.scope === "osobni" || a.scope === "all");
+        scopeSel.value = hasPersonalOrAll ? "pracovni" : "osobni";
+        rowFields.append(labelInp, scopeSel);
+
+        const rowBtns = document.createElement("div");
+        rowBtns.className = "row";
+        const createBtn = document.createElement("button");
+        createBtn.type = "submit";
+        createBtn.className = "btn btn-sm btn-primary";
+        createBtn.textContent = t("plugin_account_btn_create_connect");
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "btn btn-sm";
+        cancelBtn.textContent = t("plugin_account_btn_cancel");
+        cancelBtn.onclick = () => {
+          addAccountOpenFor.delete(p.name);
+          renderPlugins();
+        };
+        rowBtns.append(createBtn, cancelBtn);
+
+        addBox.onsubmit = async (e) => {
+          e.preventDefault();
+          createBtn.disabled = true;
+          try {
+            const labelVal = labelInp.value.trim();
+            const scopeVal = scopeSel.value;
+            const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts`, {
+              method: "POST",
+              body: JSON.stringify({ label: labelVal, scope: scopeVal }),
+            });
+            addAccountOpenFor.delete(p.name);
+            const shownName = labelVal || scopeLabel(scopeVal);
+            toast(t("toast_plugin_account_added", { label: shownName }));
+            await loadPlugins();
+            if (res && res.account) {
+              await openPluginConnectModal(p, {
+                forceReconnect: false,
+                accountId: res.account.id,
+                accountLabel: res.account.label || scopeLabel(res.account.scope),
+              });
+            }
+          } catch (err) {
+            toast(err.message, "err");
+          } finally {
+            createBtn.disabled = false;
+          }
+        };
+
+        addBox.append(addTitle, rowFields, rowBtns);
+        card.appendChild(addBox);
+      }
+
+      // Účty a oprávnění nainstalovaného pluginu
+      if (p.installed && accounts.length) {
+        const schema = Array.isArray(p.permissions_schema) ? p.permissions_schema : [];
+        const basicSpecs = schema.filter((sp) => (sp.tier || "basic") === "basic");
+        const detailSpecs = schema.filter((sp) => sp.tier === "detail");
+
+        const acctsWrap = document.createElement("div");
+        acctsWrap.className = "plugin-accounts-list";
+
+        accounts.forEach((acct) => {
+          const box = document.createElement("div");
+          box.className = "plugin-account-box";
+
+          const acctHead = document.createElement("div");
+          acctHead.className = "plugin-account-head";
+
+          const metaBox = document.createElement("div");
+          metaBox.className = "plugin-account-meta";
+
+          const titleRow = document.createElement("div");
+          titleRow.className = "plugin-account-title";
+          const titleSpan = document.createElement("span");
+          titleSpan.textContent = acct.label || scopeLabel(acct.scope) || t("plugin_account_default_label");
+          const scopeBadge = document.createElement("span");
+          scopeBadge.className = "pill";
+          scopeBadge.textContent = scopeLabel(acct.scope);
+          const stateBadge = document.createElement("span");
+          if (!acct.enabled) {
+            stateBadge.className = "pill warn";
+            stateBadge.textContent = t("plugin_account_status_paused");
+          } else if (acct.connected) {
+            stateBadge.className = "pill ok";
+            stateBadge.textContent = t("plugin_account_status_connected");
+          } else {
+            stateBadge.className = "pill";
+            stateBadge.textContent = t("plugin_account_status_disconnected");
+          }
+          titleRow.append(titleSpan, scopeBadge, stateBadge);
+          metaBox.appendChild(titleRow);
+
+          if (acct.account_email) {
+            const emailDiv = document.createElement("div");
+            emailDiv.className = "plugin-account-email mono";
+            emailDiv.textContent = acct.account_email;
+            metaBox.appendChild(emailDiv);
+          }
+
+          const acctActions = document.createElement("div");
+          acctActions.className = "plugin-account-actions";
+          if (p.supports_oauth) {
+            acctActions.appendChild(
+              makeBtn(
+                escapeHtml(acct.connected ? t("plugin_btn_reconnect") : t("plugin_btn_connect")),
+                acct.connected ? "" : "btn-primary",
+                () =>
+                  openPluginConnectModal(p, {
+                    forceReconnect: Boolean(acct.connected),
+                    accountId: acct.id,
+                    accountLabel: acct.label || acct.account_email || scopeLabel(acct.scope),
+                  })
+              )
+            );
+          }
+          if (accounts.length > 1) {
+            const rmBtn = document.createElement("button");
+            rmBtn.type = "button";
+            rmBtn.className = "btn btn-sm btn-danger";
+            rmBtn.innerHTML = uiIcon("trash", "ui-ico-sm");
+            rmBtn.title = t("btn_delete");
+            rmBtn.setAttribute("aria-label", t("btn_delete"));
+            rmBtn.onclick = async () => {
+              const lbl = acct.label || acct.account_email || t("plugin_account_default_label");
+              if (!confirm(t("plugin_account_remove_confirm", { label: lbl }))) return;
+              rmBtn.disabled = true;
+              try {
+                await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
+                  method: "DELETE",
+                });
+                expandedAccountDetails.delete(acct.id);
+                toast(t("toast_plugin_account_deleted"));
+                await loadPlugins();
+              } catch (err) {
+                toast(err.message, "err");
+              } finally {
+                rmBtn.disabled = false;
+              }
+            };
+            acctActions.appendChild(rmBtn);
+          }
+
+          acctHead.append(metaBox, acctActions);
+          box.appendChild(acctHead);
+
+          const appendPermRow = (parentEl, spec) => {
+            const row = document.createElement("div");
+            row.className = "plugin-perm-row";
+            const lbl = document.createElement("label");
+            lbl.className = "switch";
+            const span = document.createElement("span");
+            span.textContent = t(spec.label_key);
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = Boolean((acct.permissions || {})[spec.key]);
+            cb.onchange = async () => {
+              const prev = !cb.checked;
+              const updatedPerms = { ...(acct.permissions || {}), [spec.key]: cb.checked };
+              try {
+                const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
+                  method: "PUT",
+                  body: JSON.stringify({ permissions: updatedPerms }),
+                });
+                acct.permissions = (res && res.account && res.account.permissions) || updatedPerms;
+                toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
+              } catch (err) {
+                cb.checked = prev;
+                toast(err.message, "err");
+              }
+            };
+            lbl.append(span, cb);
+            row.appendChild(lbl);
+            parentEl.appendChild(row);
+          };
+
+          if (basicSpecs.length) {
+            const permTitle = document.createElement("div");
+            permTitle.className = "plugin-perm-title";
+            permTitle.textContent = t("plugin_perms_title");
+            box.appendChild(permTitle);
+            basicSpecs.forEach((sp) => appendPermRow(box, sp));
+          }
+
+          const isExpanded = expandedAccountDetails.has(acct.id);
+          const detailBtn = document.createElement("button");
+          detailBtn.type = "button";
+          detailBtn.className = "btn btn-sm plugin-detail-toggle";
+          detailBtn.innerHTML = `${uiIcon("sliders", "ui-ico-sm")} <span>${escapeHtml(isExpanded ? t("plugin_detail_hide") : t("plugin_detail_toggle"))}</span>`;
+          detailBtn.onclick = () => {
+            if (expandedAccountDetails.has(acct.id)) expandedAccountDetails.delete(acct.id);
+            else expandedAccountDetails.add(acct.id);
+            renderPlugins();
+          };
+          box.appendChild(detailBtn);
+
+          if (isExpanded) {
+            const panel = document.createElement("div");
+            panel.className = "plugin-detail-panel";
+
+            if (detailSpecs.length) {
+              const detTitle = document.createElement("div");
+              detTitle.className = "plugin-perm-title";
+              detTitle.textContent = t("plugin_detail_extra_perms");
+              panel.appendChild(detTitle);
+              detailSpecs.forEach((sp) => appendPermRow(panel, sp));
+            }
+
+            const metaGrid = document.createElement("div");
+            metaGrid.className = "grid-2";
+
+            const lblField = document.createElement("div");
+            lblField.className = "field";
+            lblField.style.marginBottom = "0";
+            const lblLabel = document.createElement("label");
+            lblLabel.textContent = t("plugin_detail_account_label");
+            const lblInput = document.createElement("input");
+            lblInput.type = "text";
+            lblInput.className = "input";
+            lblInput.value = acct.label || "";
+            lblInput.placeholder = t("plugin_account_label_ph");
+            lblField.append(lblLabel, lblInput);
+
+            const scField = document.createElement("div");
+            scField.className = "field";
+            scField.style.marginBottom = "0";
+            const scLabel = document.createElement("label");
+            scLabel.textContent = t("plugin_detail_scope");
+            const scSelect = document.createElement("select");
+            scSelect.className = "select";
+            [
+              ["all", t("scope_all_chats")],
+              ["pracovni", t("scope_work")],
+              ["osobni", t("scope_personal")],
+            ].forEach(([val, txt]) => {
+              const opt = document.createElement("option");
+              opt.value = val;
+              opt.textContent = txt;
+              scSelect.appendChild(opt);
+            });
+            scSelect.value = ["pracovni", "osobni"].includes(acct.scope) ? acct.scope : "all";
+            scField.append(scLabel, scSelect);
+
+            metaGrid.append(lblField, scField);
+            panel.appendChild(metaGrid);
+
+            const enRow = document.createElement("div");
+            enRow.className = "plugin-perm-row";
+            const enLbl = document.createElement("label");
+            enLbl.className = "switch";
+            const enSpan = document.createElement("span");
+            enSpan.textContent = t("plugin_detail_enabled");
+            const enCb = document.createElement("input");
+            enCb.type = "checkbox";
+            enCb.checked = acct.enabled !== false;
+            enLbl.append(enSpan, enCb);
+            enRow.appendChild(enLbl);
+            panel.appendChild(enRow);
+
+            const rulesField = document.createElement("div");
+            rulesField.className = "field";
+            rulesField.style.marginBottom = "0";
+            const rulesLabel = document.createElement("label");
+            rulesLabel.textContent = t("plugin_detail_rules_label");
+            const rulesArea = document.createElement("textarea");
+            rulesArea.className = "textarea plugin-rules-textarea";
+            rulesArea.value = acct.custom_rules || "";
+            rulesArea.placeholder = t("plugin_detail_rules_ph");
+            rulesField.append(rulesLabel, rulesArea);
+            panel.appendChild(rulesField);
+
+            const saveDetailBtn = document.createElement("button");
+            saveDetailBtn.type = "button";
+            saveDetailBtn.className = "btn btn-sm btn-primary";
+            saveDetailBtn.style.alignSelf = "flex-start";
+            saveDetailBtn.textContent = t("plugin_detail_save_btn");
+            saveDetailBtn.onclick = async () => {
+              saveDetailBtn.disabled = true;
+              try {
+                await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
+                  method: "PUT",
+                  body: JSON.stringify({
+                    label: lblInput.value.trim(),
+                    scope: scSelect.value,
+                    enabled: enCb.checked,
+                    custom_rules: rulesArea.value.trim(),
+                  }),
+                });
+                toast(t("toast_plugin_account_saved", { name: lblInput.value.trim() || p.display_name || p.name }));
+                await loadPlugins();
+              } catch (err) {
+                toast(err.message, "err");
+              } finally {
+                saveDetailBtn.disabled = false;
+              }
+            };
+            panel.appendChild(saveDetailBtn);
+
+            box.appendChild(panel);
+          }
+
+          acctsWrap.appendChild(box);
+        });
+
+        card.appendChild(acctsWrap);
       }
 
       grid.appendChild(card);
@@ -1815,6 +2188,12 @@
   });
   if ($("pluginSearchInput")) $("pluginSearchInput").oninput = renderPlugins;
   if ($("refreshPluginsBtn")) $("refreshPluginsBtn").onclick = loadPlugins;
+  if ($("toggleMorePluginsBtn")) {
+    $("toggleMorePluginsBtn").onclick = () => {
+      showAllPlugins = !showAllPlugins;
+      renderPlugins();
+    };
+  }
 
   if ($("customPluginForm")) {
     $("customPluginForm").onsubmit = async (e) => {
@@ -1877,8 +2256,15 @@
       }
     }
 
+    const isInteractiveCfg = st.flow_type === "interactive_config";
+    if ($("pluginConfigHint")) {
+      $("pluginConfigHint").classList.toggle("hidden", !isInteractiveCfg || Boolean(st.connected));
+    }
     if ($("pluginConnectStep1")) {
-      $("pluginConnectStep1").classList.toggle("hidden", Boolean(st.connected));
+      $("pluginConnectStep1").classList.toggle("hidden", Boolean(st.connected) || isInteractiveCfg);
+    }
+    if (isInteractiveCfg && $("pluginConnectTerminalDetails")) {
+      $("pluginConnectTerminalDetails").open = true;
     }
     if (cbForm) cbForm.classList.toggle("hidden", st.flow_type !== "localhost_callback" || Boolean(st.connected));
     if (codeForm) codeForm.classList.toggle("hidden", st.flow_type !== "code_paste" || Boolean(st.connected));
@@ -1891,18 +2277,27 @@
     }
   }
 
-  async function openPluginConnectModal(plugin, { forceReconnect = false } = {}) {
+  async function openPluginConnectModal(
+    plugin,
+    { forceReconnect = false, accountId = null, accountLabel = "", interactiveConfig = false } = {}
+  ) {
     activeConnectPlugin = plugin;
     const modal = $("pluginConnectModal");
     if (!modal) return;
-    $("pluginConnectTitle").textContent = t("plugin_connect_title", { name: plugin.display_name || plugin.name });
+    const titleSuffix = accountLabel ? ` — ${accountLabel}` : "";
+    $("pluginConnectTitle").textContent = t("plugin_connect_title", {
+      name: `${plugin.display_name || plugin.name}${titleSuffix}`,
+    });
     $("pluginCallbackInput").value = "";
     $("pluginCodeInput").value = "";
     $("pluginManualInput").value = "";
+    if ($("pluginConnectTerminalDetails")) {
+      $("pluginConnectTerminalDetails").open = Boolean(interactiveConfig);
+    }
     renderPluginConnectState({
       running: true,
       plugin_name: plugin.name,
-      flow_type: "",
+      flow_type: interactiveConfig ? "interactive_config" : "",
       auth_url: "",
       output: "",
       connected: false,
@@ -1929,6 +2324,8 @@
         body: JSON.stringify({
           install_target: plugin.install_target || null,
           force_reconnect: Boolean(forceReconnect),
+          account_id: accountId,
+          interactive_config: Boolean(interactiveConfig),
         }),
       });
       renderPluginConnectState(st);
@@ -1969,6 +2366,7 @@
     if (modal) modal.classList.add("hidden");
     activeConnectPlugin = null;
     try { await api("/api/plugins/connect/stop", { method: "POST" }); } catch (_) {}
+    loadPlugins().catch(() => {});
   }
 
   if ($("closePluginConnectBtn")) $("closePluginConnectBtn").onclick = closePluginConnectModal;

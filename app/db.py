@@ -113,6 +113,25 @@ class PluginConfigRecord:
 
 
 @dataclass(frozen=True)
+class PluginAccountRecord:
+    """Konfigurace jednoho připojeného účtu pluginu (vč. oblasti, profilu, oprávnění a pravidel)."""
+
+    id: int
+    plugin_name: str
+    label: str
+    scope: str  # 'all' | 'pracovni' | 'osobni'
+    profile_key: str  # 'default' | 'osobni' | 'pracovni' | ...
+    account_email: str
+    permissions_json: str
+    custom_rules: str
+    connected: bool
+    connected_at: str
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class RunRecord:
     """Záznam o jednom spuštění asistenta."""
 
@@ -305,10 +324,27 @@ class AssistantDB:
                     account_label TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS plugin_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plugin_name TEXT NOT NULL,
+                    label TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL DEFAULT 'all',
+                    profile_key TEXT NOT NULL DEFAULT 'default',
+                    account_email TEXT NOT NULL DEFAULT '',
+                    permissions_json TEXT NOT NULL DEFAULT '{}',
+                    custom_rules TEXT NOT NULL DEFAULT '',
+                    connected INTEGER NOT NULL DEFAULT 0,
+                    connected_at TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
             self._ensure_column(conn, "plugin_configs", "account_label", "TEXT NOT NULL DEFAULT ''")
+            self._migrate_plugin_configs_to_accounts(conn)
             self._migrate_from_legacy_multiuser(conn)
             self._normalize_legacy_context_modes(conn)
             self._ensure_column(conn, "runs", "input_tokens", "INTEGER NOT NULL DEFAULT 0")
@@ -589,6 +625,65 @@ class AssistantDB:
             updated_at=row["updated_at"],
             account_label=row["account_label"] if "account_label" in keys else "",
         )
+
+    @staticmethod
+    def _row_to_plugin_account(row: sqlite3.Row) -> PluginAccountRecord:
+        return PluginAccountRecord(
+            id=int(row["id"]),
+            plugin_name=row["plugin_name"],
+            label=row["label"],
+            scope=row["scope"],
+            profile_key=row["profile_key"],
+            account_email=row["account_email"],
+            permissions_json=row["permissions_json"],
+            custom_rules=row["custom_rules"],
+            connected=bool(row["connected"]),
+            connected_at=row["connected_at"],
+            enabled=bool(row["enabled"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _migrate_plugin_configs_to_accounts(self, conn: sqlite3.Connection) -> None:
+        """Jednorázově přenese záznamy ze starší tabulky `plugin_configs` do `plugin_accounts`."""
+        if not self._table_exists(conn, "plugin_configs"):
+            return
+        rows = conn.execute("SELECT * FROM plugin_configs ORDER BY plugin_name ASC").fetchall()
+        for row in rows:
+            pname = str(row["plugin_name"]).strip().lower()
+            if not pname:
+                continue
+            exists = conn.execute(
+                "SELECT 1 FROM plugin_accounts WHERE plugin_name = ? LIMIT 1",
+                (pname,),
+            ).fetchone()
+            if exists is not None:
+                continue
+            rkeys = set(row.keys())
+            account_email = str(row["account_label"]) if "account_label" in rkeys else ""
+            updated_at = (
+                str(row["updated_at"])
+                if "updated_at" in rkeys and row["updated_at"]
+                else self._now_iso()
+            )
+            conn.execute(
+                """
+                INSERT INTO plugin_accounts (
+                    plugin_name, label, scope, profile_key, account_email,
+                    permissions_json, custom_rules, connected, connected_at,
+                    enabled, created_at, updated_at
+                ) VALUES (?, '', 'all', 'default', ?, ?, '', ?, ?, 1, ?, ?)
+                """,
+                (
+                    pname,
+                    account_email.strip(),
+                    str(row["permissions_json"] or "{}"),
+                    int(row["connected"]),
+                    str(row["connected_at"] or ""),
+                    updated_at,
+                    updated_at,
+                ),
+            )
 
     def ensure_owner(self, settings: Settings) -> OwnerConfig:
         """Zajistí existenci záznamu vlastníka v `owner_config` (inicializuje ze `Settings`)."""
@@ -955,6 +1050,181 @@ class AssistantDB:
                 (clean_name,),
             )
             return cur.rowcount > 0
+
+    def list_plugin_accounts(self, plugin_name: str | None = None) -> list[PluginAccountRecord]:
+        """Vrátí seznam účtů pluginů (volitelně filtrovaný podle názvu pluginu)."""
+        with self._connect() as conn:
+            if plugin_name is not None:
+                clean_name = plugin_name.strip().lower()
+                if not clean_name:
+                    return []
+                rows = conn.execute(
+                    "SELECT * FROM plugin_accounts WHERE plugin_name = ? ORDER BY id ASC",
+                    (clean_name,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM plugin_accounts ORDER BY id ASC"
+                ).fetchall()
+            return [self._row_to_plugin_account(row) for row in rows]
+
+    def get_plugin_account(self, account_id: int) -> PluginAccountRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM plugin_accounts WHERE id = ?",
+                (int(account_id),),
+            ).fetchone()
+            return self._row_to_plugin_account(row) if row else None
+
+    def create_plugin_account(
+        self,
+        plugin_name: str,
+        *,
+        label: str = "",
+        scope: str = "all",
+        profile_key: str = "default",
+        account_email: str = "",
+        permissions_json: str = "{}",
+        custom_rules: str = "",
+        connected: bool = False,
+        connected_at: str = "",
+        enabled: bool = True,
+    ) -> PluginAccountRecord:
+        clean_name = plugin_name.strip().lower()
+        if not clean_name:
+            raise ValueError("Název pluginu nesmí být prázdný.")
+        clean_scope = scope if scope in ("all", "pracovni", "osobni") else "all"
+        clean_profile = profile_key.strip().lower() or "default"
+        now_iso = self._now_iso()
+        eff_connected_at = connected_at if (connected_at or not connected) else now_iso
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO plugin_accounts (
+                    plugin_name, label, scope, profile_key, account_email,
+                    permissions_json, custom_rules, connected, connected_at,
+                    enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_name,
+                    label.strip()[:80],
+                    clean_scope,
+                    clean_profile,
+                    account_email.strip(),
+                    permissions_json or "{}",
+                    custom_rules.strip()[:1000],
+                    1 if connected else 0,
+                    eff_connected_at,
+                    1 if enabled else 0,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM plugin_accounts WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+        assert row is not None
+        return self._row_to_plugin_account(row)
+
+    def update_plugin_account(
+        self,
+        account_id: int,
+        *,
+        label: str | None = None,
+        scope: str | None = None,
+        profile_key: str | None = None,
+        account_email: str | None = None,
+        permissions_json: str | None = None,
+        custom_rules: str | None = None,
+        connected: bool | None = None,
+        connected_at: str | None = None,
+        enabled: bool | None = None,
+    ) -> PluginAccountRecord | None:
+        existing = self.get_plugin_account(account_id)
+        if existing is None:
+            return None
+
+        eff_label = label.strip()[:80] if label is not None else existing.label
+        eff_scope = (
+            scope if scope in ("all", "pracovni", "osobni") else existing.scope
+        ) if scope is not None else existing.scope
+        eff_profile = (
+            (profile_key.strip().lower() or existing.profile_key)
+            if profile_key is not None
+            else existing.profile_key
+        )
+        eff_perms = permissions_json if permissions_json is not None else existing.permissions_json
+        eff_rules = custom_rules.strip()[:1000] if custom_rules is not None else existing.custom_rules
+        eff_connected = bool(connected) if connected is not None else existing.connected
+        if connected_at is not None:
+            eff_connected_at = connected_at
+        elif connected is True:
+            eff_connected_at = existing.connected_at or self._now_iso()
+        elif connected is False:
+            eff_connected_at = ""
+        else:
+            eff_connected_at = existing.connected_at
+
+        if account_email is not None:
+            eff_email = account_email.strip()
+        elif connected is False:
+            eff_email = ""
+        else:
+            eff_email = existing.account_email
+
+        eff_enabled = bool(enabled) if enabled is not None else existing.enabled
+        now_iso = self._now_iso()
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE plugin_accounts
+                SET label = ?, scope = ?, profile_key = ?, account_email = ?,
+                    permissions_json = ?, custom_rules = ?, connected = ?,
+                    connected_at = ?, enabled = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    eff_label,
+                    eff_scope,
+                    eff_profile,
+                    eff_email,
+                    eff_perms or "{}",
+                    eff_rules,
+                    1 if eff_connected else 0,
+                    eff_connected_at,
+                    1 if eff_enabled else 0,
+                    now_iso,
+                    int(account_id),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM plugin_accounts WHERE id = ?",
+                (int(account_id),),
+            ).fetchone()
+        return self._row_to_plugin_account(row) if row else None
+
+    def delete_plugin_account(self, account_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM plugin_accounts WHERE id = ?",
+                (int(account_id),),
+            )
+            return cur.rowcount > 0
+
+    def delete_plugin_accounts_for_plugin(self, plugin_name: str) -> int:
+        clean_name = plugin_name.strip().lower()
+        if not clean_name:
+            return 0
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM plugin_accounts WHERE plugin_name = ?",
+                (clean_name,),
+            )
+            return cur.rowcount
 
     def list_scheduled_tasks(self, *, enabled_only: bool = False) -> list[ScheduledTaskRecord]:
         sql = "SELECT * FROM scheduled_tasks"

@@ -48,15 +48,16 @@ Telegram (tg:<chat>:<kanál>)   Web UI (web:<kanál>)   Plánovač (cron:*, task
 - `owner_config` (1 řádek, `id = 1`): identita, jazyk (`language`), heslo, 2FA, Telegram, model, Gemini klíč, nastavení plánovače.
 - `auth_sessions`: hash přihlašovacích tokenů Web UI + expirace.
 - `mcp_servers`: konfigurace MCP serverů (`scope`, `transport`, `url`, `auth_token`, `command`, …).
-- `plugin_configs`: oprávnění a stav OAuth připojení nainstalovaných Antigravity pluginů (`permissions_json`, `connected`, `connected_at`).
+- `plugin_configs`: zpětně kompatibilní oprávnění a stav OAuth připojení výchozího profilu pluginu (`permissions_json`, `connected`, `connected_at`).
+- `plugin_accounts`: více účtů pro každý plugin (štítek, oblast `all|pracovni|osobni`, izolovaný `profile_key`, e-mail účtu, základní i detailní `permissions_json`, textové `custom_rules`, stav `connected`/`enabled`).
 - `sessions`: `session_key`, `conversation_id`, `context_mode`.
 - `runs`: historie běhů vč. tokenů.
 - `scheduled_tasks`: vlastní úlohy (`cron` / `once`).
 
-## Pluginy a jemná oprávnění (`app/plugins.py`, `/api/plugins*`)
+## Pluginy, více účtů a jemná oprávnění (`app/plugins.py`, `/api/plugins*`)
 
-- Správa oficiálních i partnerských `agy` pluginů (vč. Google Workspace: `gmail`, `gcalendar`, `gdrive`, `gdocs`, `gsheets`, `gslides`, a partnerských pluginů či GitHub URL) přes `agy plugin ...` a interaktivní PTY connect tok (`/plugin` → `Sign in`) s přísně validovaným předáním lokálního `http://127.0.0.1:<port>/callback` v backendu.
-- Přepínače „Co asistent smí“ se propisují do `permissions.deny` v `settings.json`, `AGY_UNATTENDED=1` (pro Gmail bez oprávnění k odesílání) a do prompt politiky v `AgyRunner`.
+- Správa oficiálních i partnerských `agy` pluginů (hlavní trojice `gmail`, `gcalendar`, `gdrive`, ostatní po rozbalení či přes GitHub URL) přes `agy plugin ...` a interaktivní PTY connect tok (`/plugin` → `Sign in` nebo interaktivní MCP konfigurace např. u `n8n-skills`) s přísně validovaným předáním lokálního `http://127.0.0.1:<port>/callback` v backendu.
+- Více účtů pro jeden plugin používá izolované profilové `HOME` složky `/home/asistent/profiles/<profile_key>` se sdíleným symlinkem pluginů; podle kontextu chatu (`auto` / `pracovni` / `osobni`) vybere `prepare_agy_home()` příslušný profil a propíše základní i detailní přepínače oprávnění do `permissions.deny` v `settings.json`, `AGY_UNATTENDED=1` a vlastní textová pravidla (`RULES:`) do prompt politiky v `AgyRunner`.
 
 ## Bezpečnost
 

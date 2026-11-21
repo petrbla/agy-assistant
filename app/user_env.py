@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -15,6 +16,9 @@ from app.plugins import (
     MANAGED_PLUGIN_DENY_PREFIXES,
     compute_plugin_deny_rules,
     detect_installed_plugins_from_disk,
+    get_profile_home_dir,
+    sanitize_profile_key,
+    select_active_accounts_for_context,
 )
 from app.runtime_config import sync_agy_settings_file
 
@@ -233,10 +237,15 @@ def build_mcp_config_dict(
 
 
 def sync_mcp_config(
-    settings: Settings, db: AssistantDB, context_mode: str = "auto"
+    settings: Settings,
+    db: AssistantDB,
+    context_mode: str = "auto",
+    *,
+    home_dir: Path | None = None,
 ) -> Path:
-    """Zapíše `mcp_config.json` do HOME složky asistenta."""
-    mcp_file = settings.effective_home_dir / ".gemini" / "config" / "mcp_config.json"
+    """Zapíše `mcp_config.json` do HOME složky asistenta (nebo vybraného profilu)."""
+    target_home = home_dir or settings.effective_home_dir
+    mcp_file = target_home / ".gemini" / "config" / "mcp_config.json"
     mcp_file.parent.mkdir(parents=True, exist_ok=True)
     payload = build_mcp_config_dict(db.list_mcp_servers(), context_mode=context_mode)
     serialized = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
@@ -399,32 +408,79 @@ def clear_agy_oauth(settings: Settings) -> None:
             jetski.unlink()
 
 
+def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
+    """Připraví izolovaný HOME adresář profilu (sdílí nainstalované pluginy a hlavní OAuth `agy`)."""
+    main_home = settings.effective_home_dir
+    main_home.mkdir(parents=True, exist_ok=True)
+    safe_key = sanitize_profile_key(profile_key)
+    if safe_key == "default":
+        return main_home
+
+    prof_home = get_profile_home_dir(settings, safe_key)
+    (prof_home / ".gemini" / "config").mkdir(parents=True, exist_ok=True)
+    (prof_home / ".gemini" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
+    (prof_home / ".config").mkdir(parents=True, exist_ok=True)
+    (prof_home / ".local" / "share").mkdir(parents=True, exist_ok=True)
+    (prof_home / ".cache").mkdir(parents=True, exist_ok=True)
+
+    # Sdílej složku nainstalovaných pluginů se základním HOME (na Windows nemusí mít uživatel práva na symlink)
+    main_plugins = main_home / ".gemini" / "config" / "plugins"
+    prof_plugins = prof_home / ".gemini" / "config" / "plugins"
+    if main_plugins.is_dir() and not prof_plugins.exists() and not prof_plugins.is_symlink():
+        with contextlib.suppress(OSError):
+            os.symlink(main_plugins, prof_plugins, target_is_directory=True)
+
+    # Zkopíruj hlavní OAuth soubory pro běh agy modelu (bez mcp_oauth_tokens.json), pokud profil ještě žádné nemá
+    main_gemini = main_home / ".gemini"
+    prof_gemini = prof_home / ".gemini"
+    if not _iter_oauth_paths(prof_gemini):
+        for src_file in _iter_oauth_paths(main_gemini):
+            if src_file.name.lower() == "mcp_oauth_tokens.json":
+                continue
+            rel = src_file.relative_to(main_gemini)
+            dst_file = prof_gemini / rel
+            if dst_file.exists():
+                continue
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                shutil.copy2(src_file, dst_file)
+
+    return prof_home
+
+
 def prepare_agy_home(
     settings: Settings,
     db: AssistantDB,
     context_mode: str = "auto",
 ) -> Path:
-    """Připraví HOME adresář pro `agy` (settings.json, mcp_config.json, model a oprávnění pluginů)."""
-    home_dir = settings.effective_home_dir
+    """Připraví aktivní profilový HOME adresář pro `agy` (settings.json, mcp_config.json a oprávnění)."""
+    main_home = settings.effective_home_dir
+    main_home.mkdir(parents=True, exist_ok=True)
     owner = db.get_owner()
     model = owner.agy_model if owner is not None else settings.agy_model
     api_key = owner.gemini_api_key if owner is not None else settings.gemini_api_key
 
-    installed = detect_installed_plugins_from_disk(home_dir)
+    installed = detect_installed_plugins_from_disk(main_home)
     enabled_names = {
         name for name, info in installed.items() if bool(info.get("enabled", True))
     }
+    accounts = db.list_plugin_accounts()
     plugin_configs = db.list_plugin_configs()
-    deny_rules = compute_plugin_deny_rules(enabled_names, plugin_configs)
+    target_profile_key, _, _ = select_active_accounts_for_context(
+        enabled_names, accounts, context_mode
+    )
+    target_home = ensure_profile_home_seeded(settings, target_profile_key)
+    deny_rules = compute_plugin_deny_rules(
+        enabled_names, plugin_configs, accounts=accounts, context_mode=context_mode
+    )
 
-    home_dir.mkdir(parents=True, exist_ok=True)
     sync_agy_settings_file(
         settings,
-        home_dir=home_dir,
+        home_dir=target_home,
         model=model,
         gemini_api_key=api_key,
         managed_deny_rules=deny_rules,
         managed_deny_prefixes=MANAGED_PLUGIN_DENY_PREFIXES,
     )
-    sync_mcp_config(settings, db, context_mode=context_mode)
-    return home_dir
+    sync_mcp_config(settings, db, context_mode=context_mode, home_dir=target_home)
+    return target_home

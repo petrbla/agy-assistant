@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="alternate icon" href="/favicon.ico" />
   <meta name="theme-color" content="#0b1120" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.52.0/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -20,15 +21,19 @@
       </div>
 
       <nav class="nav-tabs" aria-label="Main navigation">
-        <button type="button" class="nav-tab active" data-tab="chat" data-i18n="nav_chat">Chat</button>
-        <button type="button" class="nav-tab" data-tab="memory" data-i18n="nav_memory">Memory</button>
-        <button type="button" class="nav-tab" data-tab="ops" data-i18n="nav_ops">Scheduler &amp; History</button>
-        <button type="button" class="nav-tab" data-tab="settings" data-i18n="nav_settings">Settings</button>
+        <button type="button" class="nav-tab active" data-tab="chat"><i class="ti ti-message-circle ui-ico" aria-hidden="true"></i><span data-i18n="nav_chat">Chat</span></button>
+        <button type="button" class="nav-tab" data-tab="memory"><i class="ti ti-brain ui-ico" aria-hidden="true"></i><span data-i18n="nav_memory">Memory</span></button>
+        <button type="button" class="nav-tab" data-tab="ops"><i class="ti ti-calendar-clock ui-ico" aria-hidden="true"></i><span data-i18n="nav_ops">Scheduler &amp; History</span></button>
+        <button type="button" class="nav-tab" data-tab="settings"><i class="ti ti-settings ui-ico" aria-hidden="true"></i><span data-i18n="nav_settings">Settings</span></button>
       </nav>
 
       <div class="topbar-right">
         <div class="lang-picker" title="Language" data-i18n-title="label_language">
-          <span class="lang-picker-face" aria-hidden="true">🌐 <span id="langCodeLabel">EN</span> ▾</span>
+          <span class="lang-picker-face" aria-hidden="true">
+            <i class="ti ti-world ui-ico" aria-hidden="true"></i>
+            <span id="langCodeLabel">EN</span>
+            <i class="ti ti-chevron-down ui-ico ui-ico-sm" aria-hidden="true"></i>
+          </span>
           <select id="langSelect" class="lang-picker-select" aria-label="Language">
             <option value="en">EN · English</option>
             <option value="cs">CS · Čeština</option>
@@ -38,8 +43,13 @@
             <option value="sk">SK · Slovenčina</option>
           </select>
         </div>
-        <button id="themeBtn" type="button" class="btn btn-icon" title="Toggle light / dark theme" data-i18n-title="theme_toggle_title">☀️</button>
-        <button id="logoutBtn" type="button" class="btn btn-sm hidden" data-i18n="logout">Sign out</button>
+        <button id="themeBtn" type="button" class="btn btn-icon" title="Toggle light / dark theme" data-i18n-title="theme_toggle_title">
+          <i class="ti ti-sun ui-ico" aria-hidden="true"></i>
+        </button>
+        <button id="logoutBtn" type="button" class="btn btn-sm hidden">
+          <i class="ti ti-logout ui-ico ui-ico-sm" aria-hidden="true"></i>
+          <span data-i18n="logout">Sign out</span>
+        </button>
       </div>
     </div>
   </header>
@@ -178,7 +188,10 @@
             </div>
           </div>
           <div class="row">
-            <button id="chatCleanupBtn" type="button" class="btn btn-sm" title="Save important facts from conversations to memory and reset context" data-i18n="btn_memory_cleanup" data-i18n-title="btn_memory_cleanup_title">🧹 Memory cleanup</button>
+            <button id="chatCleanupBtn" type="button" class="btn btn-sm" title="Save important facts from conversations to memory and reset context" data-i18n-title="btn_memory_cleanup_title">
+              <i class="ti ti-sparkles ui-ico ui-ico-sm" aria-hidden="true"></i>
+              <span data-i18n="btn_memory_cleanup">Memory cleanup</span>
+            </button>
             <button id="chatResetBtn" type="button" class="btn btn-sm" data-i18n="btn_new_chat" data-i18n-title="tooltip_new_chat">New chat</button>
           </div>
         </div>
@@ -263,14 +276,20 @@
           <div class="row">
             <button id="runHeartbeatBtn" type="button" class="btn btn-sm" data-i18n="btn_run_heartbeat" data-i18n-title="btn_run_heartbeat_title">Run Heartbeat</button>
             <button id="runBriefingBtn" type="button" class="btn btn-sm" data-i18n="btn_run_briefing" data-i18n-title="btn_run_briefing_title">Generate Briefing</button>
-            <button id="runNightlyBtn" type="button" class="btn btn-sm" data-i18n="btn_run_nightly" data-i18n-title="btn_run_nightly_title">🧹 Run nightly cleanup</button>
+            <button id="runNightlyBtn" type="button" class="btn btn-sm" data-i18n-title="btn_run_nightly_title">
+              <i class="ti ti-sparkles ui-ico ui-ico-sm" aria-hidden="true"></i>
+              <span data-i18n="btn_run_nightly">Run nightly cleanup</span>
+            </button>
             <button id="refreshOpsBtn" type="button" class="btn btn-sm" data-i18n="btn_refresh">Refresh</button>
           </div>
         </div>
         <div class="card-body">
           <div id="jobsList" class="jobs-strip hidden"></div>
           <details class="help-box">
-            <summary data-i18n="ops_help_toggle">ℹ️ What do Heartbeat, Morning briefing &amp; Nightly cleanup mean?</summary>
+            <summary class="help-summary">
+              <i class="ti ti-info-circle ui-ico ui-ico-sm" aria-hidden="true"></i>
+              <span data-i18n="ops_help_toggle">What do Heartbeat, Morning briefing &amp; Nightly cleanup mean?</span>
+            </summary>
             <ul>
               <li><strong data-i18n="job_name_heartbeat">Heartbeat</strong>: <span data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</span></li>
               <li><strong data-i18n="job_name_briefing">Morning briefing</strong>: <span data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</span></li>
@@ -411,6 +430,9 @@
             <input id="pluginSearchInput" type="text" class="input" style="max-width:240px;" placeholder="Filter plugins…" data-i18n-placeholder="plugin_search_placeholder" />
           </div>
           <div id="pluginsGrid" class="plugins-grid"></div>
+          <div id="pluginsMoreWrap" class="plugins-more-wrap hidden">
+            <button id="toggleMorePluginsBtn" type="button" class="btn btn-sm"></button>
+          </div>
           <hr class="divider" />
           <form id="customPluginForm" class="row">
             <input id="customPluginTarget" type="text" class="input grow mono" required placeholder="plugin-name@antigravity-plugins-partners or https://github.com/owner/repo" data-i18n-placeholder="plugin_custom_placeholder" />
@@ -689,7 +711,9 @@
           </div>
         </form>
 
-        <details class="help-box" style="margin-top:14px;">
+        <div id="pluginConfigHint" class="alert alert-info hidden" style="margin:10px 0;" data-i18n="plugin_connect_mcp_config_hint">This plugin requires configuring its MCP server parameters (e.g. URL and API key) in interactive CLI first. Use the arrow keys, Enter, and text field below.</div>
+
+        <details id="pluginConnectTerminalDetails" class="help-box" style="margin-top:14px;">
           <summary data-i18n="plugin_connect_terminal_toggle">Advanced: interactive CLI output &amp; keys</summary>
           <pre id="pluginConnectOutput" class="term" style="margin-top:8px;"></pre>
           <div class="row" style="margin-top:8px;">

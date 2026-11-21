@@ -1050,15 +1050,26 @@ class AgyRunner:
             eff_lang = normalize_language(
                 owner.language if owner is not None else self.settings.language
             )
-            prepare_agy_home(self.settings, self.db, context_mode=effective_ctx)
+            eff_home = prepare_agy_home(self.settings, self.db, context_mode=effective_ctx)
 
             installed_map = detect_installed_plugins_from_disk(self.settings.effective_home_dir)
             enabled_plugins = {
                 name for name, info in installed_map.items() if bool(info.get("enabled", True))
             }
             plugin_cfgs = self.db.list_plugin_configs()
-            plugin_perm_hint = build_plugin_permissions_prompt_hint(enabled_plugins, plugin_cfgs)
-            unattended = should_set_agy_unattended(enabled_plugins, plugin_cfgs)
+            plugin_accounts = self.db.list_plugin_accounts()
+            plugin_perm_hint = build_plugin_permissions_prompt_hint(
+                enabled_plugins,
+                plugin_cfgs,
+                accounts=plugin_accounts,
+                context_mode=effective_ctx,
+            )
+            unattended = should_set_agy_unattended(
+                enabled_plugins,
+                plugin_cfgs,
+                accounts=plugin_accounts,
+                context_mode=effective_ctx,
+            )
 
             is_new_chat = conv_id is None and source in ("web", "telegram")
             assistant_name_pending = is_new_chat and has_pending_assistant_name(eff_cwd)
@@ -1082,7 +1093,7 @@ class AgyRunner:
                 startup_memory=startup_memory,
                 plugin_permissions_hint=plugin_perm_hint,
             )
-            env = self.settings.subprocess_env(gemini_api_key=eff_key)
+            env = self.settings.subprocess_env(gemini_api_key=eff_key, home_dir=eff_home)
             if unattended:
                 env["AGY_UNATTENDED"] = "1"
             else:
@@ -1101,6 +1112,7 @@ class AgyRunner:
                     effective_ctx,
                     eff_key or "",
                     str(eff_cwd),
+                    str(eff_home),
                     eff_lang,
                     "1" if unattended else "0",
                     plugin_perm_hint,
