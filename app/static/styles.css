@@ -768,9 +768,9 @@ pre.term {
   min-width: 0;
 }
 .plugin-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   display: inline-flex;
@@ -778,6 +778,17 @@ pre.term {
   justify-content: center;
   font-size: 18px;
   flex: 0 0 auto;
+  overflow: hidden;
+}
+.plugin-icon.has-logo {
+  background: #ffffff;
+  padding: 6px;
+}
+.plugin-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 .plugin-name {
   font-weight: 700;

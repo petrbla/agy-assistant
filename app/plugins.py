@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -74,6 +75,7 @@ class PluginCatalogItem:
     icon: str
     desc_key: str
     description: str
+    logo_url: str = ""
     supports_oauth: bool = False
     cli_bin: str = ""
     permissions: tuple[PluginPermissionSpec, ...] = ()
@@ -127,6 +129,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="google",
         icon="✉️",
+        logo_url="https://www.gstatic.com/images/branding/productlogos/gmail_2020q4/v11/192px.svg",
         desc_key="plugin_desc_gmail",
         description="Search, read, draft, and send emails in Gmail.",
         supports_oauth=True,
@@ -145,6 +148,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="google",
         icon="📅",
+        logo_url="https://www.gstatic.com/images/branding/productlogos/calendar_2020q4/v13/192px.svg",
         desc_key="plugin_desc_gcalendar",
         description="Check availability, schedule events, and RSVP.",
         supports_oauth=True,
@@ -162,6 +166,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="google",
         icon="📁",
+        logo_url="https://www.gstatic.com/images/branding/productlogos/drive_2020q4/v10/192px.svg",
         desc_key="plugin_desc_gdrive",
         description="Search, upload, download, and share files.",
         supports_oauth=True,
@@ -175,6 +180,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="google",
         icon="📝",
+        logo_url="https://www.gstatic.com/images/branding/productlogos/docs_2020q4/v12/192px.svg",
         desc_key="plugin_desc_gdocs",
         description="Read, draft, and edit docs.",
         supports_oauth=True,
@@ -188,6 +194,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="google",
         icon="📊",
+        logo_url="https://www.gstatic.com/images/branding/productlogos/sheets_2020q4/v11/192px.svg",
         desc_key="plugin_desc_gsheets",
         description="Read, write, and format spreadsheets.",
         supports_oauth=True,
@@ -201,6 +208,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="google",
         icon="📽️",
+        logo_url="https://www.gstatic.com/images/branding/productlogos/slides_2020q4/v12/192px.svg",
         desc_key="plugin_desc_gslides",
         description="Read, edit, and export presentations.",
         supports_oauth=True,
@@ -215,6 +223,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="productivity",
         icon="📓",
+        logo_url="https://cdn.simpleicons.org/notion",
         desc_key="plugin_desc_notion",
         description="Connect your Notion workspace for notes, docs, and databases.",
         supports_oauth=True,
@@ -226,6 +235,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="productivity",
         icon="✅",
+        logo_url="https://cdn.simpleicons.org/clickup",
         desc_key="plugin_desc_clickup",
         description="Manage tasks, lists, and time tracking in ClickUp.",
         supports_oauth=True,
@@ -237,6 +247,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="productivity",
         icon="📐",
+        logo_url="https://cdn.simpleicons.org/linear",
         desc_key="plugin_desc_linear",
         description="Manage issues, projects, and cycles across your Linear workspace.",
         supports_oauth=True,
@@ -248,6 +259,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="productivity",
         icon="🗂️",
+        logo_url="https://cdn.simpleicons.org/atlassian",
         desc_key="plugin_desc_atlassian",
         description="Search and manage Jira issues, Confluence pages, and Bitbucket PRs.",
         supports_oauth=True,
@@ -259,6 +271,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="productivity",
         icon="🎙️",
+        logo_url="https://www.google.com/s2/favicons?domain=wisprflow.ai&sz=128",
         desc_key="plugin_desc_wispr",
         description="Search and read meeting notes, transcripts, and scratchpad notes.",
         supports_oauth=True,
@@ -270,6 +283,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="productivity",
         icon="📋",
+        logo_url="https://cdn.simpleicons.org/zoho",
         desc_key="plugin_desc_zoho_projects",
         description="Access project tasks, issues, and milestones in Zoho Projects.",
         supports_oauth=True,
@@ -282,6 +296,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="⚡",
+        logo_url="https://cdn.simpleicons.org/n8n",
         desc_key="plugin_desc_n8n",
         description="Build, test, and debug n8n workflows and automations.",
         supports_oauth=False,
@@ -293,6 +308,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="🎨",
+        logo_url="https://www.google.com/s2/favicons?domain=canva.com&sz=128",
         desc_key="plugin_desc_canva",
         description="Create, edit, resize, and review Canva designs.",
         supports_oauth=True,
@@ -304,6 +320,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="🖌️",
+        logo_url="https://cdn.simpleicons.org/figma",
         desc_key="plugin_desc_figma",
         description="Read and inspect Figma designs and convert components to code.",
         supports_oauth=True,
@@ -315,6 +332,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="💳",
+        logo_url="https://cdn.simpleicons.org/stripe",
         desc_key="plugin_desc_stripe",
         description="Manage customers, invoices, subscriptions, and payment links.",
         supports_oauth=True,
@@ -326,6 +344,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="💼",
+        logo_url="https://cdn.simpleicons.org/zoho",
         desc_key="plugin_desc_zoho_crm",
         description="Query and work with CRM contacts, leads, and deals.",
         supports_oauth=True,
@@ -337,6 +356,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="📇",
+        logo_url="https://www.google.com/s2/favicons?domain=bigin.com&sz=128",
         desc_key="plugin_desc_bigin",
         description="Manage Bigin CRM pipelines, contacts, deals, and follow-ups.",
         supports_oauth=True,
@@ -348,6 +368,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="business",
         icon="💬",
+        logo_url="https://cdn.simpleicons.org/intercom",
         desc_key="plugin_desc_intercom",
         description="Search Intercom customer conversations, contacts, and support trends.",
         supports_oauth=True,
@@ -360,6 +381,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="dev",
         icon="🔥",
+        logo_url="https://cdn.simpleicons.org/firebase",
         desc_key="plugin_desc_firebase",
         description="Build and operate apps with Firebase backend and AI tools.",
         supports_oauth=False,
@@ -371,6 +393,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="dev",
         icon="☁️",
+        logo_url="https://cdn.simpleicons.org/cloudflare",
         desc_key="plugin_desc_cloudflare",
         description="Manage Cloudflare Workers, storage, and edge deployments.",
         supports_oauth=True,
@@ -382,6 +405,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="dev",
         icon="🌐",
+        logo_url="https://cdn.simpleicons.org/netlify",
         desc_key="plugin_desc_netlify",
         description="Deploy and manage websites, functions, and forms on Netlify.",
         supports_oauth=True,
@@ -393,6 +417,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="dev",
         icon="📈",
+        logo_url="https://cdn.simpleicons.org/grafana",
         desc_key="plugin_desc_grafana",
         description="Query Grafana metrics, logs, dashboards, and alerts.",
         supports_oauth=True,
@@ -404,6 +429,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="dev",
         icon="🛠️",
+        logo_url="https://cdn.simpleicons.org/googlecloud",
         desc_key="plugin_desc_gcloud",
         description="Google Cloud guidance, gcloud validation, and developer knowledge.",
         supports_oauth=False,
@@ -415,6 +441,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="dev",
         icon="🧭",
+        logo_url="https://cdn.simpleicons.org/googlechrome",
         desc_key="plugin_desc_chrome",
         description="Browser debugging, automation, and performance analysis.",
         supports_oauth=False,
@@ -426,6 +453,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-official",
         category="dev",
         icon="📉",
+        logo_url="https://cdn.simpleicons.org/looker",
         desc_key="plugin_desc_looker",
         description="Explore Looker data, run Looks, and build dashboards.",
         supports_oauth=True,
@@ -437,6 +465,7 @@ PLUGIN_CATALOG: tuple[PluginCatalogItem, ...] = (
         marketplace="antigravity-plugins-partners",
         category="dev",
         icon="🕸️",
+        logo_url="https://cdn.simpleicons.org/neo4j",
         desc_key="plugin_desc_neo4j",
         description="Write Cypher queries, design graph models, and manage Neo4j Aura.",
         supports_oauth=False,
@@ -777,6 +806,46 @@ def build_plugin_permissions_prompt_hint(
     )
 
 
+_LOGO_MIME_BY_EXT: dict[str, str] = {
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def _resolve_manifest_logo(plugin_dir: Path, raw_logo: Any) -> str:
+    """Bezpečně převede hodnotu `logo` z `plugin.json` na HTTPS URL nebo lokální `data:` URI."""
+    if not isinstance(raw_logo, str):
+        return ""
+    cleaned = raw_logo.strip()
+    if not cleaned:
+        return ""
+    if cleaned.startswith("https://"):
+        return cleaned[:500]
+    if cleaned.startswith(("/", "\\", "http://")) or ".." in cleaned:
+        return ""
+    try:
+        root_resolved = plugin_dir.resolve()
+        candidate = plugin_dir / cleaned
+        if candidate.is_symlink() or not candidate.is_file():
+            return ""
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(root_resolved):
+            return ""
+        mime = _LOGO_MIME_BY_EXT.get(resolved.suffix.lower())
+        if not mime:
+            return ""
+        raw_bytes = resolved.read_bytes()
+        if not raw_bytes or len(raw_bytes) > 65536:
+            return ""
+        encoded = base64.b64encode(raw_bytes).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
+    except OSError:
+        return ""
+
+
 def detect_installed_plugins_from_disk(home_dir: Path) -> dict[str, dict[str, Any]]:
     """Načte nainstalované pluginy přímo z `~/.gemini/config/plugins/`."""
     plugins_root = home_dir / ".gemini" / "config" / "plugins"
@@ -821,6 +890,7 @@ def detect_installed_plugins_from_disk(home_dir: Path) -> dict[str, dict[str, An
             "display_name": str(manifest.get("displayName") or name),
             "version": str(manifest.get("version") or ""),
             "description": str(manifest.get("description") or ""),
+            "logo_url": _resolve_manifest_logo(folder, manifest.get("logo")),
             "enabled": not bool(manifest.get("disabled", False)),
             "path": str(folder),
             "has_auth_json": (folder / "auth.json").is_file(),
@@ -913,6 +983,7 @@ class PluginManager:
                                 "mcpServers": item.get("mcpServers") if isinstance(item.get("mcpServers"), list) else [],
                                 "display_name": disk_info.get("display_name") or raw_name,
                                 "description": disk_info.get("description") or "",
+                                "logo_url": disk_info.get("logo_url") or "",
                                 "has_auth_json": bool(disk_info.get("has_auth_json", False)),
                                 "disk_mcp_servers": disk_info.get("mcp_servers") or [],
                             }
@@ -932,6 +1003,7 @@ class PluginManager:
                 "mcpServers": [],
                 "display_name": info["display_name"],
                 "description": info["description"],
+                "logo_url": info["logo_url"],
                 "has_auth_json": info["has_auth_json"],
                 "disk_mcp_servers": info["mcp_servers"],
             }
@@ -976,6 +1048,11 @@ class PluginManager:
                     "marketplace": item.marketplace,
                     "category": item.category,
                     "icon": item.icon,
+                    "logo_url": str(
+                        (inst or {}).get("logo_url")
+                        or (disk or {}).get("logo_url")
+                        or item.logo_url
+                    ),
                     "desc_key": item.desc_key,
                     "description": item.description,
                     "supports_oauth": item.supports_oauth,
@@ -1006,6 +1083,7 @@ class PluginManager:
                     "marketplace": str(inst.get("source") or "custom"),
                     "category": "custom",
                     "icon": "🧩",
+                    "logo_url": str(inst.get("logo_url") or disk.get("logo_url") or ""),
                     "desc_key": "",
                     "description": str(inst.get("description") or ""),
                     "supports_oauth": supports_oauth,

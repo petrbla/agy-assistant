@@ -1511,7 +1511,22 @@
       titleWrap.className = "plugin-title-wrap";
       const iconEl = document.createElement("span");
       iconEl.className = "plugin-icon";
-      iconEl.textContent = p.icon || "🧩";
+      if (p.logo_url) {
+        const img = document.createElement("img");
+        img.className = "plugin-logo";
+        img.src = p.logo_url;
+        img.alt = p.display_name || p.name;
+        img.loading = "lazy";
+        img.referrerPolicy = "no-referrer";
+        img.onerror = () => {
+          iconEl.classList.remove("has-logo");
+          iconEl.textContent = p.icon || "🧩";
+        };
+        iconEl.classList.add("has-logo");
+        iconEl.appendChild(img);
+      } else {
+        iconEl.textContent = p.icon || "🧩";
+      }
       const textBox = document.createElement("div");
       const acctPart = p.installed && p.connected && p.account_label ? ` · ${p.account_label}` : "";
       const metaText = (p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace) + acctPart;

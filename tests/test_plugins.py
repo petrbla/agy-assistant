@@ -15,10 +15,12 @@ from app.db import AssistantDB
 from app.memory import WorkspaceMemory
 from app.plugins import (
     MANAGED_PLUGIN_DENY_PREFIXES,
+    PLUGIN_CATALOG,
     PluginConnectState,
     PluginManager,
     build_plugin_permissions_prompt_hint,
     compute_plugin_deny_rules,
+    detect_installed_plugins_from_disk,
     extract_oauth_callback_info,
     extract_signed_in_account,
     forward_localhost_callback_sync,
@@ -457,3 +459,37 @@ def test_extract_signed_in_account_and_account_label_persistence(tmp_path: Path)
     gmail_item = next(p for p in res.json()["plugins"] if p["name"] == "gmail")
     assert gmail_item["connected"] is True
     assert gmail_item["account_label"] == "user@example.com"
+
+
+def test_plugin_catalog_and_manifest_logos(tmp_path: Path) -> None:
+    assert len(PLUGIN_CATALOG) == 27
+    for item in PLUGIN_CATALOG:
+        assert item.logo_url.startswith("https://"), f"Chybí HTTPS logo_url pro {item.name}"
+
+    home_dir = tmp_path / "home"
+    plugins_root = home_dir / ".gemini" / "config" / "plugins"
+
+    # 1. Bezpečné načtení lokálního assets/logo.svg jako data URI
+    custom_dir = plugins_root / "custom-local"
+    (custom_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (custom_dir / "assets" / "logo.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>',
+        encoding="utf-8",
+    )
+    (custom_dir / "plugin.json").write_text(
+        json.dumps({"name": "custom-local", "logo": "assets/logo.svg"}),
+        encoding="utf-8",
+    )
+
+    # 2. Path traversal v manifestu nesmí přečíst soubor mimo složku pluginu
+    (plugins_root / "secret.svg").write_text("<svg/>", encoding="utf-8")
+    evil_dir = plugins_root / "custom-evil"
+    evil_dir.mkdir(parents=True, exist_ok=True)
+    (evil_dir / "plugin.json").write_text(
+        json.dumps({"name": "custom-evil", "logo": "../secret.svg"}),
+        encoding="utf-8",
+    )
+
+    detected = detect_installed_plugins_from_disk(home_dir)
+    assert detected["custom-local"]["logo_url"].startswith("data:image/svg+xml;base64,")
+    assert detected["custom-evil"]["logo_url"] == ""
