@@ -131,6 +131,26 @@ def test_extract_urls_reassembles_wrapped_oauth_and_osc8() -> None:
     )
     assert _merge_unique_urls([short_broken, full_oauth]) == [full_oauth]
 
+    # 6. Řídicí znak BEL (\x07) ani šipka (→) z konce OSC-8 sekvence se nesmí dostat do URL
+    bel_arrow_osc8 = (
+        "\x1b]8;;https://accounts.google.com/o/oauth2/auth?access_type=offline&state=2FrnI5aRQYA_gbMeTRoU_g"
+        "\x07→ Click here to authenticate\x1b]8;;\x07\n"
+    )
+    clean_bel = clean_terminal_output(bel_arrow_osc8)
+    assert "\x07" not in clean_bel
+    assert extract_osc8_urls(bel_arrow_osc8) == [
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&state=2FrnI5aRQYA_gbMeTRoU_g"
+    ]
+    raw_bel_arrow_text = (
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&state=2FrnI5aRQYA_gbMeTRoU_g\x07→\n"
+    )
+    assert extract_urls(raw_bel_arrow_text) == [
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&state=2FrnI5aRQYA_gbMeTRoU_g"
+    ]
+    assert extract_urls(clean_terminal_output(raw_bel_arrow_text)) == [
+        "https://accounts.google.com/o/oauth2/auth?access_type=offline&state=2FrnI5aRQYA_gbMeTRoU_g"
+    ]
+
 
 def test_runtime_overrides_persist_and_sync_settings(tmp_path: Path) -> None:
     settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data")

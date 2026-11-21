@@ -23,8 +23,9 @@ except ImportError:  # Windows nemá POSIX pty/fcntl/termios
 _ANSI_RE = re.compile(r"\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _CURSOR_NEWLINE_RE = re.compile(r"\x1B\[(?:[0-9;]*[HfE]|2J)")
 _CURSOR_RIGHT_RE = re.compile(r"\x1B\[(\d*)C")
-_OSC8_URL_RE = re.compile(r"\x1B\]8;[^;\x07\x1B]*;(https?://[^\x07\x1B]+)(?:\x07|\x1B\\)")
-_URL_RE = re.compile(r"https?://[^\s<>\"'\)\]]+")
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_OSC8_URL_RE = re.compile(r"\x1B\]8;[^;\x07\x1B]*;(https?://[A-Za-z0-9\-._~:/?#@!$&'*+,;=%]+)(?:\x07|\x1B\\)")
+_URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#@!$&'*+,;=%]+")
 _URL_CHAR_RE = re.compile(r"^[A-Za-z0-9\-._~:/?#@!$&'*+,;=%]+$")
 _TRAILING_URL_SEP_RE = re.compile(r"(?:%[0-9A-Fa-f]?|[&=+/\-_.:~])$")
 _BOX_BORDER_RE = re.compile(r"^[│|┃║\s]+$")
@@ -32,10 +33,11 @@ _GOOGLE_OAUTH_PREFIX = "https://accounts.google.com/o/oauth2/auth"
 
 
 def clean_terminal_output(raw: str) -> str:
-    """Odstraní ANSI sekvence z výstupu terminálu se zachováním řádkování kurzoru."""
+    """Odstraní ANSI a řídicí sekvence z výstupu terminálu se zachováním řádkování kurzoru."""
     normalized = _CURSOR_NEWLINE_RE.sub("\n", raw)
     normalized = _CURSOR_RIGHT_RE.sub(lambda m: " " * min(int(m.group(1) or 1), 8), normalized)
     cleaned = _ANSI_RE.sub("", normalized)
+    cleaned = _CTRL_CHARS_RE.sub("", cleaned)
     return cleaned.replace("\r\n", "\n").replace("\r", "\n")
 
 
@@ -238,8 +240,7 @@ class AgyAuthManager:
                     break
                 raw_text = chunk.decode("utf-8", errors="replace")
                 self._raw_output = (self._raw_output + raw_text)[-32000:]
-                text = clean_terminal_output(raw_text)
-                self._state.output = (self._state.output + text)[-16000:]
+                self._state.output = clean_terminal_output(self._raw_output)[-16000:]
                 self._state.urls = _merge_unique_urls(
                     [*extract_osc8_urls(self._raw_output), *extract_urls(self._state.output)]
                 )
