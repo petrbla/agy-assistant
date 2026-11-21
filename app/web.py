@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,17 @@ from app.user_env import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _static_asset_url(path: str) -> str:
+    """Doplní query parametr verze a času úpravy pro cache-busting statických souborů."""
+    rel = path.removeprefix("/static/").lstrip("/")
+    asset_file = STATIC_DIR / rel
+    try:
+        mtime = int(asset_file.stat().st_mtime)
+    except OSError:
+        return f"{path}?v={__version__}"
+    return f"{path}?v={__version__}-{mtime}"
 
 
 class ChatRequest(BaseModel):
@@ -364,10 +375,25 @@ def create_app(
         return False
 
     @app.get("/", response_model=None)
-    async def index() -> FileResponse | dict[str, str]:
+    async def index() -> HTMLResponse | dict[str, str]:
         index_file = STATIC_DIR / "index.html"
         if index_file.is_file():
-            return FileResponse(index_file)
+            html = index_file.read_text(encoding="utf-8")
+            html = (
+                html.replace(
+                    'href="/static/favicon.svg"',
+                    f'href="{_static_asset_url("/static/favicon.svg")}"',
+                )
+                .replace(
+                    'href="/static/styles.css"',
+                    f'href="{_static_asset_url("/static/styles.css")}"',
+                )
+                .replace(
+                    'src="/static/app.js"',
+                    f'src="{_static_asset_url("/static/app.js")}"',
+                )
+            )
+            return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
         return {"status": "ok", "message": "Asistent Antigravity API běží."}
 
     @app.get("/favicon.ico", include_in_schema=False)

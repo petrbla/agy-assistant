@@ -69,6 +69,13 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert "appVersionBadge" in home_res.text
     assert "appVerBadge" in home_res.text
     assert "appUpdateBanner" in home_res.text
+    assert "bootstrap@5.3.9/dist/css/bootstrap.min.css" in home_res.text
+    assert "bootstrap@5.3.9/dist/js/bootstrap.bundle.min.js" in home_res.text
+    assert "bootstrap-icons@1.13.2/font/bootstrap-icons.min.css" in home_res.text
+    assert "tabler-icons" not in home_res.text
+    assert "no-cache" in (home_res.headers.get("cache-control") or "").lower()
+    assert f"/static/styles.css?v={__version__}-" in home_res.text
+    assert f"/static/app.js?v={__version__}-" in home_res.text
     assert "/static/favicon.svg" in home_res.text
     fav_svg = client.get("/static/favicon.svg")
     assert fav_svg.status_code == 200 and "<svg" in fav_svg.text

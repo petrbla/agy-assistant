@@ -38,28 +38,36 @@
   let isSending = false;
   let authPollTimer = null;
   const FEATURED_PLUGINS = ["gmail", "gcalendar", "gdrive"];
-  const TABLER_ICONS = {
-    sun: "ti-sun",
-    moon: "ti-moon",
-    globe: "ti-world",
-    chevronDown: "ti-chevron-down",
-    chevronUp: "ti-chevron-up",
-    play: "ti-player-play",
-    pause: "ti-player-pause",
-    trash: "ti-trash",
-    sliders: "ti-adjustments-horizontal",
-    plus: "ti-plus",
-    puzzle: "ti-puzzle",
-    x: "ti-x",
-    info: "ti-info-circle",
-    sparkles: "ti-sparkles",
-    logOut: "ti-logout",
+  const BS_ICONS = {
+    sun: "bi-sun",
+    moon: "bi-moon-stars",
+    globe: "bi-globe2",
+    chevronDown: "bi-chevron-down",
+    chevronUp: "bi-chevron-up",
+    play: "bi-play-fill",
+    pause: "bi-pause-fill",
+    trash: "bi-trash",
+    sliders: "bi-sliders",
+    plus: "bi-plus-lg",
+    puzzle: "bi-puzzle",
+    x: "bi-x-lg",
+    info: "bi-info-circle",
+    sparkles: "bi-stars",
+    logOut: "bi-box-arrow-right",
   };
 
   function uiIcon(name, extraCls = "") {
-    const tiCls = TABLER_ICONS[name] || "ti-point";
-    const cls = extraCls ? `ti ${tiCls} ui-ico ${extraCls}` : `ti ${tiCls} ui-ico`;
+    const biCls = BS_ICONS[name] || "bi-dot";
+    const cls = extraCls ? `bi ${biCls} ${extraCls}` : `bi ${biCls}`;
     return `<i class="${cls}" aria-hidden="true"></i>`;
+  }
+
+  function badgeCls(kind = "") {
+    if (kind === "ok" || kind === "success") return "badge rounded-pill text-bg-success";
+    if (kind === "warn" || kind === "warning") return "badge rounded-pill text-bg-warning";
+    if (kind === "err" || kind === "danger") return "badge rounded-pill text-bg-danger";
+    if (kind === "accent" || kind === "primary") return "badge rounded-pill text-bg-primary";
+    return "badge rounded-pill text-bg-secondary";
   }
 
   let pluginsCatalog = [];
@@ -124,18 +132,18 @@
     if (el && info.app_version) {
       if (info.app_update_available && info.app_latest_version) {
         el.textContent = `v${info.app_version} → v${info.app_latest_version}`;
-        el.className = "version-tag warn";
+        el.className = "badge rounded-pill border-0 font-monospace version-tag text-bg-warning";
         el.title = t("tooltip_app_ver_update", {
           current: info.app_version,
           latest: info.app_latest_version,
         });
       } else if (info.app_up_to_date === true) {
         el.textContent = `v${info.app_version} ✓`;
-        el.className = "version-tag ok";
+        el.className = "badge rounded-pill border-0 font-monospace version-tag text-bg-success";
         el.title = t("tooltip_app_ver_current", { ver: info.app_version });
       } else {
         el.textContent = `v${info.app_version}`;
-        el.className = "version-tag";
+        el.className = "badge rounded-pill border-0 font-monospace version-tag text-bg-secondary";
         el.title = t("tooltip_app_ver_check", { ver: info.app_version });
       }
     }
@@ -144,16 +152,16 @@
     if (badge && info.app_version) {
       if (info.app_update_available && info.app_latest_version) {
         badge.textContent = t("app_ver_available", { ver: info.app_latest_version });
-        badge.className = "pill warn";
-        badge.classList.remove("hidden");
+        badge.className = badgeCls("warn");
+        badge.classList.remove("d-none");
       } else if (info.app_up_to_date === true) {
         badge.textContent = t("app_ver_current", { ver: info.app_version });
-        badge.className = "pill ok";
-        badge.classList.remove("hidden");
+        badge.className = badgeCls("ok");
+        badge.classList.remove("d-none");
       } else {
         badge.textContent = t("app_ver_plain", { ver: info.app_version });
-        badge.className = "pill";
-        badge.classList.remove("hidden");
+        badge.className = badgeCls();
+        badge.classList.remove("d-none");
       }
     }
 
@@ -165,7 +173,7 @@
         && info.app_latest_version
         && dismissedVer !== info.app_latest_version
       );
-      banner.classList.toggle("hidden", !showBanner);
+      banner.classList.toggle("d-none", !showBanner);
       if (showBanner && $("appUpdateBannerText")) {
         $("appUpdateBannerText").textContent = t("app_update_banner", {
           current: info.app_version,
@@ -251,7 +259,7 @@
     if (curBase) syncEffortUi(curBase, curEff);
     if (pluginsCatalog.length) renderPlugins();
     if (lastAppVerInfo) updateAppVersionBadge(lastAppVerInfo);
-    if (lastPluginConnectState && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("hidden")) {
+    if (lastPluginConnectState && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("d-none")) {
       renderPluginConnectState(lastPluginConnectState);
     }
   }
@@ -303,13 +311,13 @@
   // Theme (dark / light)
   function applyTheme(tMode) {
     const theme = tMode === "light" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.setAttribute("data-bs-theme", theme);
     localStorage.setItem("agy_theme", theme);
     $("themeBtn").innerHTML = theme === "dark" ? uiIcon("sun") : uiIcon("moon");
   }
   applyTheme(localStorage.getItem("agy_theme") || "dark");
   $("themeBtn").onclick = () => {
-    const cur = document.documentElement.getAttribute("data-theme");
+    const cur = document.documentElement.getAttribute("data-bs-theme");
     applyTheme(cur === "dark" ? "light" : "dark");
   };
 
@@ -318,7 +326,7 @@
   function toast(msg, kind = "ok") {
     const el = $("toast");
     el.textContent = msg;
-    el.className = `toast show ${kind}`;
+    el.className = `app-toast show ${kind}`;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove("show"), 3600);
   }
@@ -401,7 +409,7 @@
       b.classList.toggle("active", b.dataset.tab === tab);
     });
     ["chat", "memory", "ops", "settings"].forEach((tabId) => {
-      $(`tab-${tabId}`).classList.toggle("hidden", tabId !== tab);
+      $(`tab-${tabId}`).classList.toggle("d-none", tabId !== tab);
     });
     if (tab === "memory") loadFiles();
     if (tab === "ops") loadOps();
@@ -414,31 +422,31 @@
   function showAuthScreen(mode) {
     inAgyOnboarding = mode === "agy-onboarding";
     isAuthenticated = inAgyOnboarding;
-    $("authScreen").classList.remove("hidden");
+    $("authScreen").classList.remove("d-none");
     $("authScreen").classList.toggle("wide", inAgyOnboarding);
-    $("appMain").classList.add("hidden");
-    $("logoutBtn").classList.toggle("hidden", !inAgyOnboarding || !localStorage.getItem("agy_web_token"));
+    $("appMain").classList.add("d-none");
+    $("logoutBtn").classList.toggle("d-none", !inAgyOnboarding || !localStorage.getItem("agy_web_token"));
     document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = true; });
-    $("initialSetupCard").classList.toggle("hidden", mode !== "initial");
-    $("loginCard").classList.toggle("hidden", mode !== "login");
-    if ($("agyOnboardingCard")) $("agyOnboardingCard").classList.toggle("hidden", !inAgyOnboarding);
+    $("initialSetupCard").classList.toggle("d-none", mode !== "initial");
+    $("loginCard").classList.toggle("d-none", mode !== "login");
+    if ($("agyOnboardingCard")) $("agyOnboardingCard").classList.toggle("d-none", !inAgyOnboarding);
   }
 
   function showAppMain() {
     inAgyOnboarding = false;
     isAuthenticated = true;
     authScreenStatusKey = "";
-    $("authScreen").classList.add("hidden");
+    $("authScreen").classList.add("d-none");
     $("authScreen").classList.remove("wide");
-    $("appMain").classList.remove("hidden");
+    $("appMain").classList.remove("d-none");
     document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = false; });
-    $("logoutBtn").classList.toggle("hidden", !localStorage.getItem("agy_web_token"));
+    $("logoutBtn").classList.toggle("d-none", !localStorage.getItem("agy_web_token"));
   }
 
   function showAuthErr(msg) {
     const el = $("authError");
     el.textContent = msg || "";
-    el.classList.toggle("hidden", !msg);
+    el.classList.toggle("d-none", !msg);
   }
 
   // Auth & Bootstrap
@@ -454,11 +462,11 @@
       await applyLanguage(preferredLang, { persistBackend: false });
 
       $("brandTitle").textContent = displayBrandTitle(st.assistant_name);
-      $("tokenLoginWrap").classList.toggle("hidden", !st.has_token_configured);
+      $("tokenLoginWrap").classList.toggle("d-none", !st.has_token_configured);
       if (st.needs_initial_setup) {
         authScreenStatusKey = "status_initial_setup";
         $("statusPill").textContent = t(authScreenStatusKey);
-        $("statusPill").className = "pill warn";
+        $("statusPill").className = badgeCls("warn");
         showAuthScreen("initial");
         return;
       }
@@ -481,10 +489,10 @@
       isAuthenticated = false;
       inAgyOnboarding = false;
       lastStatus = null;
-      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("hidden");
+      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("d-none");
       authScreenStatusKey = "status_signed_out";
       $("statusPill").textContent = t(authScreenStatusKey);
-      $("statusPill").className = "pill";
+      $("statusPill").className = badgeCls();
       showAuthScreen("login");
     }
   }
@@ -532,8 +540,8 @@
       if (!res.ok) return showAuthErr(data.detail || t("err_login_failed"));
       if (data.requires_2fa) {
         pending2faChallenge = data.challenge_token;
-        $("loginStep1Form").classList.add("hidden");
-        $("loginStep2Form").classList.remove("hidden");
+        $("loginStep1Form").classList.add("d-none");
+        $("loginStep2Form").classList.remove("d-none");
         $("login2faCode").value = "";
         $("login2faCode").focus();
         return;
@@ -562,8 +570,8 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return showAuthErr(data.detail || t("err_invalid_2fa"));
       localStorage.setItem("agy_web_token", data.session_token);
-      $("loginStep2Form").classList.add("hidden");
-      $("loginStep1Form").classList.remove("hidden");
+      $("loginStep2Form").classList.add("d-none");
+      $("loginStep1Form").classList.remove("d-none");
       toast(t("toast_signed_in_2fa"));
       await loadAuthAndBootstrap();
     } catch (err) {
@@ -573,8 +581,8 @@
 
   $("login2faBackBtn").onclick = () => {
     pending2faChallenge = "";
-    $("loginStep2Form").classList.add("hidden");
-    $("loginStep1Form").classList.remove("hidden");
+    $("loginStep2Form").classList.add("d-none");
+    $("loginStep1Form").classList.remove("d-none");
   };
 
   $("loginTokenBtn").onclick = async () => {
@@ -607,7 +615,7 @@
     sessionStorage.removeItem("agy_onboarding_skipped");
     lastStatus = null;
     lastAppVerInfo = null;
-    if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("hidden");
+    if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("d-none");
     await loadAuthAndBootstrap();
   };
 
@@ -619,21 +627,21 @@
     const pill = $("statusPill");
     if (!s.agy_available) {
       dot.className = "brand-dot err";
-      pill.className = "pill err";
+      pill.className = badgeCls("err");
       pill.textContent = t("status_agy_unavailable");
     } else if (!s.agy_authenticated) {
       dot.className = "brand-dot warn";
-      pill.className = "pill warn";
+      pill.className = badgeCls("warn");
       pill.textContent = t("status_agy_unauthenticated", { version: s.agy_version || "agy" });
     } else {
       dot.className = "brand-dot ok";
-      pill.className = "pill ok";
+      pill.className = badgeCls("ok");
       pill.textContent = s.agy_version ? `agy ${s.agy_version}` : t("status_online");
     }
     updateAgyBadges(s);
     updateSecurityUi(s);
     const banner = $("chatAgyAuthBanner");
-    if (banner) banner.classList.toggle("hidden", !s.agy_available || Boolean(s.agy_authenticated));
+    if (banner) banner.classList.toggle("d-none", !s.agy_available || Boolean(s.agy_authenticated));
   }
 
   function updateAgyBadges(info) {
@@ -647,38 +655,38 @@
     if (parts.length) {
       const label = t("agy_auth_signed_in", { parts: parts.join(" + ") });
       authBadge.textContent = label;
-      authBadge.className = "pill ok";
+      authBadge.className = badgeCls("ok");
       if (onboardBadge) {
         onboardBadge.textContent = label;
-        onboardBadge.className = "pill ok";
+        onboardBadge.className = badgeCls("ok");
       }
-      if (finishBtn) finishBtn.classList.remove("hidden");
-      logoutBtn.classList.remove("hidden");
+      if (finishBtn) finishBtn.classList.remove("d-none");
+      logoutBtn.classList.remove("d-none");
     } else if (typeof info.has_agy_oauth === "boolean") {
       authBadge.textContent = t("agy_auth_signed_out");
-      authBadge.className = "pill err";
+      authBadge.className = badgeCls("err");
       if (onboardBadge) {
         onboardBadge.textContent = t("agy_auth_signed_out");
-        onboardBadge.className = "pill err";
+        onboardBadge.className = badgeCls("err");
       }
-      if (finishBtn) finishBtn.classList.add("hidden");
-      logoutBtn.classList.add("hidden");
+      if (finishBtn) finishBtn.classList.add("d-none");
+      logoutBtn.classList.add("d-none");
     }
 
     const verBadge = $("agyVerBadge");
     const updBtn = $("updateAgyBtn");
     if (info.agy_update_available && info.agy_latest_version) {
       verBadge.textContent = t("agy_ver_available", { ver: info.agy_latest_version });
-      verBadge.className = "pill warn";
-      updBtn.classList.remove("hidden");
+      verBadge.className = badgeCls("warn");
+      updBtn.classList.remove("d-none");
     } else if (info.agy_up_to_date === true) {
       verBadge.textContent = t("agy_ver_current", { ver: info.agy_version });
-      verBadge.className = "pill ok";
-      updBtn.classList.add("hidden");
+      verBadge.className = badgeCls("ok");
+      updBtn.classList.add("d-none");
     } else if (info.agy_version) {
       verBadge.textContent = info.agy_version;
-      verBadge.className = "pill";
-      updBtn.classList.add("hidden");
+      verBadge.className = badgeCls();
+      updBtn.classList.add("d-none");
     }
   }
 
@@ -741,10 +749,10 @@
     const ordered = EFFORTS.filter((e) => effs.includes(e));
     const wrap = $("effortWrap");
     if (!base || ordered.length < 2) {
-      wrap.classList.add("hidden");
+      wrap.classList.add("d-none");
       return;
     }
-    wrap.classList.remove("hidden");
+    wrap.classList.remove("d-none");
     const range = $("effortRange");
     range.min = "0";
     range.max = String(ordered.length - 1);
@@ -918,7 +926,7 @@
       .forEach((f) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "file-item" + (f.path === currentFile ? " active" : "");
+        b.className = "list-group-item list-group-item-action font-monospace small py-2" + (f.path === currentFile ? " active" : "");
         b.textContent = f.path;
         b.onclick = () => openFile(f.path);
         list.appendChild(b);
@@ -1080,7 +1088,7 @@
       jl.innerHTML = "";
       if (systemJobs.length) {
         const label = document.createElement("span");
-        label.className = "jobs-label";
+        label.className = "small fw-semibold text-uppercase text-body-secondary me-1";
         label.textContent = t("system_jobs_label");
         jl.appendChild(label);
         systemJobs
@@ -1095,12 +1103,12 @@
             jl.appendChild(chip);
           });
       }
-      jl.classList.toggle("hidden", !systemJobs.length);
+      jl.classList.toggle("d-none", !systemJobs.length);
 
       const tb = $("tasksBody");
       tb.innerHTML = "";
       if (!tasks.length) {
-        tb.innerHTML = `<tr><td colspan="6" class="muted" style="text-align:center;padding:18px;">${escapeHtml(t("tasks_empty"))}</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="6" class="text-body-secondary text-center py-3">${escapeHtml(t("tasks_empty"))}</td></tr>`;
       }
       const sorted = [...tasks].sort((a, b) => {
         const na = a.enabled ? nextByName.get(a.name) || "~" : "~~";
@@ -1113,25 +1121,25 @@
         const raw = task.schedule_type === "once" ? task.run_at : task.cron_expr;
         const next = task.enabled ? nextByName.get(task.name) : null;
         const typePill = task.action_type === "agent"
-          ? `<span class="pill accent">${escapeHtml(t("task_type_ai"))}</span>`
-          : `<span class="pill">${escapeHtml(t("task_type_msg"))}</span>`;
+          ? `<span class="${badgeCls("primary")}">${escapeHtml(t("task_type_ai"))}</span>`
+          : `<span class="${badgeCls()}">${escapeHtml(t("task_type_msg"))}</span>`;
         const statePill = task.enabled
-          ? `<span class="pill ok">${escapeHtml(t("task_state_active"))}</span>`
-          : `<span class="pill">${escapeHtml(t("task_state_paused"))}</span>`;
+          ? `<span class="${badgeCls("ok")}">${escapeHtml(t("task_state_active"))}</span>`
+          : `<span class="${badgeCls()}">${escapeHtml(t("task_state_paused"))}</span>`;
         tr.innerHTML =
-          `<td class="task-name">${escapeHtml(task.name)}</td>` +
-          `<td class="nowrap"><div title="${escapeHtml(raw)}">${escapeHtml(humanSchedule(task))}</div>` +
-          `<div class="task-next">${next ? escapeHtml(t("task_next_prefix", { time: fmtNextRun(next) })) : "—"}</div></td>` +
+          `<td class="task-name fw-semibold">${escapeHtml(task.name)}</td>` +
+          `<td class="text-nowrap"><div title="${escapeHtml(raw)}">${escapeHtml(humanSchedule(task))}</div>` +
+          `<div class="small text-body-secondary">${next ? escapeHtml(t("task_next_prefix", { time: fmtNextRun(next) })) : "—"}</div></td>` +
           `<td>${typePill}</td>` +
           `<td><div class="task-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(task.prompt)}</div></td>` +
           `<td>${statePill}</td>`;
         const td = document.createElement("td");
-        td.className = "task-actions";
+        td.className = "text-nowrap text-end";
         const mk = (iconName, cls, title, fn) => {
           const b = document.createElement("button");
           b.type = "button";
-          b.className = "btn btn-sm " + cls;
-          b.innerHTML = uiIcon(iconName, "ui-ico-sm");
+          b.className = "btn btn-sm ms-1 " + cls;
+          b.innerHTML = uiIcon(iconName);
           b.title = title;
           b.setAttribute("aria-label", title);
           b.onclick = async () => {
@@ -1141,15 +1149,15 @@
           return b;
         };
         td.append(
-          mk("play", "btn-icon-sm", t("task_action_run"), async () => {
+          mk("play", "btn-outline-secondary btn-icon-sm", t("task_action_run"), async () => {
             await api(`/api/tasks/${task.id}/run`, { method: "POST" });
             toast(t("toast_task_run", { name: task.name }));
           }),
-          mk(task.enabled ? "pause" : "play", "btn-icon-sm", task.enabled ? t("task_action_pause") : t("task_action_resume"), async () => {
+          mk(task.enabled ? "pause" : "play", "btn-outline-secondary btn-icon-sm", task.enabled ? t("task_action_pause") : t("task_action_resume"), async () => {
             await api(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !task.enabled }) });
             toast(task.enabled ? t("toast_task_paused") : t("toast_task_resumed"));
           }),
-          mk("trash", "btn-icon-sm btn-danger", t("task_action_delete"), async () => {
+          mk("trash", "btn-outline-danger btn-icon-sm", t("task_action_delete"), async () => {
             if (!confirm(t("confirm_delete_task", { name: task.name }))) throw new Error(t("toast_cancelled"));
             await api(`/api/tasks/${task.id}`, { method: "DELETE" });
             toast(t("toast_task_deleted"));
@@ -1167,7 +1175,7 @@
         const dt = r.created_at ? new Date(r.created_at).toLocaleString(loc) : "";
         const tok = `${r.tokens_estimated ? "~" : ""}${fmtInt(r.total_tokens)}`;
         const dur = `${(r.duration_ms / 1000).toFixed(1)} s`;
-        tr.innerHTML = `<td class="mono">${escapeHtml(dt)}</td><td>${escapeHtml(r.source)}</td><td>${escapeHtml(channelLabel(r.context_mode))}</td><td>${escapeHtml((r.prompt || "").slice(0, 90))}</td><td>${escapeHtml((r.response || r.error || "").slice(0, 110))}</td><td class="mono">${tok}</td><td class="mono">${dur}</td>`;
+        tr.innerHTML = `<td class="font-monospace">${escapeHtml(dt)}</td><td>${escapeHtml(r.source)}</td><td>${escapeHtml(channelLabel(r.context_mode))}</td><td>${escapeHtml((r.prompt || "").slice(0, 90))}</td><td>${escapeHtml((r.response || r.error || "").slice(0, 110))}</td><td class="font-monospace">${tok}</td><td class="font-monospace">${dur}</td>`;
         rb.appendChild(tr);
       });
     } catch (err) {
@@ -1177,8 +1185,8 @@
 
   $("taskScheduleType").onchange = () => {
     const isOnce = $("taskScheduleType").value === "once";
-    $("taskCron").classList.toggle("hidden", isOnce);
-    $("taskRunAt").classList.toggle("hidden", !isOnce);
+    $("taskCron").classList.toggle("d-none", isOnce);
+    $("taskRunAt").classList.toggle("d-none", !isOnce);
   };
 
   $("taskForm").onsubmit = async (e) => {
@@ -1487,7 +1495,7 @@
       if (lastAppVerInfo && lastAppVerInfo.app_latest_version) {
         sessionStorage.setItem("agy_dismissed_app_ver", lastAppVerInfo.app_latest_version);
       }
-      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("hidden");
+      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("d-none");
     };
   }
   if ($("appVersionBadge")) {
@@ -1560,10 +1568,10 @@
   // MCP
   $("mcpTransport").onchange = () => {
     const isStdio = $("mcpTransport").value === "stdio";
-    $("mcpUrlWrap").classList.toggle("hidden", isStdio);
-    $("mcpTokenWrap").classList.toggle("hidden", isStdio);
-    $("mcpCmdWrap").classList.toggle("hidden", !isStdio);
-    $("mcpArgsWrap").classList.toggle("hidden", !isStdio);
+    $("mcpUrlWrap").classList.toggle("d-none", isStdio);
+    $("mcpTokenWrap").classList.toggle("d-none", isStdio);
+    $("mcpCmdWrap").classList.toggle("d-none", !isStdio);
+    $("mcpArgsWrap").classList.toggle("d-none", !isStdio);
   };
 
   async function loadMcp() {
@@ -1579,10 +1587,10 @@
       items.forEach((srv) => {
         const tr = document.createElement("tr");
         const target = srv.transport === "stdio" ? `${srv.command} ${(srv.args || []).join(" ")}` : srv.url;
-        tr.innerHTML = `<td><strong>${escapeHtml(srv.name)}</strong></td><td>${escapeHtml(labels[srv.scope] || labels.all)}</td><td class="mono">${escapeHtml(target)}</td>`;
+        tr.innerHTML = `<td><strong>${escapeHtml(srv.name)}</strong></td><td>${escapeHtml(labels[srv.scope] || labels.all)}</td><td class="font-monospace">${escapeHtml(target)}</td>`;
         const td = document.createElement("td");
         const del = document.createElement("button");
-        del.className = "btn btn-sm btn-danger";
+        del.className = "btn btn-outline-danger btn-sm";
         del.textContent = t("btn_delete");
         del.onclick = async () => {
           await api(`/api/mcp/${srv.id}`, { method: "DELETE" });
@@ -1682,18 +1690,18 @@
     const moreBtn = $("toggleMorePluginsBtn");
     if (moreWrap && moreBtn) {
       if (isDefaultCatalogView && hiddenCount > 0) {
-        moreWrap.classList.remove("hidden");
+        moreWrap.classList.remove("d-none");
         moreBtn.innerHTML = showAllPlugins
-          ? `${uiIcon("chevronUp", "ui-ico-sm")} <span>${escapeHtml(t("plugins_show_less"))}</span>`
-          : `${uiIcon("chevronDown", "ui-ico-sm")} <span>${escapeHtml(t("plugins_show_more", { count: hiddenCount }))}</span>`;
+          ? `${uiIcon("chevronUp", "me-1")}<span>${escapeHtml(t("plugins_show_less"))}</span>`
+          : `${uiIcon("chevronDown", "me-1")}<span>${escapeHtml(t("plugins_show_more", { count: hiddenCount }))}</span>`;
       } else {
-        moreWrap.classList.add("hidden");
+        moreWrap.classList.add("d-none");
       }
     }
 
     if (!displayList.length) {
       const empty = document.createElement("div");
-      empty.className = "muted";
+      empty.className = "text-body-secondary small";
       empty.textContent = t("plugins_empty");
       grid.appendChild(empty);
       return;
@@ -1701,13 +1709,18 @@
 
     displayList.forEach((p) => {
       const card = document.createElement("div");
-      card.className = p.installed && p.enabled ? "plugin-card is-active" : "plugin-card";
+      card.className = p.installed && p.enabled
+        ? "card h-100 shadow-sm border-primary plugin-card"
+        : "card h-100 shadow-sm plugin-card";
+
+      const cardBody = document.createElement("div");
+      cardBody.className = "card-body d-flex flex-column gap-2 p-3";
 
       const head = document.createElement("div");
-      head.className = "plugin-head";
+      head.className = "d-flex align-items-start justify-content-between gap-2";
 
       const titleWrap = document.createElement("div");
-      titleWrap.className = "plugin-title-wrap";
+      titleWrap.className = "d-flex align-items-center gap-2 min-w-0";
       const iconEl = document.createElement("span");
       iconEl.className = "plugin-icon";
       if (p.logo_url) {
@@ -1719,53 +1732,54 @@
         img.referrerPolicy = "no-referrer";
         img.onerror = () => {
           iconEl.classList.remove("has-logo");
-          iconEl.innerHTML = uiIcon("puzzle", "ui-ico-lg");
+          iconEl.innerHTML = uiIcon("puzzle", "fs-5");
         };
         iconEl.classList.add("has-logo");
         iconEl.appendChild(img);
       } else {
-        iconEl.innerHTML = uiIcon("puzzle", "ui-ico-lg");
+        iconEl.innerHTML = uiIcon("puzzle", "fs-5");
       }
 
       const accounts = Array.isArray(p.accounts) ? p.accounts : [];
       const connectedCount = accounts.filter((a) => a.connected).length;
       const textBox = document.createElement("div");
+      textBox.className = "min-w-0";
       const acctPart = p.installed && connectedCount === 1 && p.account_label ? ` · ${p.account_label}` : "";
       const metaText = (p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace) + acctPart;
-      textBox.innerHTML = `<div class="plugin-name">${escapeHtml(p.display_name || p.name)}</div><div class="plugin-meta mono">${escapeHtml(metaText)}</div>`;
+      textBox.innerHTML = `<div class="fw-bold small lh-sm">${escapeHtml(p.display_name || p.name)}</div><div class="small text-body-secondary font-monospace text-truncate" style="font-size:0.72rem;" title="${escapeHtml(metaText)}">${escapeHtml(metaText)}</div>`;
       titleWrap.append(iconEl, textBox);
 
       const badge = document.createElement("span");
       if (p.installed && connectedCount > 1) {
-        badge.className = "pill ok";
+        badge.className = badgeCls("ok");
         badge.textContent = t("plugin_status_connected_multi", { count: connectedCount });
       } else if (p.installed && p.connected) {
-        badge.className = "pill ok";
+        badge.className = badgeCls("ok");
         badge.textContent = t("plugin_status_connected");
         if (p.account_label) badge.title = p.account_label;
       } else if (p.installed && p.enabled) {
-        badge.className = "pill accent";
+        badge.className = badgeCls("primary");
         badge.textContent = t("plugin_status_installed");
       } else if (p.installed) {
-        badge.className = "pill warn";
+        badge.className = badgeCls("warn");
         badge.textContent = t("plugin_status_disabled");
       } else {
-        badge.className = "pill";
+        badge.className = badgeCls();
         badge.textContent = t("plugin_status_available");
       }
       head.append(titleWrap, badge);
 
       const desc = document.createElement("p");
-      desc.className = "plugin-desc";
+      desc.className = "small text-body-secondary mb-auto";
       desc.textContent = pluginDescription(p);
 
       const actions = document.createElement("div");
-      actions.className = "plugin-actions";
+      actions.className = "d-flex flex-wrap gap-2 mt-1";
 
       const makeBtn = (labelHtml, cls, handler) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = `btn btn-sm ${cls}`.trim();
+        b.className = `btn btn-sm ${cls || "btn-outline-secondary"}`.trim();
         b.innerHTML = labelHtml;
         b.onclick = async () => {
           b.disabled = true;
@@ -1799,7 +1813,7 @@
         if (p.supports_oauth) {
           actions.appendChild(
             makeBtn(
-              `${uiIcon("plus", "ui-ico-sm")} <span>${escapeHtml(t("plugin_btn_add_account"))}</span>`,
+              `${uiIcon("plus", "me-1")}<span>${escapeHtml(t("plugin_btn_add_account"))}</span>`,
               "",
               async () => {
                 if (addAccountOpenFor.has(p.name)) addAccountOpenFor.delete(p.name);
@@ -1826,7 +1840,7 @@
           })
         );
         actions.appendChild(
-          makeBtn(escapeHtml(t("plugin_btn_uninstall")), "btn-danger", async () => {
+          makeBtn(escapeHtml(t("plugin_btn_uninstall")), "btn-outline-danger", async () => {
             if (!confirm(t("confirm_uninstall_plugin", { name: p.display_name || p.name }))) return;
             try {
               await api(`/api/plugins/${encodeURIComponent(p.name)}`, { method: "DELETE" });
@@ -1837,25 +1851,26 @@
         );
       }
 
-      card.append(head, desc, actions);
+      cardBody.append(head, desc, actions);
 
       // Inline formulář pro přidání nového účtu (např. Pracovní / Osobní)
       if (p.installed && addAccountOpenFor.has(p.name)) {
         const addBox = document.createElement("form");
-        addBox.className = "plugin-add-account-form";
+        addBox.className = "p-2 rounded border bg-body-tertiary d-flex flex-column gap-2 mt-1";
         const addTitle = document.createElement("div");
         addTitle.className = "plugin-perm-title";
         addTitle.textContent = t("plugin_account_add_title");
 
         const rowFields = document.createElement("div");
-        rowFields.className = "row";
+        rowFields.className = "d-flex align-items-center flex-wrap gap-2";
         const labelInp = document.createElement("input");
         labelInp.type = "text";
-        labelInp.className = "input grow";
+        labelInp.className = "form-control form-control-sm flex-grow-1";
+        labelInp.style.minWidth = "130px";
         labelInp.placeholder = t("plugin_account_label_ph");
 
         const scopeSel = document.createElement("select");
-        scopeSel.className = "select";
+        scopeSel.className = "form-select form-select-sm";
         scopeSel.style.maxWidth = "155px";
         [
           ["pracovni", t("scope_work")],
@@ -1872,14 +1887,14 @@
         rowFields.append(labelInp, scopeSel);
 
         const rowBtns = document.createElement("div");
-        rowBtns.className = "row";
+        rowBtns.className = "d-flex align-items-center flex-wrap gap-2";
         const createBtn = document.createElement("button");
         createBtn.type = "submit";
         createBtn.className = "btn btn-sm btn-primary";
         createBtn.textContent = t("plugin_account_btn_create_connect");
         const cancelBtn = document.createElement("button");
         cancelBtn.type = "button";
-        cancelBtn.className = "btn btn-sm";
+        cancelBtn.className = "btn btn-sm btn-outline-secondary";
         cancelBtn.textContent = t("plugin_account_btn_cancel");
         cancelBtn.onclick = () => {
           addAccountOpenFor.delete(p.name);
@@ -1916,7 +1931,7 @@
         };
 
         addBox.append(addTitle, rowFields, rowBtns);
-        card.appendChild(addBox);
+        cardBody.appendChild(addBox);
       }
 
       // Účty a oprávnění nainstalovaného pluginu
@@ -1926,34 +1941,34 @@
         const detailSpecs = schema.filter((sp) => sp.tier === "detail");
 
         const acctsWrap = document.createElement("div");
-        acctsWrap.className = "plugin-accounts-list";
+        acctsWrap.className = "border-top pt-2 mt-1 d-flex flex-column gap-2";
 
         accounts.forEach((acct) => {
           const box = document.createElement("div");
-          box.className = "plugin-account-box";
+          box.className = "p-2 rounded border bg-body-tertiary d-flex flex-column gap-2";
 
           const acctHead = document.createElement("div");
-          acctHead.className = "plugin-account-head";
+          acctHead.className = "d-flex align-items-start justify-content-between flex-wrap gap-2";
 
           const metaBox = document.createElement("div");
-          metaBox.className = "plugin-account-meta";
+          metaBox.className = "d-flex flex-column min-w-0";
 
           const titleRow = document.createElement("div");
-          titleRow.className = "plugin-account-title";
+          titleRow.className = "d-flex align-items-center flex-wrap gap-1 fw-semibold small";
           const titleSpan = document.createElement("span");
           titleSpan.textContent = acct.label || scopeLabel(acct.scope) || t("plugin_account_default_label");
           const scopeBadge = document.createElement("span");
-          scopeBadge.className = "pill";
+          scopeBadge.className = badgeCls();
           scopeBadge.textContent = scopeLabel(acct.scope);
           const stateBadge = document.createElement("span");
           if (!acct.enabled) {
-            stateBadge.className = "pill warn";
+            stateBadge.className = badgeCls("warn");
             stateBadge.textContent = t("plugin_account_status_paused");
           } else if (acct.connected) {
-            stateBadge.className = "pill ok";
+            stateBadge.className = badgeCls("ok");
             stateBadge.textContent = t("plugin_account_status_connected");
           } else {
-            stateBadge.className = "pill";
+            stateBadge.className = badgeCls();
             stateBadge.textContent = t("plugin_account_status_disconnected");
           }
           titleRow.append(titleSpan, scopeBadge, stateBadge);
@@ -1961,13 +1976,14 @@
 
           if (acct.account_email) {
             const emailDiv = document.createElement("div");
-            emailDiv.className = "plugin-account-email mono";
+            emailDiv.className = "small text-body-secondary font-monospace text-break";
+            emailDiv.style.fontSize = "0.75rem";
             emailDiv.textContent = acct.account_email;
             metaBox.appendChild(emailDiv);
           }
 
           const acctActions = document.createElement("div");
-          acctActions.className = "plugin-account-actions";
+          acctActions.className = "d-flex align-items-center flex-wrap gap-1";
           if (p.supports_oauth) {
             acctActions.appendChild(
               makeBtn(
@@ -1985,8 +2001,8 @@
           if (accounts.length > 1) {
             const rmBtn = document.createElement("button");
             rmBtn.type = "button";
-            rmBtn.className = "btn btn-sm btn-danger";
-            rmBtn.innerHTML = uiIcon("trash", "ui-ico-sm");
+            rmBtn.className = "btn btn-sm btn-outline-danger btn-icon-sm";
+            rmBtn.innerHTML = uiIcon("trash");
             rmBtn.title = t("btn_delete");
             rmBtn.setAttribute("aria-label", t("btn_delete"));
             rmBtn.onclick = async () => {
@@ -2014,13 +2030,17 @@
 
           const appendPermRow = (parentEl, spec) => {
             const row = document.createElement("div");
-            row.className = "plugin-perm-row";
+            row.className = "form-check form-switch d-flex justify-content-between align-items-center gap-2 ps-0 mb-0";
+            const swId = `perm_${p.name}_${acct.id}_${spec.key}`;
             const lbl = document.createElement("label");
-            lbl.className = "switch";
-            const span = document.createElement("span");
-            span.textContent = t(spec.label_key);
+            lbl.className = "form-check-label small flex-grow-1 mb-0";
+            lbl.htmlFor = swId;
+            lbl.textContent = t(spec.label_key);
             const cb = document.createElement("input");
+            cb.className = "form-check-input m-0 flex-shrink-0";
             cb.type = "checkbox";
+            cb.role = "switch";
+            cb.id = swId;
             cb.checked = Boolean((acct.permissions || {})[spec.key]);
             cb.onchange = async () => {
               const prev = !cb.checked;
@@ -2037,8 +2057,7 @@
                 toast(err.message, "err");
               }
             };
-            lbl.append(span, cb);
-            row.appendChild(lbl);
+            row.append(lbl, cb);
             parentEl.appendChild(row);
           };
 
@@ -2053,8 +2072,8 @@
           const isExpanded = expandedAccountDetails.has(acct.id);
           const detailBtn = document.createElement("button");
           detailBtn.type = "button";
-          detailBtn.className = "btn btn-sm plugin-detail-toggle";
-          detailBtn.innerHTML = `${uiIcon("sliders", "ui-ico-sm")} <span>${escapeHtml(isExpanded ? t("plugin_detail_hide") : t("plugin_detail_toggle"))}</span>`;
+          detailBtn.className = "btn btn-sm btn-outline-secondary align-self-start";
+          detailBtn.innerHTML = `${uiIcon("sliders", "me-1")}<span>${escapeHtml(isExpanded ? t("plugin_detail_hide") : t("plugin_detail_toggle"))}</span>`;
           detailBtn.onclick = () => {
             if (expandedAccountDetails.has(acct.id)) expandedAccountDetails.delete(acct.id);
             else expandedAccountDetails.add(acct.id);
@@ -2064,7 +2083,7 @@
 
           if (isExpanded) {
             const panel = document.createElement("div");
-            panel.className = "plugin-detail-panel";
+            panel.className = "border-top pt-2 mt-1 d-flex flex-column gap-2";
 
             if (detailSpecs.length) {
               const detTitle = document.createElement("div");
@@ -2075,27 +2094,27 @@
             }
 
             const metaGrid = document.createElement("div");
-            metaGrid.className = "grid-2";
+            metaGrid.className = "row g-2";
 
-            const lblField = document.createElement("div");
-            lblField.className = "field";
-            lblField.style.marginBottom = "0";
+            const lblCol = document.createElement("div");
+            lblCol.className = "col-sm-6";
             const lblLabel = document.createElement("label");
+            lblLabel.className = "form-label small text-body-secondary mb-1";
             lblLabel.textContent = t("plugin_detail_account_label");
             const lblInput = document.createElement("input");
             lblInput.type = "text";
-            lblInput.className = "input";
+            lblInput.className = "form-control form-control-sm";
             lblInput.value = acct.label || "";
             lblInput.placeholder = t("plugin_account_label_ph");
-            lblField.append(lblLabel, lblInput);
+            lblCol.append(lblLabel, lblInput);
 
-            const scField = document.createElement("div");
-            scField.className = "field";
-            scField.style.marginBottom = "0";
+            const scCol = document.createElement("div");
+            scCol.className = "col-sm-6";
             const scLabel = document.createElement("label");
+            scLabel.className = "form-label small text-body-secondary mb-1";
             scLabel.textContent = t("plugin_detail_scope");
             const scSelect = document.createElement("select");
-            scSelect.className = "select";
+            scSelect.className = "form-select form-select-sm";
             [
               ["all", t("scope_all_chats")],
               ["pracovni", t("scope_work")],
@@ -2107,31 +2126,33 @@
               scSelect.appendChild(opt);
             });
             scSelect.value = ["pracovni", "osobni"].includes(acct.scope) ? acct.scope : "all";
-            scField.append(scLabel, scSelect);
+            scCol.append(scLabel, scSelect);
 
-            metaGrid.append(lblField, scField);
+            metaGrid.append(lblCol, scCol);
             panel.appendChild(metaGrid);
 
             const enRow = document.createElement("div");
-            enRow.className = "plugin-perm-row";
+            enRow.className = "form-check form-switch d-flex justify-content-between align-items-center gap-2 ps-0 mb-0";
+            const enId = `acct_enabled_${p.name}_${acct.id}`;
             const enLbl = document.createElement("label");
-            enLbl.className = "switch";
-            const enSpan = document.createElement("span");
-            enSpan.textContent = t("plugin_detail_enabled");
+            enLbl.className = "form-check-label small flex-grow-1 mb-0";
+            enLbl.htmlFor = enId;
+            enLbl.textContent = t("plugin_detail_enabled");
             const enCb = document.createElement("input");
+            enCb.className = "form-check-input m-0 flex-shrink-0";
             enCb.type = "checkbox";
+            enCb.role = "switch";
+            enCb.id = enId;
             enCb.checked = acct.enabled !== false;
-            enLbl.append(enSpan, enCb);
-            enRow.appendChild(enLbl);
+            enRow.append(enLbl, enCb);
             panel.appendChild(enRow);
 
             const rulesField = document.createElement("div");
-            rulesField.className = "field";
-            rulesField.style.marginBottom = "0";
             const rulesLabel = document.createElement("label");
+            rulesLabel.className = "form-label small text-body-secondary mb-1";
             rulesLabel.textContent = t("plugin_detail_rules_label");
             const rulesArea = document.createElement("textarea");
-            rulesArea.className = "textarea plugin-rules-textarea";
+            rulesArea.className = "form-control form-control-sm plugin-rules-textarea";
             rulesArea.value = acct.custom_rules || "";
             rulesArea.placeholder = t("plugin_detail_rules_ph");
             rulesField.append(rulesLabel, rulesArea);
@@ -2139,8 +2160,7 @@
 
             const saveDetailBtn = document.createElement("button");
             saveDetailBtn.type = "button";
-            saveDetailBtn.className = "btn btn-sm btn-primary";
-            saveDetailBtn.style.alignSelf = "flex-start";
+            saveDetailBtn.className = "btn btn-sm btn-primary align-self-start";
             saveDetailBtn.textContent = t("plugin_detail_save_btn");
             saveDetailBtn.onclick = async () => {
               saveDetailBtn.disabled = true;
@@ -2170,9 +2190,10 @@
           acctsWrap.appendChild(box);
         });
 
-        card.appendChild(acctsWrap);
+        cardBody.appendChild(acctsWrap);
       }
 
+      card.appendChild(cardBody);
       grid.appendChild(card);
     });
   }
@@ -2181,7 +2202,10 @@
     btn.onclick = () => {
       activePluginCategory = btn.dataset.cat || "all";
       document.querySelectorAll("#pluginCategoryBar .filter-pill").forEach((b) => {
-        b.classList.toggle("active", b === btn);
+        const isActive = b === btn;
+        b.classList.toggle("active", isActive);
+        b.classList.toggle("btn-primary", isActive);
+        b.classList.toggle("btn-outline-secondary", !isActive);
       });
       renderPlugins();
     };
@@ -2223,16 +2247,16 @@
 
     if (badge) {
       if (st.connected) {
-        badge.className = "pill ok";
+        badge.className = badgeCls("ok");
         badge.textContent = t("plugin_connect_done");
       } else if (st.error) {
-        badge.className = "pill err";
+        badge.className = badgeCls("err");
         badge.textContent = st.error;
       } else if (st.auth_url) {
-        badge.className = "pill accent";
+        badge.className = badgeCls("primary");
         badge.textContent = t("plugin_connect_waiting_user");
       } else {
-        badge.className = "pill";
+        badge.className = badgeCls();
         badge.textContent = t("plugin_connect_preparing");
       }
     }
@@ -2250,7 +2274,7 @@
         urlWrap.appendChild(a);
       } else {
         const hint = document.createElement("span");
-        hint.className = "muted";
+        hint.className = "text-body-secondary small";
         hint.textContent = t("plugin_connect_starting_hint");
         urlWrap.appendChild(hint);
       }
@@ -2258,16 +2282,16 @@
 
     const isInteractiveCfg = st.flow_type === "interactive_config";
     if ($("pluginConfigHint")) {
-      $("pluginConfigHint").classList.toggle("hidden", !isInteractiveCfg || Boolean(st.connected));
+      $("pluginConfigHint").classList.toggle("d-none", !isInteractiveCfg || Boolean(st.connected));
     }
     if ($("pluginConnectStep1")) {
-      $("pluginConnectStep1").classList.toggle("hidden", Boolean(st.connected) || isInteractiveCfg);
+      $("pluginConnectStep1").classList.toggle("d-none", Boolean(st.connected) || isInteractiveCfg);
     }
     if (isInteractiveCfg && $("pluginConnectTerminalDetails")) {
       $("pluginConnectTerminalDetails").open = true;
     }
-    if (cbForm) cbForm.classList.toggle("hidden", st.flow_type !== "localhost_callback" || Boolean(st.connected));
-    if (codeForm) codeForm.classList.toggle("hidden", st.flow_type !== "code_paste" || Boolean(st.connected));
+    if (cbForm) cbForm.classList.toggle("d-none", st.flow_type !== "localhost_callback" || Boolean(st.connected));
+    if (codeForm) codeForm.classList.toggle("d-none", st.flow_type !== "code_paste" || Boolean(st.connected));
 
     if (outEl) {
       outEl.textContent = st.error
@@ -2303,7 +2327,7 @@
       connected: false,
       error: null,
     });
-    modal.classList.remove("hidden");
+    modal.classList.remove("d-none");
 
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
     let connectSuccessHandled = false;
@@ -2363,7 +2387,7 @@
   async function closePluginConnectModal() {
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
     const modal = $("pluginConnectModal");
-    if (modal) modal.classList.add("hidden");
+    if (modal) modal.classList.add("d-none");
     activeConnectPlugin = null;
     try { await api("/api/plugins/connect/stop", { method: "POST" }); } catch (_) {}
     loadPlugins().catch(() => {});
@@ -2371,7 +2395,7 @@
 
   if ($("closePluginConnectBtn")) $("closePluginConnectBtn").onclick = closePluginConnectModal;
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("hidden")) {
+    if (e.key === "Escape" && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("d-none")) {
       closePluginConnectModal();
     }
   });
@@ -2442,12 +2466,12 @@
   // Security (Password & 2FA)
   function updateSecurityUi(s) {
     if ($("accEmail")) $("accEmail").value = s.email || "";
-    $("pwdCurrentWrap").classList.toggle("hidden", !s.has_password);
-    $("disable2faPwd").classList.toggle("hidden", !s.has_password);
+    $("pwdCurrentWrap").classList.toggle("d-none", !s.has_password);
+    $("disable2faPwd").classList.toggle("d-none", !s.has_password);
     $("totpBadge").textContent = s.totp_enabled ? t("totp_on") : t("totp_off");
-    $("totpBadge").className = `pill ${s.totp_enabled ? "ok" : ""}`;
-    $("totpDisabledBox").classList.toggle("hidden", Boolean(s.totp_enabled));
-    $("totpEnabledBox").classList.toggle("hidden", !s.totp_enabled);
+    $("totpBadge").className = badgeCls(s.totp_enabled ? "ok" : "");
+    $("totpDisabledBox").classList.toggle("d-none", Boolean(s.totp_enabled));
+    $("totpEnabledBox").classList.toggle("d-none", !s.totp_enabled);
   }
 
   $("accountEmailForm").onsubmit = async (e) => {
@@ -2480,8 +2504,8 @@
       const r = await api("/api/2fa/setup", { method: "POST" });
       renderQr($("totpQrBox"), r.otpauth_uri);
       $("totpSecretCode").textContent = r.secret;
-      $("totpSetupArea").classList.remove("hidden");
-      $("recoveryCodesBox").classList.add("hidden");
+      $("totpSetupArea").classList.remove("d-none");
+      $("recoveryCodesBox").classList.add("d-none");
     } catch (err) { toast(err.message, "err"); }
   };
 
@@ -2496,10 +2520,10 @@
       const r = await api("/api/2fa/enable", { method: "POST", body: JSON.stringify({ code: $("enable2faCode").value.trim() }) });
       if (r.session_token) localStorage.setItem("agy_web_token", r.session_token);
       $("enable2faCode").value = "";
-      $("totpSetupArea").classList.add("hidden");
+      $("totpSetupArea").classList.add("d-none");
       latestRecoveryCodes = r.recovery_codes || [];
       $("recoveryCodesList").innerHTML = latestRecoveryCodes.map((c) => `<div>${escapeHtml(c)}</div>`).join("");
-      $("recoveryCodesBox").classList.toggle("hidden", !latestRecoveryCodes.length);
+      $("recoveryCodesBox").classList.toggle("d-none", !latestRecoveryCodes.length);
       updateSecurityUi(r.owner);
       toast(t("toast_2fa_enabled"));
     } catch (err) { toast(err.message, "err"); }
@@ -2518,7 +2542,7 @@
         body: JSON.stringify({ password: $("disable2faPwd").value, code: $("disable2faCode").value.trim() }),
       });
       $("disable2faPwd").value = ""; $("disable2faCode").value = "";
-      $("recoveryCodesBox").classList.add("hidden");
+      $("recoveryCodesBox").classList.add("d-none");
       updateSecurityUi(r.owner);
       toast(t("toast_2fa_disabled"));
     } catch (err) { toast(err.message, "err"); }
