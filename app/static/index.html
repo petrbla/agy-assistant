@@ -161,9 +161,9 @@
         <div class="chat-toolbar">
           <div class="row">
             <div class="seg" id="channelSeg">
-              <button type="button" data-channel="auto" class="active" data-i18n="channel_auto">Auto</button>
-              <button type="button" data-channel="pracovni" data-i18n="channel_work">Work</button>
-              <button type="button" data-channel="osobni" data-i18n="channel_personal">Personal</button>
+              <button type="button" data-channel="auto" class="active" data-i18n="channel_auto" data-i18n-title="tooltip_channel_auto">Auto</button>
+              <button type="button" data-channel="pracovni" data-i18n="channel_work" data-i18n-title="tooltip_channel_work">Work</button>
+              <button type="button" data-channel="osobni" data-i18n="channel_personal" data-i18n-title="tooltip_channel_personal">Personal</button>
             </div>
             <select id="chatModelSelect" class="select" style="width:auto;min-width:190px;"></select>
             <div id="effortWrap" class="row hidden" style="gap:6px;">
@@ -173,7 +173,7 @@
           </div>
           <div class="row">
             <button id="chatCleanupBtn" type="button" class="btn btn-sm" title="Save important facts from conversations to memory and reset context" data-i18n="btn_memory_cleanup" data-i18n-title="btn_memory_cleanup_title">🧹 Memory cleanup</button>
-            <button id="chatResetBtn" type="button" class="btn btn-sm" data-i18n="btn_new_chat">New chat</button>
+            <button id="chatResetBtn" type="button" class="btn btn-sm" data-i18n="btn_new_chat" data-i18n-title="tooltip_new_chat">New chat</button>
           </div>
         </div>
 
@@ -191,7 +191,10 @@
       <div class="memory-layout">
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title" data-i18n="memory_files_title">Memory files</h2>
+            <div>
+              <h2 class="card-title" data-i18n="memory_files_title">Memory files</h2>
+              <p class="card-subtitle" data-i18n="memory_files_subtitle">Plain-text notes the assistant uses: personality (SOUL.md), your profile (USER.md), long-term memory (MEMORY.md), and check rules (HEARTBEAT.md).</p>
+            </div>
             <div class="row" style="gap:6px;">
               <button id="refreshFilesBtn" type="button" class="btn btn-sm" data-i18n="btn_refresh">Refresh</button>
               <button id="resetWorkspaceBtn" type="button" class="btn btn-sm btn-danger" title="Overwrite default templates" data-i18n="btn_reset" data-i18n-title="btn_reset_title">Reset</button>
@@ -252,14 +255,22 @@
             <p id="opsSummary" class="card-subtitle"></p>
           </div>
           <div class="row">
-            <button id="runHeartbeatBtn" type="button" class="btn btn-sm" data-i18n="btn_run_heartbeat">Run Heartbeat</button>
-            <button id="runBriefingBtn" type="button" class="btn btn-sm" data-i18n="btn_run_briefing">Generate Briefing</button>
-            <button id="runNightlyBtn" type="button" class="btn btn-sm" data-i18n="btn_run_nightly">🧹 Run nightly cleanup</button>
+            <button id="runHeartbeatBtn" type="button" class="btn btn-sm" data-i18n="btn_run_heartbeat" data-i18n-title="btn_run_heartbeat_title">Run Heartbeat</button>
+            <button id="runBriefingBtn" type="button" class="btn btn-sm" data-i18n="btn_run_briefing" data-i18n-title="btn_run_briefing_title">Generate Briefing</button>
+            <button id="runNightlyBtn" type="button" class="btn btn-sm" data-i18n="btn_run_nightly" data-i18n-title="btn_run_nightly_title">🧹 Run nightly cleanup</button>
             <button id="refreshOpsBtn" type="button" class="btn btn-sm" data-i18n="btn_refresh">Refresh</button>
           </div>
         </div>
         <div class="card-body">
           <div id="jobsList" class="jobs-strip hidden"></div>
+          <details class="help-box">
+            <summary data-i18n="ops_help_toggle">ℹ️ What do Heartbeat, Morning briefing &amp; Nightly cleanup mean?</summary>
+            <ul>
+              <li><strong data-i18n="job_name_heartbeat">Heartbeat</strong>: <span data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</span></li>
+              <li><strong data-i18n="job_name_briefing">Morning briefing</strong>: <span data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</span></li>
+              <li><strong data-i18n="job_name_nightly">Nightly cleanup &amp; reset</strong>: <span data-i18n="help_nightly">Saves important facts from today's chats into long-term memory at night and clears old context (saves tokens and keeps replies sharp).</span></li>
+            </ul>
+          </details>
 
           <h3 style="margin:4px 0 10px;font-size:14px;" data-i18n="custom_tasks_title">Custom scheduled tasks &amp; reminders</h3>
           <div class="table-wrap" style="margin-bottom:14px;">
@@ -293,6 +304,7 @@
             <input id="taskPrompt" type="text" class="input grow" required placeholder="Reminder message or task for AI…" data-i18n-placeholder="task_prompt_placeholder" />
             <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_add">Add</button>
           </form>
+          <p class="field-hint" style="margin:8px 0 0;" data-i18n="hint_cron_examples">Schedule tip (cron): 0 12 * * * = daily at 12:00 · 0 9 * * 1-5 = Mon–Fri at 9:00 · “Send message” uses 0 AI tokens; “Run AI assistant” lets AI complete a task.</p>
         </div>
       </div>
 
@@ -406,6 +418,7 @@
                     <option value="pracovni" data-i18n="channel_work">Work</option>
                     <option value="osobni" data-i18n="channel_personal">Personal</option>
                   </select>
+                  <div class="field-hint" data-i18n="help_default_context">Separates work and personal tools (Auto uses all, Work only work tools, Personal only personal tools).</div>
                 </div>
                 <div class="field">
                   <label for="cfgModel" data-i18n="label_default_model">Default AI model</label>
@@ -427,19 +440,29 @@
                   <input id="cfgTgNotify" type="text" class="input" placeholder="empty = first allowed" data-i18n-placeholder="placeholder_tg_notify" />
                 </div>
               </div>
+              <div class="field-hint" style="margin-top:-6px;margin-bottom:8px;" data-i18n="help_telegram">Connect Telegram: create a bot token via @BotFather and find your numeric ID via @userinfobot.</div>
 
               <hr class="divider" />
-              <div class="row-between" style="margin-bottom:12px;">
-                <label class="switch"><input id="cfgHbEnabled" type="checkbox" checked /> <span data-i18n="cfg_hb_enabled">Heartbeat enabled</span></label>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label class="switch"><input id="cfgHbEnabled" type="checkbox" checked /> <span data-i18n="cfg_hb_enabled">Heartbeat enabled</span></label>
+                  <div class="setting-desc" data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</div>
+                </div>
                 <input id="cfgHbInterval" type="number" class="input" min="1" value="60" style="width:110px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title" />
               </div>
-              <div class="row-between" style="margin-bottom:12px;">
-                <label class="switch"><input id="cfgBriefEnabled" type="checkbox" checked /> <span data-i18n="cfg_brief_enabled">Morning briefing</span></label>
-                <input id="cfgBriefCron" type="text" class="input mono" placeholder="0 8 * * *" style="width:150px;" />
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label class="switch"><input id="cfgBriefEnabled" type="checkbox" checked /> <span data-i18n="cfg_brief_enabled">Morning briefing</span></label>
+                  <div class="setting-desc" data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</div>
+                </div>
+                <input id="cfgBriefCron" type="text" class="input mono" placeholder="0 8 * * *" style="width:150px;" data-i18n-title="th_schedule" />
               </div>
-              <div class="row-between" style="margin-bottom:14px;">
-                <label class="switch"><input id="cfgNightlyEnabled" type="checkbox" checked /> <span data-i18n="cfg_nightly_enabled">Nightly memory cleanup &amp; reset</span></label>
-                <input id="cfgNightlyCron" type="text" class="input mono" placeholder="15 0 * * *" style="width:150px;" />
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label class="switch"><input id="cfgNightlyEnabled" type="checkbox" checked /> <span data-i18n="cfg_nightly_enabled">Nightly memory cleanup &amp; reset</span></label>
+                  <div class="setting-desc" data-i18n="help_nightly">Saves important facts from today's chats into long-term memory at night and clears old context (saves tokens and keeps replies sharp).</div>
+                </div>
+                <input id="cfgNightlyCron" type="text" class="input mono" placeholder="15 0 * * *" style="width:150px;" data-i18n-title="th_schedule" />
               </div>
 
               <button type="submit" class="btn btn-primary" data-i18n="btn_save_settings">Save settings</button>
@@ -450,7 +473,10 @@
         <!-- MCP servers -->
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title" data-i18n="mcp_title">MCP Servers</h2>
+            <div>
+              <h2 class="card-title" data-i18n="mcp_title">MCP Servers</h2>
+              <p class="card-subtitle" data-i18n="mcp_subtitle">Connect external apps &amp; data sources (e.g. Google Calendar, Gmail, NocoDB, n8n) so the assistant can read data and run actions.</p>
+            </div>
           </div>
           <div class="card-body">
             <div class="table-wrap" style="margin-bottom:16px;">
