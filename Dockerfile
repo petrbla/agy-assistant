@@ -51,10 +51,14 @@ RUN sed -i 's/\r$//' /usr/local/sbin/agy-cli-update \
         > /etc/sudoers.d/asistent \
     && chmod 0440 /etc/sudoers.d/asistent
 
-# Kód aplikace a výchozí šablony workspace (EN výchozí + CS)
+# Kód aplikace a výchozí šablony workspace (EN výchozí + CS, DE, SK, ES, PL)
 COPY app /app/app
 COPY workspace_template /app/workspace_template
 COPY workspace_template_cs /app/workspace_template_cs
+COPY workspace_template_de /app/workspace_template_de
+COPY workspace_template_sk /app/workspace_template_sk
+COPY workspace_template_es /app/workspace_template_es
+COPY workspace_template_pl /app/workspace_template_pl
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 RUN sed -i 's/\r$//' /app/docker-entrypoint.sh \

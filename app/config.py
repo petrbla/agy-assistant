@@ -137,10 +137,15 @@ class Settings(BaseSettings):
         return self
 
     def template_dir_for_language(self, lang: str | None = None) -> Path:
-        """Vrátí cestu k výchozím šablonám podle zvoleného jazyka."""
+        """Vrátí cestu k výchozím šablonám podle zvoleného jazyka (`workspace_template_<lang>`, výchozí EN)."""
         resolved = normalize_language(lang or self.language)
+        if resolved == "en":
+            return self.template_dir
         if resolved == "cs" and self.template_dir_cs.is_dir():
             return self.template_dir_cs
+        localized = self.template_dir.parent / f"{self.template_dir.name}_{resolved}"
+        if localized.is_dir():
+            return localized
         return self.template_dir
 
     @property

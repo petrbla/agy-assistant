@@ -11,6 +11,18 @@ case "$LANG_NORM" in
     cs*|cz*|czech*|čeština*|cestina*)
         TEMPLATE_DIR="/app/workspace_template_cs"
         ;;
+    de*|ger*|deutsch*|german*|něm*|nem*)
+        TEMPLATE_DIR="/app/workspace_template_de"
+        ;;
+    sk*|svk*|slo*|slovak*|sloven*)
+        TEMPLATE_DIR="/app/workspace_template_sk"
+        ;;
+    es*|esp*|spa*|spanish*|español*|espanol*|špan*|span*)
+        TEMPLATE_DIR="/app/workspace_template_es"
+        ;;
+    pl*|pol*)
+        TEMPLATE_DIR="/app/workspace_template_pl"
+        ;;
     *)
         TEMPLATE_DIR="/app/workspace_template"
         ;;
@@ -35,12 +47,12 @@ from pathlib import Path
 
 p = Path(os.environ["SOUL_FILE"])
 name = os.environ["JMENO_ENV"].strip()
-if not name or name.lower() in {"assistant", "asistent", "jarvis"}:
+if not name or name.lower() in {"assistant", "asistent", "assistent", "asistente", "asystent", "jarvis"}:
     raise SystemExit(0)
 txt = p.read_text(encoding="utf-8")
 txt = txt.replace("{{JMENO}}", name).replace("{{NAME}}", name)
 txt = re.sub(
-    r"^(\s*(?:[-*]\s*)?\*\*(?:Name|Jméno):\*\*)\s*\[(?:TODO|DOPLNIT):.*\]\s*$",
+    r"^(\s*(?:[-*]\s*)?\*\*(?:Name|Jméno|Meno|Nombre|Imię):\*\*)\s*\[(?:TODO|DOPLNIT):.*\]\s*$",
     rf"\1 {name}",
     txt,
     flags=re.MULTILINE,

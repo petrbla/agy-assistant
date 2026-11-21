@@ -70,12 +70,38 @@ def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_p
     import re
 
     root = Path(__file__).resolve().parent.parent
-    template_mcp_en = root / "workspace_template" / ".agents" / "mcp_config.example.json"
-    template_mcp_cs = root / "workspace_template_cs" / ".agents" / "mcp_config.example.json"
-    parsed_en = json.loads(template_mcp_en.read_text(encoding="utf-8"))
-    parsed_cs = json.loads(template_mcp_cs.read_text(encoding="utf-8"))
-    assert isinstance(parsed_en.get("mcpServers"), dict) and "n8n-work" in parsed_en["mcpServers"]
-    assert isinstance(parsed_cs.get("mcpServers"), dict) and "n8n-prace" in parsed_cs["mcpServers"]
+    base_tpl = root / "workspace_template"
+    base_rel_files = {p.relative_to(base_tpl).as_posix() for p in base_tpl.rglob("*") if p.is_file()}
+    assert len(base_rel_files) == 9
+
+    dockerfile_txt = (root / "Dockerfile").read_text(encoding="utf-8")
+    for tpl_name in (
+        "workspace_template",
+        "workspace_template_cs",
+        "workspace_template_de",
+        "workspace_template_sk",
+        "workspace_template_es",
+        "workspace_template_pl",
+    ):
+        tpl_dir = root / tpl_name
+        rel_files = {p.relative_to(tpl_dir).as_posix() for p in tpl_dir.rglob("*") if p.is_file()}
+        assert rel_files == base_rel_files, f"Rozdíl souborů v {tpl_name}"
+
+        parsed_mcp = json.loads((tpl_dir / ".agents" / "mcp_config.example.json").read_text(encoding="utf-8"))
+        assert isinstance(parsed_mcp.get("mcpServers"), dict)
+        expected_server = "n8n-prace" if tpl_name == "workspace_template_cs" else "n8n-work"
+        assert expected_server in parsed_mcp["mcpServers"], f"Chybí {expected_server} v {tpl_name}"
+
+        assert "HEARTBEAT_OK" in (tpl_dir / "HEARTBEAT.md").read_text(encoding="utf-8")
+        assert "HEARTBEAT_OK" in (tpl_dir / "AGENTS.md").read_text(encoding="utf-8")
+        assert "name: morning-briefing" in (
+            tpl_dir / ".agents" / "skills" / "morning-briefing" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        assert "name: memory-maintenance" in (
+            tpl_dir / ".agents" / "skills" / "memory-maintenance" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        if tpl_name != "workspace_template":
+            assert f"COPY {tpl_name}" in dockerfile_txt, f"{tpl_name} chybí v Dockerfile"
 
     # Parita všech klíčů a placeholderů napříč všemi jazyky v app/locales/*.json
     locales_dir = root / "app" / "locales"

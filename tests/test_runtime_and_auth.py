@@ -36,7 +36,31 @@ def test_polivka_env_aliases(monkeypatch, tmp_path: Path) -> None:
     assert normalize_language("polski") == "pl"
     assert normalize_language("cz") == "cs"
     assert normalize_language("english") == "en"
-    assert s.template_dir_for_language("de") == s.template_dir
+    assert s.template_dir_for_language("en").name == "workspace_template"
+    for lang_code in ("cs", "de", "sk", "es", "pl"):
+        tpl = s.template_dir_for_language(lang_code)
+        assert tpl.name == f"workspace_template_{lang_code}"
+        assert tpl.is_dir()
+
+
+def test_all_language_templates_support_onboarding_and_name_sync(tmp_path: Path) -> None:
+    from app.agy_runner import (
+        extract_assistant_name_from_soul,
+        has_pending_assistant_name,
+        has_schedule_instructions,
+    )
+    from app.user_env import ensure_workspace, sync_soul_assistant_name
+
+    for lang_code in ("en", "cs", "de", "sk", "es", "pl"):
+        ws = tmp_path / f"ws_{lang_code}"
+        s = Settings(workspace_dir=ws, data_dir=tmp_path / f"data_{lang_code}", language=lang_code)
+        ensure_workspace(s)
+        assert has_pending_assistant_name(ws) is True, f"SOUL.md {lang_code} nebyl detekován jako nevyplněný"
+        assert has_schedule_instructions(ws) is True, f"AGENTS.md {lang_code} postrádá add_tasks"
+
+        sync_soul_assistant_name(ws, "Nova")
+        assert extract_assistant_name_from_soul(ws) == "Nova", f"Nepodařilo se přečíst jméno ze SOUL.md ({lang_code})"
+        assert has_pending_assistant_name(ws) is False, f"SOUL.md {lang_code} zůstal označený jako nevyplněný"
 
 
 def test_clean_terminal_output_and_extract_urls() -> None:
