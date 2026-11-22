@@ -657,9 +657,9 @@ def create_app(
         if not owner.totp_enabled:
             return {"status": "ok", "owner": _owner_public_dict(owner, settings)}
         if owner.password_hash.strip() and not verify_password(payload.password, owner.password_hash):
-            raise HTTPException(status_code=401, detail="Nesprávné heslo účtu.")
+            raise HTTPException(status_code=400, detail="Nesprávné heslo účtu.")
         if not _verify_second_factor(owner, payload.code):
-            raise HTTPException(status_code=401, detail="Neplatný 2FA nebo záložní kód.")
+            raise HTTPException(status_code=400, detail="Neplatný 2FA nebo záložní kód.")
         updated = db.update_owner(
             totp_enabled=False,
             totp_secret="",

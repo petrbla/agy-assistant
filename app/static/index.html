@@ -510,7 +510,9 @@
                 </div>
                 <div class="col-md-4">
                   <label for="cfgTz" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tz">Timezone</label>
-                  <input id="cfgTz" type="text" class="form-control form-control-sm" placeholder="Europe/Prague" />
+                  <select id="cfgTz" class="form-select form-select-sm">
+                    <option value="Europe/Prague">Europe/Prague</option>
+                  </select>
                 </div>
               </div>
 
@@ -525,9 +527,15 @@
                   <div class="form-text" data-i18n="help_default_context">Separates work and personal tools (Auto uses all, Work only work tools, Personal only personal tools).</div>
                 </div>
                 <div class="col-md-6">
-                  <label for="cfgModel" class="form-label small fw-semibold text-body-secondary" data-i18n="label_default_model">Default AI model</label>
-                  <input id="cfgModel" type="text" class="form-control form-control-sm" list="modelsDatalist" placeholder="empty = default from agy" data-i18n-placeholder="placeholder_default_model" />
-                  <datalist id="modelsDatalist"></datalist>
+                  <label for="cfgModelSelect" class="form-label small fw-semibold text-body-secondary" data-i18n="label_default_model">Default AI model</label>
+                  <div class="d-flex align-items-center flex-wrap gap-2">
+                    <select id="cfgModelSelect" class="form-select form-select-sm flex-grow-1" style="min-width:190px;"></select>
+                    <div id="cfgEffortWrap" class="d-flex align-items-center gap-2 d-none">
+                      <input id="cfgEffortRange" type="range" class="form-range" min="0" max="2" step="1" value="1" style="width:92px;" />
+                      <span id="cfgEffortLabel" class="badge rounded-pill text-bg-secondary">Medium</span>
+                    </div>
+                  </div>
+                  <input id="cfgModel" type="hidden" />
                 </div>
               </div>
 
@@ -756,7 +764,10 @@
                       <input id="cfgHbEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
                       <label for="cfgHbEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_hb_enabled">Heartbeat enabled</label>
                     </div>
-                    <input id="cfgHbInterval" form="settingsForm" type="number" class="form-control form-control-sm flex-shrink-0" min="1" value="60" style="width:90px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title" />
+                    <div class="input-group input-group-sm flex-shrink-0" style="width:124px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title">
+                      <input id="cfgHbInterval" form="settingsForm" type="number" class="form-control" min="1" value="60" aria-label="Interval in minutes" />
+                      <span class="input-group-text text-body-secondary" data-i18n="unit_minutes_short">min</span>
+                    </div>
                   </div>
                   <div class="form-text mt-0" data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</div>
                 </div>
@@ -968,11 +979,12 @@
                 <div id="totpEnabledBox" class="d-none">
                   <p class="small text-body-secondary mb-2" data-i18n="totp_active_desc">2FA is active. A TOTP or recovery code is required to sign in.</p>
                   <form id="disable2faForm" class="d-flex align-items-center flex-wrap gap-2">
-                    <input id="disable2faPwd" type="password" class="form-control form-control-sm d-none" style="max-width:170px;" placeholder="Password" data-i18n-placeholder="label_password" />
+                    <input id="disable2faPwd" type="password" class="form-control form-control-sm d-none" style="max-width:170px;" autocomplete="current-password" placeholder="Password" data-i18n-placeholder="label_password" />
                     <input id="disable2faCode" type="text" class="form-control form-control-sm font-monospace" style="max-width:160px;" required placeholder="2FA code" data-i18n-placeholder="placeholder_2fa_short" />
-                    <button type="submit" class="btn btn-danger btn-sm" data-i18n="btn_disable_2fa">Disable 2FA</button>
+                    <button id="disable2faBtn" type="submit" class="btn btn-danger btn-sm" data-i18n="btn_disable_2fa">Disable 2FA</button>
                   </form>
                 </div>
+                <div id="disable2faFeedback" class="small d-none mt-2" role="status" aria-live="polite"></div>
               </div>
             </div>
       </div>

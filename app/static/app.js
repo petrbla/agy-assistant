@@ -1,6 +1,31 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const EFFORTS = ["low", "medium", "high", "xhigh"];
+  const FALLBACK_TIMEZONES = [
+    "UTC",
+    "Europe/Prague",
+    "Europe/Bratislava",
+    "Europe/Berlin",
+    "Europe/Vienna",
+    "Europe/Warsaw",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Madrid",
+    "Europe/Rome",
+    "Europe/Amsterdam",
+    "Europe/Zurich",
+    "Europe/Stockholm",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Sao_Paulo",
+    "Asia/Tokyo",
+    "Asia/Seoul",
+    "Asia/Singapore",
+    "Asia/Dubai",
+    "Australia/Sydney",
+  ];
   const SYSTEM_JOB_KEY_BY_ID = {
     heartbeat: "job_name_heartbeat",
     briefing: "job_name_briefing",
@@ -943,6 +968,98 @@
     return t(`effort_${eff}`) || eff;
   }
 
+  function orderedEffortsForBase(base) {
+    const effs = (modelGroups[base] || []).filter(Boolean);
+    return EFFORTS.filter((e) => effs.includes(e));
+  }
+
+  function pickDefaultModelForBase(base) {
+    if (!base) return "";
+    const effs = (modelGroups[base] || []).filter(Boolean);
+    if (effs.includes("medium")) return `${base}-medium`;
+    if (effs[0]) return `${base}-${effs[0]}`;
+    return base;
+  }
+
+  function fillModelSelect(sel, extraBase = "") {
+    if (!sel) return;
+    sel.innerHTML = `<option value="">${escapeHtml(t("model_default"))}</option>`;
+    Object.keys(modelGroups).forEach((base) => {
+      const opt = document.createElement("option");
+      opt.value = base;
+      opt.textContent = base;
+      sel.appendChild(opt);
+    });
+    if (extraBase && !modelGroups[extraBase]) {
+      const opt = document.createElement("option");
+      opt.value = extraBase;
+      opt.textContent = extraBase;
+      sel.appendChild(opt);
+    }
+  }
+
+  function bindEffortControl({ wrapId, rangeId, labelId, base, eff, onInputChange = null, onCommit = null }) {
+    const wrap = $(wrapId);
+    const range = $(rangeId);
+    const lbl = $(labelId);
+    if (!wrap || !range || !lbl) return;
+    const ordered = orderedEffortsForBase(base);
+    if (!base || ordered.length < 2) {
+      wrap.classList.add("d-none");
+      return;
+    }
+    wrap.classList.remove("d-none");
+    range.min = "0";
+    range.max = String(ordered.length - 1);
+    const idx = Math.max(0, ordered.indexOf(eff || "medium"));
+    range.value = String(idx);
+    lbl.textContent = effortLabel(ordered[idx]);
+    range.oninput = () => {
+      const e = ordered[Number(range.value)];
+      lbl.textContent = effortLabel(e);
+      if (onInputChange) onInputChange(e);
+    };
+    range.onchange = async () => {
+      const e = ordered[Number(range.value)];
+      lbl.textContent = effortLabel(e);
+      if (onCommit) await onCommit(e);
+    };
+  }
+
+  function syncEffortUi(base, eff) {
+    bindEffortControl({
+      wrapId: "effortWrap",
+      rangeId: "effortRange",
+      labelId: "effortLabel",
+      base,
+      eff,
+      onCommit: async (e) => { await setActiveModel(`${base}-${e}`); },
+    });
+  }
+
+  function syncSettingsEffortUi(base, eff) {
+    bindEffortControl({
+      wrapId: "cfgEffortWrap",
+      rangeId: "cfgEffortRange",
+      labelId: "cfgEffortLabel",
+      base,
+      eff,
+      onInputChange: (e) => { if ($("cfgModel")) $("cfgModel").value = `${base}-${e}`; },
+      onCommit: (e) => { if ($("cfgModel")) $("cfgModel").value = `${base}-${e}`; },
+    });
+  }
+
+  function applySettingsModelUi(fullModel) {
+    if ($("cfgModel")) $("cfgModel").value = fullModel || "";
+    const [base, eff] = splitModel(fullModel);
+    const sel = $("cfgModelSelect");
+    if (sel) {
+      fillModelSelect(sel, base);
+      sel.value = base;
+    }
+    syncSettingsEffortUi(base, eff);
+  }
+
   async function loadModels(refresh = false) {
     try {
       const data = await api(`/api/models?refresh=${refresh}`);
@@ -955,63 +1072,22 @@
         if (!modelGroups[base]) modelGroups[base] = [];
         if (!modelGroups[base].includes(eff)) modelGroups[base].push(eff);
       });
-      const sel = $("chatModelSelect");
-      const dl = $("modelsDatalist");
-      sel.innerHTML = `<option value="">${escapeHtml(t("model_default"))}</option>`;
-      dl.innerHTML = "";
-      list.forEach((m) => {
-        const opt = document.createElement("option");
-        opt.value = m;
-        dl.appendChild(opt);
-      });
-      Object.keys(modelGroups).forEach((base) => {
-        const opt = document.createElement("option");
-        opt.value = base;
-        opt.textContent = base;
-        sel.appendChild(opt);
-      });
       const [curBase, curEff] = splitModel(currentModel);
-      if (curBase && !modelGroups[curBase]) {
-        const opt = document.createElement("option");
-        opt.value = curBase;
-        opt.textContent = curBase;
-        sel.appendChild(opt);
+      const sel = $("chatModelSelect");
+      if (sel) {
+        fillModelSelect(sel, curBase);
+        sel.value = curBase;
       }
-      sel.value = curBase;
       syncEffortUi(curBase, curEff);
+      applySettingsModelUi(currentModel);
     } catch (_) {}
-  }
-
-  function syncEffortUi(base, eff) {
-    const effs = (modelGroups[base] || []).filter(Boolean);
-    const ordered = EFFORTS.filter((e) => effs.includes(e));
-    const wrap = $("effortWrap");
-    if (!base || ordered.length < 2) {
-      wrap.classList.add("d-none");
-      return;
-    }
-    wrap.classList.remove("d-none");
-    const range = $("effortRange");
-    range.min = "0";
-    range.max = String(ordered.length - 1);
-    const idx = Math.max(0, ordered.indexOf(eff || "medium"));
-    range.value = String(idx);
-    const activeEff = ordered[idx];
-    $("effortLabel").textContent = effortLabel(activeEff);
-    range.oninput = () => {
-      const e = ordered[Number(range.value)];
-      $("effortLabel").textContent = effortLabel(e);
-    };
-    range.onchange = async () => {
-      const e = ordered[Number(range.value)];
-      await setActiveModel(`${base}-${e}`);
-    };
   }
 
   async function setActiveModel(fullModel) {
     currentModel = fullModel;
     try {
       await api("/api/settings", { method: "POST", body: JSON.stringify({ agy_model: fullModel }) });
+      applySettingsModelUi(fullModel);
       toast(t("toast_model_set", { model: fullModel || t("model_default") }));
     } catch (err) {
       toast(err.message, "err");
@@ -1020,17 +1096,21 @@
 
   $("chatModelSelect").onchange = async () => {
     const base = $("chatModelSelect").value;
-    if (!base) {
-      syncEffortUi("", "");
-      await setActiveModel("");
-      return;
-    }
-    const effs = (modelGroups[base] || []).filter(Boolean);
-    const chosen = effs.includes("medium") ? `${base}-medium` : effs[0] ? `${base}-${effs[0]}` : base;
+    const chosen = pickDefaultModelForBase(base);
     const [, eff] = splitModel(chosen);
     syncEffortUi(base, eff);
     await setActiveModel(chosen);
   };
+
+  if ($("cfgModelSelect")) {
+    $("cfgModelSelect").onchange = () => {
+      const base = $("cfgModelSelect").value;
+      const chosen = pickDefaultModelForBase(base);
+      if ($("cfgModel")) $("cfgModel").value = chosen;
+      const [, eff] = splitModel(chosen);
+      syncSettingsEffortUi(base, eff);
+    };
+  }
 
   // Chat
   function renderChat() {
@@ -1916,16 +1996,44 @@
   };
 
   // Settings & MCP & OAuth & 2FA
+  function populateTimezoneSelect(selectedTz = "Europe/Prague") {
+    const sel = $("cfgTz");
+    if (!sel) return;
+    let zones = [];
+    try {
+      if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
+        zones = Intl.supportedValuesOf("timeZone");
+      }
+    } catch (_) {}
+    if (!Array.isArray(zones) || !zones.length) {
+      zones = FALLBACK_TIMEZONES;
+    }
+    const target = (selectedTz || "Europe/Prague").trim() || "Europe/Prague";
+    const sorted = Array.from(new Set(["UTC", "Europe/Prague", ...zones, target]))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = "";
+    sorted.forEach((tz) => {
+      const opt = document.createElement("option");
+      opt.value = tz;
+      opt.textContent = tz;
+      sel.appendChild(opt);
+    });
+    sel.value = target;
+  }
+
+  populateTimezoneSelect("Europe/Prague");
+
   async function loadSettings() {
     try {
       const s = await api("/api/settings");
       $("cfgAssistantName").value = s.assistant_name || t("placeholder_assistant_name");
       if ($("cfgLanguage")) $("cfgLanguage").value = s.language || currentLang;
-      $("cfgTz").value = s.tz || "Europe/Prague";
+      populateTimezoneSelect(s.tz || "Europe/Prague");
       $("cfgDefaultContext").value = ["pracovni", "osobni"].includes(s.default_context_mode)
         ? s.default_context_mode
         : "auto";
-      $("cfgModel").value = s.agy_model || "";
+      applySettingsModelUi(s.agy_model || "");
       $("cfgTgUsers").value = s.telegram_allowed_users || "";
       $("cfgTgNotify").value = s.telegram_notify_chat_id || "";
       if ($("tgAdvancedBox") && (s.telegram_notify_chat_id || "").trim()) {
@@ -4174,6 +4282,7 @@
     if ($("accUsername")) $("accUsername").value = s.username || "";
     $("pwdCurrentWrap").classList.toggle("d-none", !s.has_password);
     $("disable2faPwd").classList.toggle("d-none", !s.has_password);
+    $("disable2faPwd").required = Boolean(s.has_password);
     $("totpBadge").textContent = s.totp_enabled ? t("totp_on") : t("totp_off");
     $("totpBadge").className = badgeCls(s.totp_enabled ? "ok" : "");
     $("totpDisabledBox").classList.toggle("d-none", Boolean(s.totp_enabled));
@@ -4246,6 +4355,7 @@
 
   $("enable2faForm").onsubmit = async (e) => {
     e.preventDefault();
+    showInlineFeedback("disable2faFeedback", "");
     try {
       const r = await api("/api/2fa/enable", { method: "POST", body: JSON.stringify({ code: $("enable2faCode").value.trim() }) });
       if (r.session_token) localStorage.setItem("agy_web_token", r.session_token);
@@ -4266,6 +4376,9 @@
 
   $("disable2faForm").onsubmit = async (e) => {
     e.preventDefault();
+    showInlineFeedback("disable2faFeedback", "");
+    const btn = $("disable2faBtn");
+    if (btn) btn.disabled = true;
     try {
       const r = await api("/api/2fa/disable", {
         method: "POST",
@@ -4274,8 +4387,14 @@
       $("disable2faPwd").value = ""; $("disable2faCode").value = "";
       $("recoveryCodesBox").classList.add("d-none");
       updateSecurityUi(r.owner);
+      showInlineFeedback("disable2faFeedback", t("toast_2fa_disabled"), "ok");
       toast(t("toast_2fa_disabled"));
-    } catch (err) { toast(err.message, "err"); }
+    } catch (err) {
+      showInlineFeedback("disable2faFeedback", err.message, "err");
+      toast(err.message, "err");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   };
 
   setInterval(async () => {

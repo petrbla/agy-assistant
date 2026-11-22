@@ -229,6 +229,7 @@
     "placeholder_tg_notify": "empty = first allowed",
     "cfg_hb_enabled": "Heartbeat enabled",
     "cfg_hb_interval_title": "Interval in minutes",
+    "unit_minutes_short": "min",
     "cfg_brief_enabled": "Morning briefing",
     "cfg_nightly_enabled": "Nightly memory cleanup & reset",
     "btn_save_settings": "Save settings",

@@ -579,4 +579,66 @@ def test_memory_export_and_import_api_endpoints(tmp_path: Path) -> None:
     assert bad_imp.status_code == 400
 
 
+def test_2fa_enable_and_disable_validation_returns_400_without_logout(tmp_path: Path) -> None:
+    from app.security import generate_totp_code
+
+    client = _build_client(tmp_path)
+    home_res = client.get("/")
+    assert home_res.status_code == 200
+    assert "unit_minutes_short" in home_res.text
+    assert "disable2faFeedback" in home_res.text
+    assert 'id="cfgModelSelect"' in home_res.text
+    assert 'id="cfgEffortRange"' in home_res.text
+    assert '<select id="cfgTz"' in home_res.text
+
+    setup_res = client.post(
+        "/api/auth/initial-setup",
+        json={
+            "email": "uzivatel@example.com",
+            "username": "admin",
+            "language": "cs",
+            "password": "heslo12345",
+        },
+    )
+    assert setup_res.status_code == 200
+    tok = setup_res.json()["session_token"]
+    headers = {"Authorization": f"Bearer {tok}"}
+
+    setup_2fa = client.post("/api/2fa/setup", headers=headers)
+    assert setup_2fa.status_code == 200
+    secret = setup_2fa.json()["secret"]
+    valid_code = generate_totp_code(secret)
+
+    enable_res = client.post("/api/2fa/enable", headers=headers, json={"code": valid_code})
+    assert enable_res.status_code == 200
+    assert enable_res.json()["owner"]["totp_enabled"] is True
+
+    # Špatné heslo ani špatný kód nesmí vrátit 401 (nesmí odhlásit relaci v Web UI)
+    bad_pwd = client.post(
+        "/api/2fa/disable",
+        headers=headers,
+        json={"password": "spatne-heslo", "code": valid_code},
+    )
+    assert bad_pwd.status_code == 400
+    assert client.get("/api/status", headers=headers).status_code == 200
+
+    wrong_code = f"{(int(valid_code) + 500000) % 1000000:06d}"
+    bad_code = client.post(
+        "/api/2fa/disable",
+        headers=headers,
+        json={"password": "heslo12345", "code": wrong_code},
+    )
+    assert bad_code.status_code == 400
+    assert client.get("/api/status", headers=headers).status_code == 200
+
+    ok_dis = client.post(
+        "/api/2fa/disable",
+        headers=headers,
+        json={"password": "heslo12345", "code": generate_totp_code(secret)},
+    )
+    assert ok_dis.status_code == 200
+    assert ok_dis.json()["owner"]["totp_enabled"] is False
+
+
+
 

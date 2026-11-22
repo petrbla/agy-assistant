@@ -229,6 +229,7 @@
     "placeholder_tg_notify": "leer = erste erlaubte ID",
     "cfg_hb_enabled": "Heartbeat aktiviert",
     "cfg_hb_interval_title": "Intervall in Minuten",
+    "unit_minutes_short": "Min.",
     "cfg_brief_enabled": "Morgenbriefing",
     "cfg_nightly_enabled": "Nächtliche Bereinigung & Reset",
     "btn_save_settings": "Einstellungen speichern",
