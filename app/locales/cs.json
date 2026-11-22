@@ -483,6 +483,7 @@
     "perms_mcp_empty": "Z tohoto MCP serveru zatím nejsou načteny žádné nástroje. Klikněte na „Načíst nástroje ze serveru“ pro automatické stažení seznamu nástrojů.",
     "perms_no_matches": "Žádný nástroj neodpovídá zadanému filtru.",
     "perms_account_section": "Nastavení účtu a vlastní pravidla",
+    "perms_mcp_section": "Oblast a stav MCP serveru",
     "perms_summary_counts": "{allow} povoleno · {ask} s potvrzením · {block} zakázáno",
     "perms_btn_save": "Uložit oprávnění",
     "perms_btn_back": "Zpět do Nastavení",

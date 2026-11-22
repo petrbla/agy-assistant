@@ -3200,6 +3200,8 @@ class PluginManager:
         updated_srv = self.db.update_mcp_server_tools(
             custom_srv.id,
             tool_permissions_json=json.dumps(cur_tp, ensure_ascii=False),
+            scope=scope,
+            enabled=enabled,
         )
         return {
             "status": "ok",

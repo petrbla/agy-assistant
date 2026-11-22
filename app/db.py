@@ -1099,10 +1099,18 @@ class AssistantDB:
         *,
         cached_tools_json: str | None = None,
         tool_permissions_json: str | None = None,
+        scope: str | None = None,
+        enabled: bool | None = None,
     ) -> McpServerRecord | None:
         existing = self.get_mcp_server(server_id)
         if existing is None:
             return None
+        eff_scope = (
+            (scope if scope in ("all", "pracovni", "osobni") else existing.scope)
+            if scope is not None
+            else existing.scope
+        )
+        eff_enabled = bool(enabled) if enabled is not None else existing.enabled
         eff_tools = cached_tools_json if cached_tools_json is not None else existing.cached_tools_json
         eff_perms = (
             tool_permissions_json
@@ -1111,8 +1119,8 @@ class AssistantDB:
         )
         with self._connect() as conn:
             conn.execute(
-                "UPDATE mcp_servers SET cached_tools_json = ?, tool_permissions_json = ? WHERE id = ?",
-                (eff_tools or "[]", eff_perms or "{}", int(server_id)),
+                "UPDATE mcp_servers SET scope = ?, enabled = ?, cached_tools_json = ?, tool_permissions_json = ? WHERE id = ?",
+                (eff_scope, 1 if eff_enabled else 0, eff_tools or "[]", eff_perms or "{}", int(server_id)),
             )
             row = conn.execute(
                 "SELECT * FROM mcp_servers WHERE id = ?", (int(server_id),)

@@ -483,6 +483,7 @@
     "perms_mcp_empty": "Aún no hay herramientas cargadas de este servidor MCP. Haz clic en «Cargar herramientas del servidor» para obtener la lista mediante tools/list.",
     "perms_no_matches": "Ninguna herramienta coincide con tu filtro.",
     "perms_account_section": "Cuenta y reglas personalizadas",
+    "perms_mcp_section": "Área y estado del servidor MCP",
     "perms_summary_counts": "{allow} permitidas · {ask} con aprobación · {block} bloqueadas",
     "perms_btn_save": "Guardar permisos",
     "perms_btn_back": "Volver a Configuración",

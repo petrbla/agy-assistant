@@ -483,6 +483,7 @@
     "perms_mcp_empty": "Z tego serwera MCP nie pobrano jeszcze żadnych narzędzi. Kliknij „Pobierz narzędzia z serwera”, aby pobrać listę przez JSON-RPC tools/list.",
     "perms_no_matches": "Żadne narzędzie nie pasuje do filtra.",
     "perms_account_section": "Konto i własne reguły",
+    "perms_mcp_section": "Obszar i status serwera MCP",
     "perms_summary_counts": "{allow} dozwolonych · {ask} z pytaniem · {block} zablokowanych",
     "perms_btn_save": "Zapisz uprawnienia",
     "perms_btn_back": "Powrót do Ustawień",

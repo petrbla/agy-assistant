@@ -483,6 +483,7 @@
     "perms_mcp_empty": "No tools loaded from this MCP server yet. Click “Load tools from server” to fetch the live list via JSON-RPC tools/list.",
     "perms_no_matches": "No tools match your filter.",
     "perms_account_section": "Account & custom rules",
+    "perms_mcp_section": "MCP server area & status",
     "perms_summary_counts": "{allow} allowed · {ask} approval · {block} blocked",
     "perms_btn_save": "Save permissions",
     "perms_btn_back": "Back to Settings",

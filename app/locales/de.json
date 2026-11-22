@@ -483,6 +483,7 @@
     "perms_mcp_empty": "Von diesem MCP-Server wurden noch keine Werkzeuge geladen. Klicken Sie auf „Werkzeuge vom Server laden“, um die aktuelle Liste abzurufen.",
     "perms_no_matches": "Keine Werkzeuge entsprechen Ihrem Filter.",
     "perms_account_section": "Konto & eigene Regeln",
+    "perms_mcp_section": "Bereich & Status des MCP-Servers",
     "perms_summary_counts": "{allow} erlaubt · {ask} mit Nachfrage · {block} blockiert",
     "perms_btn_save": "Berechtigungen speichern",
     "perms_btn_back": "Zurück zu Einstellungen",

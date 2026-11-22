@@ -20,12 +20,19 @@ from aiogram.types import (
     Message,
 )
 
-from app.agy_runner import AgyRunner, is_version_up_to_date
+from app.agy_runner import AgyRunner
 from app.attachments import (
     build_attachment_prompt,
     build_inbox_path,
     extract_attachment_text,
     is_image_filename,
+)
+from app.chat_commands import (
+    fmt_int,
+    format_cleanup_summary as render_cleanup_summary,
+    format_status_report,
+    format_template,
+    format_usage_report as render_usage_report,
 )
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, OwnerConfig
@@ -380,85 +387,21 @@ class TelegramAssistantBot:
 
     @staticmethod
     def _fmt_int(value: int) -> str:
-        return f"{int(value):,}".replace(",", " ")
+        return fmt_int(value)
 
     @staticmethod
     def _format_cleanup_summary(summary: dict[str, object], *, lang: str = "en") -> str:
-        flushed = int(summary.get("flushed_sessions", 0) or 0)
-        reset = int(summary.get("reset_sessions", 0) or 0)
-        errors = summary.get("errors") or []
-        if reset == 0:
-            return t("backend.tg_cleanup_empty", lang)
-        text = t("backend.tg_cleanup_done", lang, flushed=flushed, reset=reset)
-        if isinstance(errors, list) and errors:
-            text += t("backend.tg_cleanup_partial", lang, failed=len(errors))
-        return text
+        return render_cleanup_summary(summary, lang=lang)
 
     def _format_usage_report(self, message: Message, *, lang: str | None = None) -> str:
-        eff_lang = normalize_language(lang) if lang is not None else self._lang()
-        owner = self._owner()
-        active_model = (
-            owner.agy_model if owner is not None else self.settings.agy_model
-        ) or t("backend.model_default", eff_lang)
         active_ctx = self._active_context(message)
-        channel = normalize_chat_channel(active_ctx)
-        ch_lbl = channel_label(channel, eff_lang)
-        chat_session = self._chat_session_key(message, active_ctx)
-        conv_id, _ = self.db.get_session(chat_session, default_context=active_ctx)
-
-        if conv_id:
-            conv_runs, conv_tokens = self.db.get_conversation_stats(conv_id)
-            short_id = conv_id if len(conv_id) <= 12 else f"{conv_id[:12]}…"
-            conv_line = t(
-                "backend.tg_usage_conv_active",
-                eff_lang,
-                channel=ch_lbl,
-                short_id=short_id,
-                runs=self._fmt_int(conv_runs),
-                tokens=self._fmt_int(conv_tokens),
-            )
-        else:
-            conv_line = t("backend.tg_usage_conv_clean", eff_lang, channel=ch_lbl)
-
-        def _period_line(label: str, days: int | None) -> str:
-            st = self.db.get_activity_stats(days=days)
-            if st.total_runs == 0:
-                return t("backend.tg_usage_period_empty", eff_lang, label=label)
-            tilde = "~" if st.estimated_runs > 0 and st.exact_runs == 0 else ""
-            return t(
-                "backend.tg_usage_period",
-                eff_lang,
-                label=label,
-                tilde=tilde,
-                tokens=self._fmt_int(st.total_tokens),
-                in_tok=self._fmt_int(st.input_tokens),
-                out_tok=self._fmt_int(st.output_tokens),
-                runs=self._fmt_int(st.total_runs),
-            )
-
-        nightly_enabled = (
-            owner.nightly_reset_enabled
-            if owner is not None
-            else self.settings.nightly_reset_enabled
-        )
-        nightly_cron = (
-            owner.nightly_reset_cron if owner is not None else self.settings.nightly_reset_cron
-        )
-        nightly_line = (
-            t("backend.tg_usage_nightly_on", eff_lang, cron=nightly_cron)
-            if nightly_enabled
-            else t("backend.tg_usage_nightly_off", eff_lang)
-        )
-
-        return t(
-            "backend.tg_usage_report",
-            eff_lang,
-            model=active_model,
-            conv_line=conv_line,
-            nightly_line=nightly_line,
-            p24=_period_line(t("backend.tg_usage_24h", eff_lang), 1),
-            p7=_period_line(t("backend.tg_usage_7d", eff_lang), 7),
-            pall=_period_line(t("backend.tg_usage_all", eff_lang), None),
+        return render_usage_report(
+            self.db,
+            self.settings,
+            session_key=self._chat_session_key(message, active_ctx),
+            context_mode=active_ctx,
+            owner=self._owner(),
+            lang=lang if lang is not None else self._lang(),
         )
 
     async def _send_long(self, chat_id: int, text: str) -> None:
@@ -552,7 +495,7 @@ class TelegramAssistantBot:
             ctx = self._active_context(message)
             ch_lbl = channel_label(normalize_chat_channel(ctx), lang)
             await message.answer(
-                t(
+                format_template(
                     "backend.tg_start",
                     lang,
                     name=self._assistant_name(),
@@ -650,7 +593,7 @@ class TelegramAssistantBot:
                 cur = self._lang()
                 avail = ", ".join(item["code"] for item in list_available_languages())
                 await message.answer(
-                    t(
+                    format_template(
                         "backend.tg_lang_status",
                         cur,
                         lang=cur,
@@ -667,7 +610,7 @@ class TelegramAssistantBot:
             if isinstance(self.runner, AgyRunner):
                 await self.runner.close_all()
             await message.answer(
-                t(
+                format_template(
                     "backend.tg_lang_switched",
                     new_lang,
                     lang=new_lang,
@@ -799,47 +742,20 @@ class TelegramAssistantBot:
         async def cmd_status(message: Message) -> None:
             if not await self._guard(message):
                 return
-            lang = self._lang()
-            unavail = t("backend.tg_status_unavailable", lang)
-            version = await self.runner.check_version() or unavail
-            latest = (
-                await self.runner.check_latest_version()
-                if isinstance(self.runner, AgyRunner)
-                else None
-            )
-            up_to_date = is_version_up_to_date(None if version == unavail else version, latest)
-            if up_to_date is True:
-                ver_status = t("backend.tg_status_up_to_date", lang, ver=version)
-            elif up_to_date is False and latest:
-                ver_status = t("backend.tg_status_update_avail", lang, ver=version, latest=latest)
-            else:
-                ver_status = version
-            owner = self._owner()
-            active_model = (
-                owner.agy_model if owner is not None else self.settings.agy_model
-            ) or t("backend.model_default", lang)
             _, ctx = self.db.get_session(
                 self._session_key(message), default_context=self._default_context()
             )
-            none_lbl = t("backend.tg_none", lang)
-            skills = ", ".join(self.memory.list_skills()) or none_lbl
-            jobs_txt = none_lbl
-            if self.scheduler:
-                jobs = self.scheduler.list_jobs()
-                if jobs:
-                    jobs_txt = "\n".join(f"- {j.id}: {j.next_run_time}" for j in jobs)
-            await message.answer(
-                t(
-                    "backend.tg_status_msg",
-                    lang,
-                    ver_status=ver_status,
-                    model=active_model,
-                    lang=f"{get_language_name(lang)} ({lang})",
-                    ctx=f"{channel_label(normalize_chat_channel(ctx), lang)} ({ctx})",
-                    skills=skills,
-                    jobs=jobs_txt,
-                )
+            text = await format_status_report(
+                self.settings,
+                self.db,
+                self.memory,
+                self.runner,
+                self.scheduler,
+                context_mode=ctx,
+                owner=self._owner(),
+                lang=self._lang(),
             )
+            await message.answer(text)
 
         @self.dp.message(F.photo | F.document | F.voice | F.audio)
         async def handle_attachment(message: Message) -> None:

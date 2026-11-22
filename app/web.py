@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from app import __version__
 from app.agy_runner import AgyRunner, is_version_up_to_date
 from app.auth_session import AgyAuthManager, AgyTerminalManager
+from app.chat_commands import execute_web_slash_command
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
 from app.github_backup import (
@@ -130,6 +131,11 @@ class McpServerUpsertRequest(BaseModel):
     args: list[str] | None = None
     env: dict[str, str] | None = None
     enabled: bool = True
+
+
+class McpServerPatchRequest(BaseModel):
+    scope: Literal["all", "pracovni", "osobni"] | None = None
+    enabled: bool | None = None
 
 
 class AuthStartRequest(BaseModel):
@@ -871,10 +877,28 @@ def create_app(
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        prepare_agy_home(settings, db)
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return _mcp_public_dict(saved)
+
+    @app.patch("/api/mcp/{server_id}")
+    async def patch_mcp_server(
+        server_id: int,
+        payload: McpServerPatchRequest,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        updated = db.update_mcp_server_tools(
+            server_id,
+            scope=payload.scope,
+            enabled=payload.enabled,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="MCP server nebyl nalezen.")
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return _mcp_public_dict(updated)
 
     @app.delete("/api/mcp/{server_id}")
     async def delete_mcp_server(
@@ -883,7 +907,7 @@ def create_app(
     ) -> dict[str, str]:
         if not db.delete_mcp_server(server_id):
             raise HTTPException(status_code=404, detail="MCP server nebyl nalezen.")
-        prepare_agy_home(settings, db)
+        _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return {"status": "ok"}
@@ -1431,6 +1455,20 @@ def create_app(
         channel = normalize_chat_channel(effective_ctx)
         session_key = f"web:{channel}" if payload.session_key == "web:default" else payload.session_key
         effective_model = payload.model if payload.model is not None else owner.agy_model
+        cmd_reply = await execute_web_slash_command(
+            prompt=payload.prompt,
+            settings=settings,
+            db=db,
+            memory=get_memory(settings, owner),
+            runner=runner,
+            scheduler=scheduler,
+            owner=owner,
+            session_key=session_key,
+            context_mode=effective_ctx,
+            model=effective_model,
+        )
+        if cmd_reply is not None:
+            return cmd_reply
         result = await runner.run(
             payload.prompt,
             session_key=session_key,

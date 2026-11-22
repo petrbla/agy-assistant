@@ -769,5 +769,145 @@ def test_terminal_endpoints_and_ws_auth(tmp_path: Path, monkeypatch) -> None:
     assert client.get("/api/terminal/status", headers=headers).json()["running"] is False
 
 
+def test_web_chat_slash_commands(tmp_path: Path) -> None:
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    (ws_dir / "MEMORY.md").write_text("# Dlouhodobá paměť\n- Projekt Alpha", encoding="utf-8")
+
+    settings = Settings(workspace_dir=ws_dir, data_dir=tmp_path / "data")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    db.update_owner(agy_model="gemini-4-neon-medium")
+    db.set_conversation_id("web:auto", "conv-web-999888777", "auto")
+    db.log_run(
+        source="web",
+        session_key="web:auto",
+        context_mode="auto",
+        prompt="Test",
+        response="Odpověď",
+        conversation_id="conv-web-999888777",
+        duration_ms=500,
+        success=True,
+        input_tokens=900,
+        output_tokens=300,
+        total_tokens=1200,
+    )
+
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.5.14")
+    runner.list_models = AsyncMock(return_value=["gemini-4-neon-medium", "gemini-4-neon-high"])
+    runner.run = AsyncMock(
+        return_value=AgyResult(
+            text="Běžná AI odpověď",
+            conversation_id="conv-web-999888777",
+            duration_ms=42,
+            success=True,
+        )
+    )
+    app = create_app(settings, db, WorkspaceMemory(ws_dir), runner, scheduler=None)
+    client = TestClient(app)
+
+    # /usage vrátí přehled spotřeby a nesmí volat runner.run
+    usage_res = client.post(
+        "/api/chat",
+        json={"prompt": "/usage", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert usage_res.status_code == 200
+    usage_body = usage_res.json()
+    assert usage_body["handled_command"] == "usage"
+    assert usage_body["total_tokens"] == 0
+    assert "gemini-4-neon-medium" in usage_body["text"]
+    assert "conv-web-999" in usage_body["text"]
+    assert "1 200" in usage_body["text"]
+    runner.run.assert_not_called()
+
+    # /status, /memory, /help
+    st_res = client.post(
+        "/api/chat",
+        json={"prompt": "/status", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert st_res.status_code == 200
+    assert st_res.json()["handled_command"] == "status"
+    assert "1.5.14" in st_res.json()["text"]
+
+    mem_res = client.post(
+        "/api/chat",
+        json={"prompt": "/memory", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert mem_res.status_code == 200
+    assert mem_res.json()["handled_command"] == "memory"
+    assert "Projekt Alpha" in mem_res.json()["text"]
+
+    help_res = client.post(
+        "/api/chat",
+        json={"prompt": "/help", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert help_res.status_code == 200
+    assert help_res.json()["handled_command"] == "help"
+    assert "/usage" in help_res.json()["text"]
+
+    # /pracovni přepne kanál přes switch_channel
+    work_res = client.post(
+        "/api/chat",
+        json={"prompt": "/pracovni", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert work_res.status_code == 200
+    assert work_res.json()["handled_command"] == "pracovni"
+    assert work_res.json()["switch_channel"] == "pracovni"
+
+    # /model uloží nový model do DB a vrátí active_model
+    mdl_res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "/model gemini-4-neon-high",
+            "session_key": "web:auto",
+            "context_mode": "auto",
+        },
+    )
+    assert mdl_res.status_code == 200
+    assert mdl_res.json()["handled_command"] == "model"
+    assert mdl_res.json()["active_model"] == "gemini-4-neon-high"
+    assert db.get_owner() is not None and db.get_owner().agy_model == "gemini-4-neon-high"
+
+    # /lang cs uloží jazyk do DB a vrátí switch_language
+    lang_res = client.post(
+        "/api/chat",
+        json={"prompt": "/lang cs", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert lang_res.status_code == 200
+    assert lang_res.json()["handled_command"] == "lang"
+    assert lang_res.json()["switch_language"] == "cs"
+    assert db.get_owner() is not None and db.get_owner().language == "cs"
+
+    # /new vyčistí conversation_id v DB
+    new_res = client.post(
+        "/api/chat",
+        json={"prompt": "/new", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert new_res.status_code == 200
+    assert new_res.json()["handled_command"] == "new"
+    assert new_res.json()["conversation_id"] is None
+    assert db.get_session("web:auto")[0] is None
+
+    runner.run.assert_not_called()
+
+    # Cesta začínající lomítkem i neznámý příkaz propadnou normálně do runner.run(...)
+    path_res = client.post(
+        "/api/chat",
+        json={"prompt": "/etc/hosts", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert path_res.status_code == 200
+    assert path_res.json()["text"] == "Běžná AI odpověď"
+
+    unk_res = client.post(
+        "/api/chat",
+        json={"prompt": "/neznamy", "session_key": "web:auto", "context_mode": "auto"},
+    )
+    assert unk_res.status_code == 200
+    assert unk_res.json()["text"] == "Běžná AI odpověď"
+    assert runner.run.call_count == 2
+
+
+
 
 

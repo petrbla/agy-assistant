@@ -726,6 +726,18 @@ pre.term.terminal-fallback {
   letter-spacing: 0.04em;
   color: var(--bs-secondary-color);
 }
+.plugin-scope-select {
+  width: auto;
+  max-width: 145px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 0.16rem 1.6rem 0.16rem 0.55rem;
+  border-radius: 999px;
+  background-color: var(--glass-input-bg);
+  border-color: var(--glass-border);
+  cursor: pointer;
+}
 .plugin-rules-textarea {
   min-height: 64px;
   font-size: 0.82rem;

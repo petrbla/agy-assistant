@@ -1132,15 +1132,15 @@
 
       <div id="permsAccountSection" class="card shadow-sm mb-3 d-none">
         <div class="card-header">
-          <h2 class="h6 fw-bold mb-0" data-i18n="perms_account_section">Account &amp; custom rules</h2>
+          <h2 id="permsAccountSectionTitle" class="h6 fw-bold mb-0" data-i18n="perms_account_section">Account &amp; custom rules</h2>
         </div>
         <div class="card-body d-flex flex-column gap-3">
           <div class="row g-2">
-            <div class="col-sm-5">
+            <div id="permsAccountLabelWrap" class="col-sm-5">
               <label for="permsAccountLabel" class="form-label small fw-semibold text-body-secondary mb-1" data-i18n="plugin_detail_account_label">Account label</label>
               <input id="permsAccountLabel" type="text" class="form-control form-control-sm" placeholder="Label (e.g. Work or Personal)" data-i18n-placeholder="plugin_account_label_ph" />
             </div>
-            <div class="col-sm-4">
+            <div id="permsAccountScopeWrap" class="col-sm-4">
               <label for="permsAccountScope" class="form-label small fw-semibold text-body-secondary mb-1" data-i18n="plugin_detail_scope">Chat area</label>
               <select id="permsAccountScope" class="form-select form-select-sm">
                 <option value="all" data-i18n="scope_all_chats">All chats</option>
@@ -1151,11 +1151,11 @@
             <div class="col-sm-3 d-flex align-items-end pb-1">
               <div class="form-check form-switch mb-0">
                 <input id="permsAccountEnabled" class="form-check-input" type="checkbox" role="switch" checked />
-                <label for="permsAccountEnabled" class="form-check-label small fw-semibold" data-i18n="plugin_detail_enabled">Account enabled</label>
+                <label id="permsAccountEnabledLabel" for="permsAccountEnabled" class="form-check-label small fw-semibold" data-i18n="plugin_detail_enabled">Account enabled</label>
               </div>
             </div>
           </div>
-          <div>
+          <div id="permsAccountRulesWrap">
             <label for="permsAccountRules" class="form-label small fw-semibold text-body-secondary mb-1" data-i18n="plugin_detail_rules_label">Custom rules &amp; restrictions</label>
             <textarea id="permsAccountRules" class="form-control form-control-sm plugin-rules-textarea" placeholder="e.g. Never send emails outside @company.com without asking first; focus on label Invoices…" data-i18n-placeholder="plugin_detail_rules_ph"></textarea>
           </div>

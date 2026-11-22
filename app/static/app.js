@@ -460,7 +460,8 @@
     });
     s = escapeHtml(s)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "<em>$1</em>");
+      .replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "<em>$1</em>")
+      .replace(/(^|[\s(])_([^_\n]+?)_(?=$|[\s).,!?:;])/g, "$1<em>$2</em>");
     stash.forEach((html, i) => { s = s.replace(`\x00BLK${i}\x00`, html); });
     return s;
   }
@@ -1199,7 +1200,27 @@
         if (lastStatus) lastStatus.assistant_name = res.assistant_name;
         $("brandTitle").textContent = displayBrandTitle(res.assistant_name);
       }
+      if (["auto", "pracovni", "osobni"].includes(res.switch_channel) && res.switch_channel !== activeChannel) {
+        activeChannel = res.switch_channel;
+        document.querySelectorAll("#channelSeg button").forEach((b) => {
+          b.classList.toggle("active", b.dataset.channel === activeChannel);
+        });
+      }
+      if (typeof res.active_model === "string") {
+        currentModel = res.active_model;
+        const [base, eff] = splitModel(currentModel);
+        const sel = $("chatModelSelect");
+        if (sel) {
+          fillModelSelect(sel, base);
+          sel.value = base;
+        }
+        syncEffortUi(base, eff);
+        applySettingsModelUi(currentModel);
+      }
       appendMsg(res.text || t("empty_reply"), "assistant");
+      if (res.switch_language && res.switch_language !== currentLang) {
+        await applyLanguage(res.switch_language, { persistBackend: false });
+      }
     } catch (err) {
       typing.remove();
       appendMsg(t("chat_error_prefix", { msg: err.message }), "meta");
@@ -2866,6 +2887,40 @@
     $("mcpArgsWrap").classList.toggle("d-none", !isStdio);
   };
 
+  function createInlineScopeSelect(currentScope, onChange) {
+    const sel = document.createElement("select");
+    sel.className = "form-select form-select-sm plugin-scope-select";
+    const titleLbl = t("plugin_detail_scope");
+    sel.title = titleLbl;
+    sel.setAttribute("aria-label", titleLbl);
+    [
+      ["all", t("scope_all_chats")],
+      ["pracovni", t("scope_work")],
+      ["osobni", t("scope_personal")],
+    ].forEach(([val, txt]) => {
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = txt;
+      sel.appendChild(opt);
+    });
+    let prevVal = ["pracovni", "osobni"].includes(currentScope) ? currentScope : "all";
+    sel.value = prevVal;
+    sel.onchange = async () => {
+      const nextVal = sel.value;
+      sel.disabled = true;
+      try {
+        await onChange(nextVal);
+        prevVal = nextVal;
+      } catch (err) {
+        sel.value = prevVal;
+        toast(err.message, "err");
+      } finally {
+        sel.disabled = false;
+      }
+    };
+    return sel;
+  }
+
   async function loadMcp() {
     try {
       const items = await api("/api/mcp");
@@ -2876,15 +2931,26 @@
       }
       const tb = $("mcpBody");
       tb.innerHTML = "";
-      const labels = {
-        all: t("scope_all"),
-        pracovni: t("scope_work"),
-        osobni: t("scope_personal"),
-      };
       items.forEach((srv) => {
         const tr = document.createElement("tr");
         const target = srv.transport === "stdio" ? `${srv.command} ${(srv.args || []).join(" ")}` : srv.url;
-        tr.innerHTML = `<td><strong>${escapeHtml(srv.name)}</strong></td><td>${escapeHtml(labels[srv.scope] || labels.all)}</td><td class="font-monospace">${escapeHtml(target)}</td>`;
+        const nameTd = document.createElement("td");
+        nameTd.innerHTML = `<strong>${escapeHtml(srv.name)}</strong>`;
+        const scopeTd = document.createElement("td");
+        scopeTd.appendChild(
+          createInlineScopeSelect(srv.scope, async (nextScope) => {
+            await api(`/api/mcp/${srv.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ scope: nextScope }),
+            });
+            toast(t("toast_mcp_saved"));
+            await loadMcp();
+            await loadPlugins();
+          })
+        );
+        const targetTd = document.createElement("td");
+        targetTd.className = "font-monospace";
+        targetTd.textContent = target;
         const td = document.createElement("td");
         const del = document.createElement("button");
         del.className = "btn btn-outline-danger btn-sm";
@@ -2893,9 +2959,10 @@
           await api(`/api/mcp/${srv.id}`, { method: "DELETE" });
           toast(t("toast_mcp_deleted"));
           loadMcp();
+          loadPlugins();
         };
         td.appendChild(del);
-        tr.appendChild(td);
+        tr.append(nameTd, scopeTd, targetTd, td);
         tb.appendChild(tr);
       });
     } catch (_) {}
@@ -2962,10 +3029,14 @@
     return t("scope_all_chats");
   }
 
+  function hasCustomMcp(p) {
+    return Boolean(p && (p.custom_url_connected || (p.custom_mcp && p.custom_mcp.url)));
+  }
+
   function pluginSortRank(p) {
     if (p.custom_url_connected || (p.installed && p.enabled && p.connected)) return 0;
     if (p.installed && p.enabled) return 1;
-    if (p.installed) return 2;
+    if (p.installed || hasCustomMcp(p)) return 2;
     const featIdx = FEATURED_PLUGINS.indexOf(p.name);
     if (featIdx >= 0) return 3 + featIdx;
     return 100;
@@ -2981,17 +3052,17 @@
     if ($("customPluginWrap")) $("customPluginWrap").classList.toggle("d-none", !showAllPlugins);
 
     const hiddenCount = pluginsCatalog.filter(
-      (p) => !p.installed && !p.custom_url_connected && !FEATURED_PLUGINS.includes(p.name)
+      (p) => !p.installed && !hasCustomMcp(p) && !FEATURED_PLUGINS.includes(p.name)
     ).length;
     let displayList;
     if (!showAllPlugins) {
       displayList = pluginsCatalog
-        .filter((p) => p.installed || Boolean(p.custom_url_connected) || FEATURED_PLUGINS.includes(p.name))
+        .filter((p) => p.installed || hasCustomMcp(p) || FEATURED_PLUGINS.includes(p.name))
         .sort((a, b) => pluginSortRank(a) - pluginSortRank(b));
     } else {
       displayList = pluginsCatalog
         .filter((p) => {
-          if (activePluginCategory === "installed" && !p.installed && !p.custom_url_connected) return false;
+          if (activePluginCategory === "installed" && !p.installed && !hasCustomMcp(p)) return false;
           if (activePluginCategory !== "all" && activePluginCategory !== "installed" && p.category !== activePluginCategory) {
             return false;
           }
@@ -3036,6 +3107,9 @@
         p.installed && p.enabled && !isConnected && !needsConnect
       );
       const isDisabled = Boolean(p.installed && !p.enabled);
+      const isCustomPaused = Boolean(
+        !isConnected && !p.installed && p.custom_mcp && p.custom_mcp.url && p.custom_mcp.enabled === false
+      );
 
       const card = document.createElement("div");
       if (isConnected) {
@@ -3044,7 +3118,7 @@
         card.className = "card shadow-sm plugin-card plugin-card-unconnected";
       } else if (isInstalledOnlyReady) {
         card.className = "card shadow-sm plugin-card plugin-card-installed";
-      } else if (isDisabled) {
+      } else if (isDisabled || isCustomPaused) {
         card.className = "card shadow-sm plugin-card plugin-card-disabled";
       } else {
         card.className = "card shadow-sm plugin-card";
@@ -3098,9 +3172,9 @@
       } else if (isInstalledOnlyReady) {
         badge.className = badgeCls("primary");
         badge.textContent = t("plugin_status_installed");
-      } else if (isDisabled) {
+      } else if (isDisabled || isCustomPaused) {
         badge.className = badgeCls();
-        badge.textContent = t("plugin_status_disabled");
+        badge.textContent = t(isCustomPaused ? "plugin_account_status_paused" : "plugin_status_disabled");
       } else {
         badge.className = badgeCls();
         badge.textContent = t("plugin_status_available");
@@ -3232,10 +3306,23 @@
         const linkMeta = document.createElement("span");
         linkMeta.className = "small fw-semibold d-inline-flex align-items-center gap-1";
         linkMeta.innerHTML = `${uiIcon("link", "text-primary")}<span>${escapeHtml(t("plugin_custom_url_title"))}</span>`;
-        const scPill = document.createElement("span");
-        scPill.className = badgeCls();
-        scPill.textContent = scopeLabel(p.custom_mcp.scope);
-        urlBadges.append(linkMeta, scPill);
+        const scSelect = createInlineScopeSelect(p.custom_mcp.scope, async (nextScope) => {
+          await api(`/api/mcp/${p.custom_mcp.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ scope: nextScope }),
+          });
+          toast(t("toast_plugin_account_saved", { name: p.display_name || p.name }));
+          await loadPlugins();
+          await loadMcp();
+        });
+        urlBadges.append(linkMeta, scSelect);
+
+        if (p.custom_mcp.enabled === false) {
+          const pausedPill = document.createElement("span");
+          pausedPill.className = badgeCls();
+          pausedPill.textContent = t("plugin_account_status_paused");
+          urlBadges.appendChild(pausedPill);
+        }
 
         if (p.custom_mcp.has_auth_token) {
           const tokPill = document.createElement("span");
@@ -3517,9 +3604,14 @@
           titleRow.className = "d-flex align-items-center flex-wrap gap-1 fw-semibold small";
           const titleSpan = document.createElement("span");
           titleSpan.textContent = acct.label || t("plugin_account_default_label");
-          const scopeBadge = document.createElement("span");
-          scopeBadge.className = badgeCls();
-          scopeBadge.textContent = scopeLabel(acct.scope);
+          const scopeSelect = createInlineScopeSelect(acct.scope, async (nextScope) => {
+            await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
+              method: "PUT",
+              body: JSON.stringify({ scope: nextScope }),
+            });
+            toast(t("toast_plugin_account_saved", { name: acct.label || p.display_name || p.name }));
+            await loadPlugins();
+          });
           const stateBadge = document.createElement("span");
           if (!acct.enabled) {
             stateBadge.className = badgeCls();
@@ -3531,7 +3623,7 @@
             stateBadge.className = badgeCls("warn");
             stateBadge.textContent = t("plugin_account_status_disconnected");
           }
-          titleRow.append(titleSpan, scopeBadge, stateBadge);
+          titleRow.append(titleSpan, scopeSelect, stateBadge);
           metaBox.appendChild(titleRow);
 
           if (acct.account_email) {
@@ -4142,7 +4234,10 @@
     }
     if ($("permsModalSubtitle")) {
       $("permsModalSubtitle").textContent = useMcp
-        ? ((plugin.custom_mcp && plugin.custom_mcp.url) || "")
+        ? [
+            (plugin.custom_mcp && plugin.custom_mcp.url) || "",
+            plugin.custom_mcp ? scopeLabel(plugin.custom_mcp.scope) : "",
+          ].filter(Boolean).join(" · ")
         : [
             account ? (account.label || t("plugin_account_default_label")) : "",
             account && account.account_email ? account.account_email : "",
@@ -4153,8 +4248,21 @@
     if ($("permsSearchInput")) $("permsSearchInput").value = "";
     if ($("permsDiscoverBtn")) $("permsDiscoverBtn").classList.toggle("d-none", !useMcp);
 
+    const showMcpSettings = useMcp && Boolean(plugin.custom_mcp);
     const showAccountSection = !useMcp && Boolean(account);
-    if ($("permsAccountSection")) $("permsAccountSection").classList.toggle("d-none", !showAccountSection);
+    if ($("permsAccountSection")) $("permsAccountSection").classList.toggle("d-none", !(showAccountSection || showMcpSettings));
+    if ($("permsAccountLabelWrap")) $("permsAccountLabelWrap").classList.toggle("d-none", showMcpSettings);
+    if ($("permsAccountRulesWrap")) $("permsAccountRulesWrap").classList.toggle("d-none", showMcpSettings);
+    if ($("permsAccountSectionTitle")) {
+      const titleKey = showMcpSettings ? "perms_mcp_section" : "perms_account_section";
+      $("permsAccountSectionTitle").setAttribute("data-i18n", titleKey);
+      $("permsAccountSectionTitle").textContent = t(titleKey);
+    }
+    if ($("permsAccountEnabledLabel")) {
+      const enKey = showMcpSettings ? "cfg_active" : "plugin_detail_enabled";
+      $("permsAccountEnabledLabel").setAttribute("data-i18n", enKey);
+      $("permsAccountEnabledLabel").textContent = t(enKey);
+    }
     if (showAccountSection && account) {
       if ($("permsAccountLabel")) $("permsAccountLabel").value = account.label || "";
       if ($("permsAccountScope")) {
@@ -4162,6 +4270,13 @@
       }
       if ($("permsAccountEnabled")) $("permsAccountEnabled").checked = account.enabled !== false;
       if ($("permsAccountRules")) $("permsAccountRules").value = account.custom_rules || "";
+    } else if (showMcpSettings && plugin.custom_mcp) {
+      if ($("permsAccountScope")) {
+        $("permsAccountScope").value = ["pracovni", "osobni"].includes(plugin.custom_mcp.scope)
+          ? plugin.custom_mcp.scope
+          : "all";
+      }
+      if ($("permsAccountEnabled")) $("permsAccountEnabled").checked = plugin.custom_mcp.enabled !== false;
     }
 
     activateTabDom("plugin-perms");
@@ -4255,6 +4370,9 @@
       payload.scope = $("permsAccountScope")?.value || "all";
       payload.enabled = Boolean($("permsAccountEnabled")?.checked);
       payload.custom_rules = ($("permsAccountRules")?.value || "").trim();
+    } else if (permsModalState.mcpMode && permsModalState.plugin && permsModalState.plugin.custom_mcp) {
+      payload.scope = $("permsAccountScope")?.value || "all";
+      payload.enabled = Boolean($("permsAccountEnabled")?.checked);
     }
     saveBtns.forEach((b) => { b.disabled = true; });
     try {

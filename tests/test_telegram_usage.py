@@ -179,3 +179,96 @@ async def test_telegram_controller_reload_skips_restart_when_token_unchanged_and
         assert ctrl._bot is not None and ctrl._bot is not first_bot
     finally:
         await ctrl.stop()
+
+
+async def test_telegram_commands_with_lang_placeholder(tmp_path: Path) -> None:
+    from app.chat_commands import format_status_report, format_template
+
+    settings = Settings(
+        workspace_dir=tmp_path / "ws",
+        data_dir=tmp_path / "data",
+        telegram_bot_token="123456:TESTTOKEN_FOR_UNIT_TESTS_ONLY",
+        telegram_allowed_users="111",
+    )
+    (tmp_path / "ws").mkdir(parents=True, exist_ok=True)
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    db.update_owner(language="cs", agy_model="gemini-4-neon-medium")
+
+    mem = WorkspaceMemory(tmp_path / "ws")
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.5.14")
+    bot = TelegramAssistantBot(settings, db, mem, runner)
+    try:
+        start_txt = format_template(
+            "backend.tg_start",
+            "cs",
+            name="Asistent",
+            channel="Auto",
+            ctx="auto",
+            lang="Čeština (cs)",
+        )
+        assert "Čeština (cs)" in start_txt
+
+        lang_st = format_template(
+            "backend.tg_lang_status",
+            "cs",
+            lang="cs",
+            lang_name="Čeština",
+            available="en, cs",
+        )
+        assert "Čeština (cs)" in lang_st
+
+        lang_sw = format_template(
+            "backend.tg_lang_switched",
+            "cs",
+            lang="cs",
+            lang_name="Čeština",
+        )
+        assert "Čeština (cs)" in lang_sw
+
+        status_txt = await format_status_report(
+            settings,
+            db,
+            mem,
+            runner,
+            None,
+            context_mode="auto",
+            owner=db.get_owner(),
+            lang="cs",
+        )
+        assert "Čeština (cs)" in status_txt
+        assert "1.5.14" in status_txt
+
+        handlers = {h.callback.__name__: h.callback for h in bot.dp.message.handlers}
+        assert {"cmd_start", "cmd_lang", "cmd_status"} <= set(handlers)
+
+        async def _invoke(name: str, msg_id: int, text: str) -> str:
+            ans = AsyncMock()
+            msg = SimpleNamespace(
+                chat=SimpleNamespace(id=111),
+                from_user=SimpleNamespace(id=111),
+                message_id=msg_id,
+                text=text,
+                answer=ans,
+            )
+            await handlers[name](msg)
+            ans.assert_awaited_once()
+            return str(ans.await_args.args[0])
+
+        out_start = await _invoke("cmd_start", 101, "/start")
+        assert "Čeština (cs)" in out_start
+
+        out_lang_status = await _invoke("cmd_lang", 102, "/lang")
+        assert "Čeština (cs)" in out_lang_status
+
+        out_lang_switch = await _invoke("cmd_lang", 103, "/lang en")
+        assert "English (en)" in out_lang_switch
+
+        db.update_owner(language="cs")
+        out_status = await _invoke("cmd_status", 104, "/status")
+        assert "Čeština (cs)" in out_status
+        assert "1.5.14" in out_status
+    finally:
+        await bot.bot.session.close()
+

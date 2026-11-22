@@ -36,7 +36,7 @@ from app.plugins import (
     validate_plugin_target,
 )
 from app.runtime_config import sync_agy_settings_file
-from app.user_env import prepare_agy_home
+from app.user_env import build_mcp_config_dict, prepare_agy_home
 from app.web import create_app
 
 
@@ -1569,6 +1569,113 @@ async def test_submit_callback_persists_email_from_pty_and_disk_fallback(
     assert backfilled["account_email"] == "jwt-work@example.com"
     reloaded3 = db.get_plugin_account(acct3.id)
     assert reloaded3 is not None and reloaded3.account_email == "jwt-work@example.com"
+
+
+def test_custom_mcp_scope_update_via_tool_permissions_and_mcp_patch(tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    (ws_dir / "MEMORY.md").write_text("# Mem", encoding="utf-8")
+
+    s = Settings(
+        workspace_dir=ws_dir,
+        data_dir=tmp_path / "data",
+        home_dir=home_dir,
+        web_auth_token="tajne-mcp-patch",
+    )
+    db = AssistantDB(s.db_path)
+    client = TestClient(create_app(s, db, WorkspaceMemory(ws_dir), AsyncMock()))
+    hdr = {"Authorization": "Bearer tajne-mcp-patch"}
+
+    save_res = client.post(
+        "/api/plugins/n8n-skills/custom-url",
+        headers=hdr,
+        json={
+            "url": "https://n8n.example.com/mcp-server/http",
+            "auth_token": "tok-keep-secret",
+            "scope": "all",
+        },
+    )
+    assert save_res.status_code == 200
+    srv_id = int(save_res.json()["custom_mcp"]["id"])
+    db.update_mcp_server_tools(
+        srv_id,
+        cached_tools_json=json.dumps(
+            [
+                {"key": "list_workflows", "title": "List", "description": "", "group": "readonly"},
+                {"key": "execute_workflow", "title": "Run", "description": "", "group": "write"},
+            ]
+        ),
+        tool_permissions_json=json.dumps({"list_workflows": "allow", "execute_workflow": "ask"}),
+    )
+
+    # Neautorizovaný a neexistující PATCH /api/mcp/{id}
+    assert client.patch(f"/api/mcp/{srv_id}", json={"scope": "pracovni"}).status_code == 401
+    assert (
+        client.patch("/api/mcp/999999", headers=hdr, json={"scope": "pracovni"}).status_code
+        == 404
+    )
+
+    # PATCH /api/mcp/{id} změní oblast i stav a zachová token, nástroje i práva
+    patch_res = client.patch(
+        f"/api/mcp/{srv_id}",
+        headers=hdr,
+        json={"scope": "pracovni", "enabled": True},
+    )
+    assert patch_res.status_code == 200
+    patched = patch_res.json()
+    assert patched["scope"] == "pracovni"
+    assert patched["enabled"] is True
+    assert patched["has_auth_token"] is True
+    saved_srv = db.get_mcp_server(srv_id)
+    assert saved_srv is not None
+    assert saved_srv.auth_token == "tok-keep-secret"
+    assert json.loads(saved_srv.tool_permissions_json)["execute_workflow"] == "ask"
+    assert len(json.loads(saved_srv.cached_tools_json)) == 2
+
+    # V kontextu pracovni a auto se server propíše, v osobni ne
+    servers = db.list_mcp_servers()
+    assert "n8n" in build_mcp_config_dict(servers, context_mode="pracovni")["mcpServers"]
+    assert "n8n" in build_mcp_config_dict(servers, context_mode="auto")["mcpServers"]
+    assert "n8n" not in build_mcp_config_dict(servers, context_mode="osobni")["mcpServers"]
+
+    # PUT /api/plugins/n8n-skills/tool-permissions umí přepnout scope i enabled pro custom MCP
+    perm_res = client.put(
+        "/api/plugins/n8n-skills/tool-permissions",
+        headers=hdr,
+        json={
+            "scope": "osobni",
+            "enabled": False,
+            "tool_permissions": {"list_workflows": "allow", "execute_workflow": "block"},
+        },
+    )
+    assert perm_res.status_code == 200
+    cm = perm_res.json()["custom_mcp"]
+    assert cm["scope"] == "osobni"
+    assert cm["enabled"] is False
+    assert cm["tool_permissions"]["execute_workflow"] == "block"
+
+    perm_re_enable = client.put(
+        "/api/plugins/n8n-skills/tool-permissions",
+        headers=hdr,
+        json={
+            "scope": "osobni",
+            "enabled": True,
+            "tool_permissions": {"list_workflows": "allow", "execute_workflow": "ask"},
+        },
+    )
+    assert perm_re_enable.status_code == 200
+
+    cat = client.get("/api/plugins?lang=cs", headers=hdr).json()["plugins"]
+    n8n_entry = next(p for p in cat if p["name"] == "n8n-skills")
+    assert n8n_entry["custom_mcp"]["scope"] == "osobni"
+    assert n8n_entry["custom_mcp"]["enabled"] is True
+
+    servers_after = db.list_mcp_servers()
+    assert "n8n" in build_mcp_config_dict(servers_after, context_mode="osobni")["mcpServers"]
+    assert "n8n" in build_mcp_config_dict(servers_after, context_mode="auto")["mcpServers"]
+    assert "n8n" not in build_mcp_config_dict(servers_after, context_mode="pracovni")["mcpServers"]
+
 
 
 
