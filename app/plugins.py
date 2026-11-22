@@ -66,6 +66,9 @@ MANAGED_PLUGIN_DENY_PREFIXES: tuple[str, ...] = (
 )
 
 
+TOOL_PERMISSION_MODES: tuple[str, ...] = ("allow", "ask", "block")
+
+
 @dataclass(frozen=True)
 class PluginPermissionSpec:
     """Definice jednoho přepínače oprávnění pluginu."""
@@ -74,6 +77,624 @@ class PluginPermissionSpec:
     label_key: str
     default: bool
     tier: str = "basic"  # 'basic' | 'detail'
+
+
+@dataclass(frozen=True)
+class PluginToolSpec:
+    """Definice jednoho granulárního nástroje (akce) v 3-stavovém oprávnění pluginu."""
+
+    key: str
+    group: str  # 'readonly' | 'write'
+    summary_key: str
+    title_en: str
+    title_cs: str
+    desc_en: str
+    desc_cs: str
+    deny_commands: tuple[str, ...] = ()
+    default_mode: str | None = None
+
+
+PLUGIN_TOOL_CATALOG: dict[str, tuple[PluginToolSpec, ...]] = {
+    "gmail": (
+        # Read-only (7)
+        PluginToolSpec(
+            "search_threads",
+            "readonly",
+            "read",
+            "Search email threads",
+            "Vyhledávat vlákna e-mailů",
+            "Searches messages and threads in the mailbox using Gmail queries.",
+            "Vyhledává zprávy a konverzace ve schránce podle dotazu.",
+            ("command(gmail readonly search)",),
+        ),
+        PluginToolSpec(
+            "get_message",
+            "readonly",
+            "read",
+            "Get email message",
+            "Číst obsah e-mailu",
+            "Retrieves the full content, headers, and body of a specific email.",
+            "Načte kompletní obsah, hlavičky a text konkrétní zprávy.",
+            ("command(gmail readonly get-message)", "command(gmail readonly read)"),
+        ),
+        PluginToolSpec(
+            "get_thread",
+            "readonly",
+            "read",
+            "Get email thread",
+            "Číst celé vlákno konverzace",
+            "Retrieves all messages within an email conversation thread.",
+            "Načte všechny zprávy v jednom konverzačním vlákně.",
+            ("command(gmail readonly get-thread)",),
+        ),
+        PluginToolSpec(
+            "list_drafts",
+            "readonly",
+            "read",
+            "List draft emails",
+            "Zobrazit seznam konceptů",
+            "Lists saved draft emails in the mailbox.",
+            "Vypíše seznam uložených konceptů zpráv.",
+            ("command(gmail readonly list-drafts)",),
+        ),
+        PluginToolSpec(
+            "get_draft",
+            "readonly",
+            "read",
+            "Get draft email",
+            "Číst uložený koncept",
+            "Retrieves a specific saved draft email by its ID.",
+            "Přečte obsah konkrétního uloženého konceptu e-mailu.",
+            ("command(gmail readonly get-draft)",),
+        ),
+        PluginToolSpec(
+            "list_labels",
+            "readonly",
+            "read",
+            "List labels",
+            "Zobrazit seznam štítků",
+            "Lists all Gmail system and custom labels in the mailbox.",
+            "Vypíše všechny systémové i vlastní štítky ve schránce.",
+            ("command(gmail readonly list-labels)",),
+        ),
+        PluginToolSpec(
+            "get_attachment",
+            "readonly",
+            "read",
+            "Download attachment",
+            "Stahovat přílohy z e-mailů",
+            "Downloads or inspects an attachment from an email message.",
+            "Stáhne nebo zobrazí přílohu z e-mailové zprávy.",
+            ("command(gmail readonly get-attachment)", "command(gmail readonly download-attachment)"),
+        ),
+        # Write / delete (18)
+        PluginToolSpec(
+            "create_draft",
+            "write",
+            "draft",
+            "Create draft email",
+            "Vytvořit koncept e-mailu",
+            "Saves a new draft email without sending it.",
+            "Uloží nový koncept zprávy bez odeslání.",
+            ("command(gmail mutate create-draft)",),
+        ),
+        PluginToolSpec(
+            "update_draft",
+            "write",
+            "draft",
+            "Update draft email",
+            "Upravit uložený koncept",
+            "Edits an existing draft email without sending it.",
+            "Upraví text, předmět nebo příjemce existujícího konceptu.",
+            ("command(gmail mutate update-draft)",),
+        ),
+        PluginToolSpec(
+            "delete_draft",
+            "write",
+            "trash",
+            "Delete draft email",
+            "Smazat koncept e-mailu",
+            "Permanently deletes an existing draft email.",
+            "Trvale odstraní vybraný koncept e-mailu.",
+            ("command(gmail mutate delete-draft)",),
+        ),
+        PluginToolSpec(
+            "send_message",
+            "write",
+            "send",
+            "Send email message",
+            "Odeslat nový e-mail",
+            "Sends a new email message immediately.",
+            "Okamžitě odešle nový e-mail zadaným příjemcům.",
+            ("command(gmail mutate send)",),
+        ),
+        PluginToolSpec(
+            "send_with_attachment",
+            "write",
+            "send",
+            "Send email with attachment",
+            "Odeslat e-mail s přílohou",
+            "Sends a new email message with attached files immediately.",
+            "Okamžitě odešle nový e-mail včetně přiložených souborů.",
+            ("command(gmail mutate send-with-attachment)",),
+        ),
+        PluginToolSpec(
+            "send_draft",
+            "write",
+            "send",
+            "Send draft email",
+            "Odeslat uložený koncept",
+            "Sends a previously saved draft email to recipients.",
+            "Odešle dříve připravený koncept příjemcům.",
+            ("command(gmail mutate send-draft)",),
+        ),
+        PluginToolSpec(
+            "reply_email",
+            "write",
+            "reply_forward",
+            "Reply to email",
+            "Odpovědět na e-mail",
+            "Replies directly to an existing email message in a thread.",
+            "Odešle přímou odpověď na vybranou zprávu ve vlákně.",
+            ("command(gmail mutate reply)",),
+        ),
+        PluginToolSpec(
+            "forward_email",
+            "write",
+            "reply_forward",
+            "Forward email",
+            "Přeposlat e-mail",
+            "Forwards an email message to another recipient.",
+            "Přepošle vybraný e-mail jiným příjemcům.",
+            ("command(gmail mutate forward)",),
+        ),
+        PluginToolSpec(
+            "add_label",
+            "write",
+            "labels",
+            "Add labels to message/thread",
+            "Přidat štítky zprávě či vláknu",
+            "Applies one or more labels to a message or thread.",
+            "Přiřadí jeden nebo více štítků zprávě či celému vláknu.",
+            ("command(gmail mutate add-label)",),
+        ),
+        PluginToolSpec(
+            "remove_label",
+            "write",
+            "labels",
+            "Remove labels from message/thread",
+            "Odebrat štítky ze zprávy či vlákna",
+            "Removes labels from a message or thread.",
+            "Odebere vybrané štítky ze zprávy nebo konverzace.",
+            ("command(gmail mutate remove-label)",),
+        ),
+        PluginToolSpec(
+            "thread_modify",
+            "write",
+            "labels",
+            "Modify thread labels",
+            "Upravit štítky vlákna",
+            "Modifies label assignments on an entire conversation thread.",
+            "Hromadně upraví štítky celého konverzačního vlákna.",
+            ("command(gmail mutate thread-modify)",),
+        ),
+        PluginToolSpec(
+            "batch_modify",
+            "write",
+            "labels",
+            "Batch modify messages",
+            "Hromadná úprava zpráv",
+            "Applies or removes labels across multiple messages at once.",
+            "Hromadně upraví štítky nebo stav u více zpráv najednou.",
+            ("command(gmail mutate batch-modify)",),
+        ),
+        PluginToolSpec(
+            "mark_read_unread",
+            "write",
+            "labels",
+            "Mark read / unread",
+            "Označit přečtené / nepřečtené",
+            "Changes the read or unread state of messages and threads.",
+            "Přepne stav přečteno / nepřečteno u zpráv a vláken.",
+            ("command(gmail mutate mark-read)", "command(gmail mutate mark-unread)"),
+        ),
+        PluginToolSpec(
+            "create_update_label",
+            "write",
+            "labels",
+            "Create or rename label",
+            "Vytvořit či přejmenovat štítek",
+            "Creates a new Gmail label or renames an existing one.",
+            "Vytvoří nový štítek v Gmailu nebo upraví stávající.",
+            ("command(gmail mutate create-label)", "command(gmail mutate update-label)"),
+        ),
+        PluginToolSpec(
+            "archive_email",
+            "write",
+            "archive",
+            "Archive email",
+            "Archivovat e-mail",
+            "Removes messages or threads from Inbox without deleting them.",
+            "Přesune zprávy z Doručené pošty do archivu bez smazání.",
+            ("command(gmail mutate archive)",),
+        ),
+        PluginToolSpec(
+            "trash_or_spam",
+            "write",
+            "trash",
+            "Move to Trash or mark Spam",
+            "Přesunout do koše nebo spamu",
+            "Moves a message or thread to Trash or marks it as Spam.",
+            "Přesune zprávu či vlákno do koše nebo označí jako spam.",
+            ("command(gmail mutate trash)",),
+        ),
+        PluginToolSpec(
+            "delete_label",
+            "write",
+            "trash",
+            "Delete label",
+            "Smazat štítek",
+            "Deletes a custom Gmail label.",
+            "Odstraní vlastní štítek z účtu Gmail.",
+            ("command(gmail mutate delete-label)",),
+        ),
+        PluginToolSpec(
+            "email_reactions",
+            "write",
+            "reactions",
+            "Send or remove emoji reactions",
+            "Posílat a odebírat reakce",
+            "Adds or removes emoji reactions on email messages.",
+            "Přidá nebo odebere emoji reakci u e-mailové zprávy.",
+            (
+                "command(gmail mutate react)",
+                "command(gmail mutate create-reaction)",
+                "command(gmail mutate delete-reaction)",
+                "command(gmail mutate unreact)",
+            ),
+        ),
+    ),
+    "gcalendar": (
+        PluginToolSpec(
+            "list_events",
+            "readonly",
+            "read",
+            "List & search calendar events",
+            "Vyhledávat a vypisovat události",
+            "Lists and filters events in selected calendars.",
+            "Vypíše a vyhledá události ve vybraných kalendářích.",
+            ("command(gcalendar readonly list)",),
+        ),
+        PluginToolSpec(
+            "get_event",
+            "readonly",
+            "read",
+            "Get event details",
+            "Číst detail události",
+            "Retrieves complete details, attendees, and links of an event.",
+            "Zobrazí detail, popis, účastníky a odkaz na schůzku.",
+            ("command(gcalendar readonly get)",),
+        ),
+        PluginToolSpec(
+            "freebusy",
+            "readonly",
+            "read",
+            "Check availability (Free/Busy)",
+            "Zkontrolovat dostupnost (Free/Busy)",
+            "Checks free and busy time slots across calendars.",
+            "Zjistí volné a obsazené termíny v kalendářích.",
+            ("command(gcalendar readonly freebusy)",),
+        ),
+        PluginToolSpec(
+            "create_event",
+            "write",
+            "create",
+            "Create calendar event",
+            "Vytvořit novou událost",
+            "Creates a full calendar event with title, time, and guests.",
+            "Vytvoří novou událost s časem, místem a hosty.",
+            ("command(gcalendar mutate create)",),
+        ),
+        PluginToolSpec(
+            "quick_add",
+            "write",
+            "create",
+            "Quick-add event from text",
+            "Rychle přidat událost z textu",
+            "Creates an event parsed from natural language text.",
+            "Rychle založí událost z přirozeného textového popisu.",
+            ("command(gcalendar mutate quick-add)",),
+        ),
+        PluginToolSpec(
+            "import_event",
+            "write",
+            "create",
+            "Import external event",
+            "Importovat externí událost",
+            "Imports an ICS or external event into the calendar.",
+            "Naimportuje externí nebo ICS událost do kalendáře.",
+            ("command(gcalendar mutate import)",),
+        ),
+        PluginToolSpec(
+            "update_event",
+            "write",
+            "update",
+            "Update calendar event",
+            "Upravit událost v kalendáři",
+            "Modifies time, title, description, or attendees of an event.",
+            "Změní čas, název, popis nebo hosty existující události.",
+            ("command(gcalendar mutate update)",),
+        ),
+        PluginToolSpec(
+            "move_event",
+            "write",
+            "update",
+            "Move event between calendars",
+            "Přesunout událost do jiného kalendáře",
+            "Moves an existing event to another calendar.",
+            "Přesune vybranou událost do jiného kalendáře.",
+            ("command(gcalendar mutate move)",),
+        ),
+        PluginToolSpec(
+            "rsvp_event",
+            "write",
+            "rsvp",
+            "Respond to invitation (RSVP)",
+            "Odpovědět na pozvánku (RSVP)",
+            "Accepts, tentatively accepts, or declines event invitations.",
+            "Přijme, nezávazně potvrdí nebo odmítne pozvánku.",
+            ("command(gcalendar mutate rsvp)",),
+        ),
+        PluginToolSpec(
+            "delete_event",
+            "write",
+            "delete",
+            "Delete calendar event",
+            "Smazat událost z kalendáře",
+            "Deletes an event from the calendar permanently.",
+            "Odstraní vybranou událost z kalendáře.",
+            ("command(gcalendar mutate delete)",),
+        ),
+    ),
+    "gdrive": (
+        PluginToolSpec(
+            "search_files",
+            "readonly",
+            "read",
+            "Search & list files",
+            "Hledat a vypisovat soubory",
+            "Searches files and folders in Google Drive.",
+            "Vyhledává soubory a složky na Google Disku.",
+            ("command(gdrive readonly search)",),
+        ),
+        PluginToolSpec(
+            "get_file_metadata",
+            "readonly",
+            "read",
+            "Get file metadata & permissions",
+            "Číst metadata a oprávnění souboru",
+            "Inspects file info, owners, size, and sharing metadata.",
+            "Zobrazí vlastnosti souboru, vlastníka a přehled sdílení.",
+            ("command(gdrive readonly get)",),
+        ),
+        PluginToolSpec(
+            "download_file",
+            "readonly",
+            "read",
+            "Download & export files",
+            "Stahovat a exportovat soubory",
+            "Downloads or exports file content to local workspace.",
+            "Stáhne nebo vyexportuje obsah souboru do pracovního prostoru.",
+            ("command(gdrive readonly download)",),
+        ),
+        PluginToolSpec(
+            "upload_file",
+            "write",
+            "write",
+            "Upload new file",
+            "Nahrát nový soubor",
+            "Uploads a local file into Google Drive.",
+            "Nahraje soubor z pracovního prostoru na Google Disk.",
+            ("command(gdrive mutate upload)",),
+        ),
+        PluginToolSpec(
+            "create_folder",
+            "write",
+            "write",
+            "Create folder",
+            "Vytvořit složku",
+            "Creates a new folder in Google Drive.",
+            "Založí novou složku na Google Disku.",
+            ("command(gdrive mutate create)",),
+        ),
+        PluginToolSpec(
+            "update_file",
+            "write",
+            "write",
+            "Update file content",
+            "Aktualizovat obsah souboru",
+            "Uploads a new revision or updates content of an existing file.",
+            "Aktualizuje obsah existujícího souboru na Google Disku.",
+            ("command(gdrive mutate update)",),
+        ),
+        PluginToolSpec(
+            "copy_move_file",
+            "write",
+            "write",
+            "Copy or move file",
+            "Kopírovat nebo přesunout soubor",
+            "Copies or moves files across Drive folders.",
+            "Zkopíruje nebo přesune soubory mezi složkami.",
+            ("command(gdrive mutate copy)", "command(gdrive mutate move)"),
+        ),
+        PluginToolSpec(
+            "rename_file",
+            "write",
+            "write",
+            "Rename file or folder",
+            "Přejmenovat soubor či složku",
+            "Changes the name of a Drive file or folder.",
+            "Změní název souboru nebo složky na Google Disku.",
+            ("command(gdrive mutate rename)",),
+        ),
+        PluginToolSpec(
+            "share_file",
+            "write",
+            "share",
+            "Share or unshare file",
+            "Sdílet / zrušit sdílení souboru",
+            "Grants or revokes sharing access to files and folders.",
+            "Nastaví nebo zruší sdílení souboru s dalšími lidmi.",
+            ("command(gdrive mutate share)", "command(gdrive mutate unshare)"),
+        ),
+        PluginToolSpec(
+            "manage_permissions",
+            "write",
+            "share",
+            "Manage file permissions",
+            "Spravovat podrobná práva přístupu",
+            "Modifies roles and permission entries on a Drive item.",
+            "Upraví role (čtenář/editor) a přístupová práva k položce.",
+            ("command(gdrive mutate permissions)",),
+        ),
+        PluginToolSpec(
+            "delete_file",
+            "write",
+            "delete",
+            "Delete or trash file",
+            "Smazat nebo přesunout do koše",
+            "Moves files to Trash or permanently deletes them.",
+            "Přesune soubory do koše nebo je trvale smaže.",
+            ("command(gdrive mutate delete)", "command(gdrive mutate trash)"),
+        ),
+    ),
+    "gdocs": (
+        PluginToolSpec(
+            "read_document",
+            "readonly",
+            "read",
+            "Read Google Doc content",
+            "Číst obsah Google Dokumentu",
+            "Reads headings, paragraphs, and content of a Google Doc.",
+            "Načte text, strukturu a nadpisy Google Dokumentu.",
+            ("command(gdocs readonly read)", "command(gdocs readonly get)"),
+        ),
+        PluginToolSpec(
+            "search_documents",
+            "readonly",
+            "read",
+            "List & search Google Docs",
+            "Vyhledávat Google Dokumenty",
+            "Finds and lists Google Docs documents.",
+            "Vyhledá a vypíše dostupné Google Dokumenty.",
+            ("command(gdocs readonly search)", "command(gdocs readonly list)"),
+        ),
+        PluginToolSpec(
+            "create_document",
+            "write",
+            "write",
+            "Create Google Doc",
+            "Vytvořit nový Google Dokument",
+            "Creates a new Google Docs document.",
+            "Založí nový prázdný nebo předvyplněný Google Dokument.",
+            ("command(gdocs mutate create)",),
+        ),
+        PluginToolSpec(
+            "edit_document",
+            "write",
+            "write",
+            "Edit or append Google Doc",
+            "Upravit nebo doplnit Google Dokument",
+            "Modifies or appends text and formatting in a Google Doc.",
+            "Upraví text nebo doplní nové odstavce do dokumentu.",
+            ("command(gdocs mutate update)", "command(gdocs mutate edit)", "command(gdocs mutate append)"),
+        ),
+    ),
+    "gsheets": (
+        PluginToolSpec(
+            "read_spreadsheet",
+            "readonly",
+            "read",
+            "Read Google Sheet values",
+            "Číst data z Google Tabulek",
+            "Reads sheets, ranges, and cell values from a spreadsheet.",
+            "Přečte listy, rozsahy a hodnoty buněk z Google Tabulky.",
+            ("command(gsheets readonly read)", "command(gsheets readonly get)"),
+        ),
+        PluginToolSpec(
+            "search_spreadsheets",
+            "readonly",
+            "read",
+            "List & search Google Sheets",
+            "Vyhledávat Google Tabulky",
+            "Lists and searches spreadsheets in Drive.",
+            "Vyhledá a vypíše dostupné tabulky Google Sheets.",
+            ("command(gsheets readonly search)", "command(gsheets readonly list)"),
+        ),
+        PluginToolSpec(
+            "create_spreadsheet",
+            "write",
+            "write",
+            "Create Google Sheet",
+            "Vytvořit novou Google Tabulku",
+            "Creates a new spreadsheet workbook.",
+            "Vytvoří novou tabulku v Google Sheets.",
+            ("command(gsheets mutate create)",),
+        ),
+        PluginToolSpec(
+            "edit_spreadsheet",
+            "write",
+            "write",
+            "Write & format Google Sheet",
+            "Zapisovat a formátovat buňky",
+            "Writes cell values, appends rows, and updates sheet formatting.",
+            "Zapíše hodnoty, přidá řádky a upraví formátování buněk.",
+            ("command(gsheets mutate update)", "command(gsheets mutate append)", "command(gsheets mutate format)"),
+        ),
+    ),
+    "gslides": (
+        PluginToolSpec(
+            "read_presentation",
+            "readonly",
+            "read",
+            "Read Google Slides deck",
+            "Číst obsah Google Prezentace",
+            "Reads slides, titles, speaker notes, and text from a deck.",
+            "Přečte snímky, texty a poznámky řečníka z prezentace.",
+            ("command(gslides readonly read)", "command(gslides readonly get)"),
+        ),
+        PluginToolSpec(
+            "export_presentation",
+            "readonly",
+            "read",
+            "List & export Google Slides",
+            "Vyhledávat a exportovat prezentace",
+            "Lists available slide decks or exports them to PDF/images.",
+            "Vypíše dostupné prezentace nebo je exportuje.",
+            ("command(gslides readonly export)", "command(gslides readonly list)"),
+        ),
+        PluginToolSpec(
+            "create_presentation",
+            "write",
+            "write",
+            "Create Google Slides deck",
+            "Vytvořit novou prezentaci",
+            "Creates a new Google Slides presentation.",
+            "Založí novou prezentaci v Google Slides.",
+            ("command(gslides mutate create)",),
+        ),
+        PluginToolSpec(
+            "edit_presentation",
+            "write",
+            "write",
+            "Edit Google Slides",
+            "Upravovat snímky prezentace",
+            "Adds, edits, or updates slides in an existing presentation.",
+            "Přidá nebo upraví snímky a texty ve stávající prezentaci.",
+            ("command(gslides mutate update)", "command(gslides mutate edit)"),
+        ),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -900,6 +1521,106 @@ def normalize_plugin_permissions(
     return resolved
 
 
+def parse_tool_permissions_raw(raw: dict[str, Any] | str | None) -> dict[str, str]:
+    """Bezpečně převede JSON/dict s 3-stavovými právy nástrojů na mapu validních módů."""
+    parsed: dict[str, Any] = {}
+    if isinstance(raw, str) and raw.strip():
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                parsed = loaded
+        except json.JSONDecodeError:
+            parsed = {}
+    elif isinstance(raw, dict):
+        parsed = raw
+
+    out: dict[str, str] = {}
+    for k, v in parsed.items():
+        if not isinstance(k, str) or not k.strip():
+            continue
+        if isinstance(v, str) and v.strip().lower() in TOOL_PERMISSION_MODES:
+            out[k.strip()] = v.strip().lower()
+    return out
+
+
+def normalize_tool_permissions(
+    plugin_name: str,
+    raw_tool_perms: dict[str, Any] | str | None,
+    summary_perms: dict[str, bool] | None = None,
+) -> dict[str, str]:
+    """Sestaví úplnou mapu `{tool_key: allow|ask|block}` s fallbackem ze souhrnných přepínačů."""
+    pname = plugin_name.strip().lower()
+    specs = PLUGIN_TOOL_CATALOG.get(pname)
+    if not specs:
+        return parse_tool_permissions_raw(raw_tool_perms)
+
+    summary = (
+        normalize_plugin_permissions(pname, summary_perms)
+        if summary_perms is not None
+        else default_permissions_for_plugin(pname)
+    )
+    overrides = parse_tool_permissions_raw(raw_tool_perms)
+    resolved: dict[str, str] = {}
+    for spec in specs:
+        if spec.key in overrides:
+            resolved[spec.key] = overrides[spec.key]
+        elif spec.default_mode in TOOL_PERMISSION_MODES:
+            resolved[spec.key] = spec.default_mode  # type: ignore[assignment]
+        else:
+            resolved[spec.key] = "allow" if summary.get(spec.summary_key, False) else "block"
+    return resolved
+
+
+def sync_summary_from_tool_permissions(
+    plugin_name: str,
+    tool_perms: dict[str, str],
+    current_summary: dict[str, bool] | None = None,
+) -> dict[str, bool]:
+    """Aktualizuje souhrnné boolean přepínače podle granulární 3-stavové mapy nástrojů."""
+    pname = plugin_name.strip().lower()
+    base = (
+        normalize_plugin_permissions(pname, current_summary)
+        if current_summary is not None
+        else default_permissions_for_plugin(pname)
+    )
+    specs = PLUGIN_TOOL_CATALOG.get(pname)
+    if not base or not specs:
+        return base
+
+    by_summary: dict[str, list[str]] = {}
+    for spec in specs:
+        by_summary.setdefault(spec.summary_key, []).append(spec.key)
+
+    updated = dict(base)
+    for sum_key, tool_keys in by_summary.items():
+        if sum_key in updated:
+            updated[sum_key] = any(tool_perms.get(tk, "block") != "block" for tk in tool_keys)
+    return updated
+
+
+def localize_tool_specs(
+    plugin_name: str, tool_perms: dict[str, str], lang: str = "en"
+) -> list[dict[str, Any]]:
+    """Vrátí lokalizovaný seznam nástrojů pluginu včetně jejich aktuálního režimu."""
+    specs = PLUGIN_TOOL_CATALOG.get(plugin_name.strip().lower())
+    if not specs:
+        return []
+    use_cs = (lang or "en").strip().lower() in ("cs", "sk")
+    out: list[dict[str, Any]] = []
+    for spec in specs:
+        out.append(
+            {
+                "key": spec.key,
+                "group": spec.group,
+                "summary_key": spec.summary_key,
+                "title": spec.title_cs if use_cs else spec.title_en,
+                "description": spec.desc_cs if use_cs else spec.desc_en,
+                "mode": tool_perms.get(spec.key, "block"),
+            }
+        )
+    return out
+
+
 def _effective_permissions(
     plugin_name: str,
     configs: dict[str, PluginConfigRecord],
@@ -910,6 +1631,320 @@ def _effective_permissions(
         return normalize_plugin_permissions(plugin_name, acct.permissions_json)
     rec = configs.get(plugin_name.lower())
     return normalize_plugin_permissions(plugin_name, rec.permissions_json if rec is not None else None)
+
+
+def _effective_tool_permissions(
+    plugin_name: str,
+    configs: dict[str, PluginConfigRecord],
+    selected_accounts: dict[str, PluginAccountRecord] | None = None,
+) -> dict[str, str]:
+    summary = _effective_permissions(plugin_name, configs, selected_accounts)
+    raw_tp: str | None = None
+    if selected_accounts and plugin_name.lower() in selected_accounts:
+        raw_tp = selected_accounts[plugin_name.lower()].tool_permissions_json
+    return normalize_tool_permissions(plugin_name, raw_tp, summary)
+
+
+def _mcp_server_matches_channel(scope: str, channel: str) -> bool:
+    if channel == "auto":
+        return True
+    return scope in ("all", channel)
+
+
+def classify_mcp_tool_group(name: str, annotations: dict[str, Any] | None = None) -> str:
+    """Zařadí MCP nástroj do skupiny `readonly` nebo `write` podle anotací či názvu."""
+    if isinstance(annotations, dict):
+        if annotations.get("readOnlyHint") is True:
+            return "readonly"
+        if annotations.get("destructiveHint") is True:
+            return "write"
+    low = (name or "").strip().lower()
+    if low in {"whoami", "status", "health", "version"} or low.startswith(
+        (
+            "get_",
+            "list_",
+            "search_",
+            "read_",
+            "find_",
+            "fetch_",
+            "query_",
+            "describe_",
+            "show_",
+            "inspect_",
+            "check_",
+            "count_",
+            "lookup_",
+            "view_",
+        )
+    ):
+        return "readonly"
+    return "write"
+
+
+def parse_mcp_jsonrpc_response(raw_bytes: bytes, content_type: str = "") -> dict[str, Any]:
+    """Rozparsuje JSON-RPC odpověď MCP serveru jak z plain JSON, tak ze SSE `text/event-stream`."""
+    text = raw_bytes.decode("utf-8", errors="replace").strip()
+    if not text:
+        return {}
+
+    ct = (content_type or "").lower()
+    if "text/event-stream" not in ct and (text.startswith("{") or text.startswith("[")):
+        try:
+            loaded = json.loads(text)
+            if isinstance(loaded, dict):
+                return loaded
+            if isinstance(loaded, list):
+                for item in reversed(loaded):
+                    if isinstance(item, dict) and ("result" in item or "error" in item):
+                        return item
+                for item in loaded:
+                    if isinstance(item, dict):
+                        return item
+        except json.JSONDecodeError:
+            pass
+
+    # SSE event-stream: sbíráme bloky `data:` řádků oddělené prázdným řádkem
+    candidates: list[dict[str, Any]] = []
+    data_buf: list[str] = []
+
+    def _flush_buf() -> None:
+        if not data_buf:
+            return
+        payload_str = "\n".join(data_buf).strip()
+        data_buf.clear()
+        if not payload_str or payload_str == "[DONE]":
+            return
+        with contextlib.suppress(json.JSONDecodeError):
+            parsed = json.loads(payload_str)
+            if isinstance(parsed, dict):
+                candidates.append(parsed)
+            elif isinstance(parsed, list):
+                for sub in parsed:
+                    if isinstance(sub, dict):
+                        candidates.append(sub)
+
+    for line in text.replace("\r\n", "\n").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            _flush_buf()
+            continue
+        if line.startswith("data:"):
+            data_buf.append(line[5:].lstrip())
+    _flush_buf()
+
+    for cand in reversed(candidates):
+        if "result" in cand or "error" in cand:
+            return cand
+    if candidates:
+        return candidates[-1]
+
+    # Poslední fallback: zkusit přímo JSON
+    try:
+        loaded = json.loads(text)
+        if isinstance(loaded, dict):
+            return loaded
+    except json.JSONDecodeError:
+        pass
+    return {}
+
+
+def _post_mcp_jsonrpc_sync(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    auth_token: str = "",
+    headers: dict[str, str] | None = None,
+    session_id: str = "",
+    timeout: float = 10.0,
+) -> tuple[int, str, dict[str, Any]]:
+    """Odešle jeden JSON-RPC POST požadavek na HTTP MCP server bez externích závislostí."""
+    req_headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "asistent-antigravity/1.0",
+    }
+    if isinstance(headers, dict):
+        for k, v in headers.items():
+            if isinstance(k, str) and k.strip() and isinstance(v, str):
+                req_headers[k.strip()] = v
+    if auth_token.strip():
+        req_headers["Authorization"] = f"Bearer {auth_token.strip()}"
+    if session_id.strip():
+        req_headers["Mcp-Session-Id"] = session_id.strip()
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers=req_headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = int(getattr(resp, "status", 200))
+            new_sid = str(resp.headers.get("Mcp-Session-Id") or session_id or "").strip()
+            ctype = str(resp.headers.get("Content-Type") or "")
+            raw = resp.read(2 * 1024 * 1024)
+            return status, new_sid, parse_mcp_jsonrpc_response(raw, ctype)
+    except urllib.error.HTTPError as exc:
+        err_raw = b""
+        with contextlib.suppress(Exception):
+            err_raw = exc.read(4096)
+        ctype = str(exc.headers.get("Content-Type") or "") if exc.headers else ""
+        parsed = parse_mcp_jsonrpc_response(err_raw, ctype)
+        err_detail = ""
+        if isinstance(parsed.get("error"), dict):
+            err_detail = str(parsed["error"].get("message") or "")
+        if not err_detail:
+            err_detail = err_raw.decode("utf-8", errors="replace").strip()[:250]
+        if int(exc.code) in (401, 403):
+            raise RuntimeError(
+                f"MCP server odmítl autorizaci (HTTP {exc.code}). Zkontrolujte Bearer token."
+            ) from exc
+        new_sid = (
+            str(exc.headers.get("Mcp-Session-Id") or session_id or "").strip()
+            if exc.headers
+            else session_id
+        )
+        if parsed and ("error" in parsed or "result" in parsed):
+            return int(exc.code), new_sid, parsed
+        raise RuntimeError(f"HTTP {exc.code}: {err_detail or exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Nepodařilo se připojit k MCP serveru: {exc.reason}") from exc
+    except (TimeoutError, OSError) as exc:
+        raise RuntimeError(f"Chyba komunikace s MCP serverem: {exc}") from exc
+
+
+def discover_http_mcp_tools_sync(
+    url: str,
+    *,
+    auth_token: str = "",
+    headers: dict[str, str] | None = None,
+    timeout: float = 10.0,
+) -> list[dict[str, str]]:
+    """Načte seznam dostupných nástrojů ze Streamable HTTP MCP serveru (`tools/list`)."""
+    clean_url = validate_custom_mcp_url(url)
+    session_id = ""
+    initialized_ok = False
+
+    with contextlib.suppress(RuntimeError):
+        status, sid, init_res = _post_mcp_jsonrpc_sync(
+            clean_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "asistent-antigravity", "version": "1.0"},
+                },
+            },
+            auth_token=auth_token,
+            headers=headers,
+            timeout=timeout,
+        )
+        session_id = sid
+        if 200 <= status < 300 and isinstance(init_res.get("result"), dict):
+            initialized_ok = True
+
+    if initialized_ok:
+        with contextlib.suppress(RuntimeError):
+            _post_mcp_jsonrpc_sync(
+                clean_url,
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                auth_token=auth_token,
+                headers=headers,
+                session_id=session_id,
+                timeout=min(timeout, 4.0),
+            )
+
+    raw_tools: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    cursor: str | None = None
+    for page in range(5):
+        params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+        status, session_id, list_res = _post_mcp_jsonrpc_sync(
+            clean_url,
+            {"jsonrpc": "2.0", "id": 10 + page, "method": "tools/list", "params": params},
+            auth_token=auth_token,
+            headers=headers,
+            session_id=session_id,
+            timeout=timeout,
+        )
+        if isinstance(list_res.get("error"), dict):
+            msg = str(list_res["error"].get("message") or list_res["error"])
+            raise RuntimeError(f"MCP server vrátil chybu při tools/list: {msg}")
+        result = list_res.get("result")
+        if not isinstance(result, dict):
+            if status >= 400:
+                raise RuntimeError(f"MCP server vrátil neplatnou odpověď (HTTP {status}).")
+            break
+        batch = result.get("tools")
+        if isinstance(batch, list):
+            for item in batch:
+                if not isinstance(item, dict):
+                    continue
+                tname = str(item.get("name") or "").strip()
+                if not tname or tname in seen_names:
+                    continue
+                seen_names.add(tname)
+                raw_tools.append(item)
+                if len(raw_tools) >= 200:
+                    break
+        next_cursor = result.get("nextCursor")
+        if not isinstance(next_cursor, str) or not next_cursor.strip() or len(raw_tools) >= 200:
+            break
+        cursor = next_cursor.strip()
+
+    out: list[dict[str, str]] = []
+    for item in raw_tools:
+        tname = str(item.get("name") or "").strip()
+        ann = item.get("annotations") if isinstance(item.get("annotations"), dict) else None
+        group = classify_mcp_tool_group(tname, ann)
+        title = str(item.get("title") or tname).strip()[:120]
+        desc = " ".join(str(item.get("description") or "").split())[:300]
+        out.append({"key": tname, "title": title, "description": desc, "group": group})
+    return out
+
+
+def build_mcp_tools_payload(srv: McpServerRecord) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Sestaví seznam nástrojů a jejich 3-stavových oprávnění pro jeden MCP server."""
+    try:
+        cached = json.loads(srv.cached_tools_json or "[]")
+        if not isinstance(cached, list):
+            cached = []
+    except (json.JSONDecodeError, TypeError):
+        cached = []
+
+    saved_tp = parse_tool_permissions_raw(srv.tool_permissions_json)
+    tools_out: list[dict[str, Any]] = []
+    resolved_tp: dict[str, str] = {}
+    seen_keys: set[str] = set()
+
+    for entry in cached:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("key") or entry.get("name") or "").strip()
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        raw_grp = str(entry.get("group") or "").strip().lower()
+        group = raw_grp if raw_grp in ("readonly", "write") else classify_mcp_tool_group(key)
+        default_mode = "allow" if group == "readonly" else "ask"
+        mode = saved_tp.get(key, default_mode)
+        resolved_tp[key] = mode
+        tools_out.append(
+            {
+                "key": key,
+                "group": group,
+                "summary_key": group,
+                "title": str(entry.get("title") or key).strip(),
+                "description": str(entry.get("description") or "").strip(),
+                "mode": mode,
+            }
+        )
+
+    for key, mode in saved_tp.items():
+        if key not in resolved_tp:
+            resolved_tp[key] = mode
+
+    return tools_out, resolved_tp
 
 
 def compute_plugin_deny_rules(
@@ -933,146 +1968,28 @@ def compute_plugin_deny_rules(
     for cli_name in _GOOGLE_CLI_PLUGINS:
         if cli_name in blocked:
             rules.extend([f"command({cli_name} readonly)", f"command({cli_name} mutate)"])
+            continue
+        if cli_name not in enabled_low:
+            continue
 
-    if "gmail" in enabled_low and "gmail" not in blocked:
-        p = _effective_permissions("gmail", configs, selected)
-        if not p.get("read", True):
-            rules.append("command(gmail readonly)")
-        if not p.get("draft", True):
-            rules.extend(
-                [
-                    "command(gmail mutate create-draft)",
-                    "command(gmail mutate update-draft)",
-                ]
-            )
-        if not p.get("send", False):
-            rules.extend(
-                [
-                    "command(gmail mutate send)",
-                    "command(gmail mutate send-with-attachment)",
-                    "command(gmail mutate send-draft)",
-                ]
-            )
-        if not p.get("reply_forward", False):
-            rules.extend(
-                [
-                    "command(gmail mutate reply)",
-                    "command(gmail mutate forward)",
-                ]
-            )
-        if not p.get("labels", False):
-            rules.extend(
-                [
-                    "command(gmail mutate add-label)",
-                    "command(gmail mutate remove-label)",
-                    "command(gmail mutate create-label)",
-                    "command(gmail mutate update-label)",
-                    "command(gmail mutate mark-read)",
-                    "command(gmail mutate mark-unread)",
-                    "command(gmail mutate thread-modify)",
-                    "command(gmail mutate batch-modify)",
-                ]
-            )
-        if not p.get("archive", False):
-            rules.append("command(gmail mutate archive)")
-        if not p.get("trash", False):
-            rules.extend(
-                [
-                    "command(gmail mutate trash)",
-                    "command(gmail mutate delete-draft)",
-                    "command(gmail mutate delete-label)",
-                ]
-            )
-        if not p.get("reactions", False):
-            rules.extend(
-                [
-                    "command(gmail mutate react)",
-                    "command(gmail mutate create-reaction)",
-                    "command(gmail mutate delete-reaction)",
-                    "command(gmail mutate unreact)",
-                ]
-            )
-        if not any(
-            p.get(k, False)
-            for k in ("draft", "send", "reply_forward", "labels", "archive", "trash", "reactions")
-        ):
-            rules.append("command(gmail mutate)")
+        tperms = _effective_tool_permissions(cli_name, configs, selected)
+        specs = PLUGIN_TOOL_CATALOG.get(cli_name, ())
+        ro_specs = [sp for sp in specs if sp.group == "readonly"]
+        wr_specs = [sp for sp in specs if sp.group == "write"]
 
-    if "gcalendar" in enabled_low and "gcalendar" not in blocked:
-        p = _effective_permissions("gcalendar", configs, selected)
-        if not p.get("read", True):
-            rules.append("command(gcalendar readonly)")
-        create_ok = p.get("create", True)
-        update_ok = p.get("update", True)
-        rsvp_ok = p.get("rsvp", False)
-        delete_ok = p.get("delete", False)
-        if not create_ok and not update_ok and not rsvp_ok and not delete_ok:
-            rules.append("command(gcalendar mutate)")
+        if ro_specs and all(tperms.get(sp.key, "block") == "block" for sp in ro_specs):
+            rules.append(f"command({cli_name} readonly)")
         else:
-            if not create_ok:
-                rules.extend(
-                    [
-                        "command(gcalendar mutate create)",
-                        "command(gcalendar mutate quick-add)",
-                        "command(gcalendar mutate import)",
-                    ]
-                )
-            if not update_ok:
-                rules.extend(
-                    [
-                        "command(gcalendar mutate update)",
-                        "command(gcalendar mutate move)",
-                    ]
-                )
-            if not rsvp_ok:
-                rules.append("command(gcalendar mutate rsvp)")
-            if not delete_ok:
-                rules.append("command(gcalendar mutate delete)")
+            for sp in ro_specs:
+                if tperms.get(sp.key, "block") == "block":
+                    rules.extend(sp.deny_commands)
 
-    if "gdrive" in enabled_low and "gdrive" not in blocked:
-        p = _effective_permissions("gdrive", configs, selected)
-        if not p.get("read", True):
-            rules.append("command(gdrive readonly)")
-        write_ok = p.get("write", False)
-        share_ok = p.get("share", False)
-        delete_ok = p.get("delete", False)
-        if not write_ok and not share_ok and not delete_ok:
-            rules.append("command(gdrive mutate)")
+        if wr_specs and all(tperms.get(sp.key, "block") == "block" for sp in wr_specs):
+            rules.append(f"command({cli_name} mutate)")
         else:
-            if not write_ok:
-                rules.extend(
-                    [
-                        "command(gdrive mutate upload)",
-                        "command(gdrive mutate create)",
-                        "command(gdrive mutate update)",
-                        "command(gdrive mutate copy)",
-                        "command(gdrive mutate move)",
-                        "command(gdrive mutate rename)",
-                    ]
-                )
-            if not share_ok:
-                rules.extend(
-                    [
-                        "command(gdrive mutate share)",
-                        "command(gdrive mutate unshare)",
-                        "command(gdrive mutate permissions)",
-                    ]
-                )
-            if not delete_ok:
-                rules.extend(
-                    [
-                        "command(gdrive mutate delete)",
-                        "command(gdrive mutate trash)",
-                    ]
-                )
-
-    for name in ("gdocs", "gsheets", "gslides"):
-        if name in enabled_low and name not in blocked:
-            p = _effective_permissions(name, configs, selected)
-            if not p.get("read", True):
-                rules.append(f"command({name} readonly)")
-            if not p.get("write", False):
-                rules.append(f"command({name} mutate)")
+            for sp in wr_specs:
+                if tperms.get(sp.key, "block") == "block":
+                    rules.extend(sp.deny_commands)
 
     return list(dict.fromkeys(rules))
 
@@ -1095,8 +2012,15 @@ def should_set_agy_unattended(
         )
         if "gmail" in blocked:
             return True
-    perms = _effective_permissions("gmail", configs, selected)
-    return not perms.get("send", False) and not perms.get("reply_forward", False)
+    tperms = _effective_tool_permissions("gmail", configs, selected)
+    send_keys = (
+        "send_message",
+        "send_with_attachment",
+        "send_draft",
+        "reply_email",
+        "forward_email",
+    )
+    return all(tperms.get(k, "block") == "block" for k in send_keys)
 
 
 def build_plugin_permissions_prompt_hint(
@@ -1105,8 +2029,9 @@ def build_plugin_permissions_prompt_hint(
     *,
     accounts: list[PluginAccountRecord] | None = None,
     context_mode: str = "auto",
+    mcp_servers: list[McpServerRecord] | None = None,
 ) -> str:
-    """Sestaví stručnou systémovou instrukci pro agenta vč. kontextového účtu a vlastních pravidel."""
+    """Sestaví systémovou instrukci pro agenta vč. 3-stavových práv, účtů, MCP nástrojů a pravidel."""
     enabled_low = {p.lower() for p in enabled_plugins}
     selected: dict[str, PluginAccountRecord] = {}
     blocked: set[str] = set()
@@ -1136,6 +2061,19 @@ def build_plugin_permissions_prompt_hint(
                 allow_s = ", ".join(allowed) if allowed else "none"
                 deny_s = ", ".join(denied)
                 parts.append(f"ALLOWED({allow_s}), DENIED({deny_s})")
+            specs = PLUGIN_TOOL_CATALOG.get(pname, ())
+            if specs:
+                tperms = _effective_tool_permissions(pname, configs, selected)
+                ask_keys = [sp.key for sp in specs if tperms.get(sp.key) == "ask"]
+                mixed_blocked = [
+                    sp.key
+                    for sp in specs
+                    if tperms.get(sp.key) == "block" and perms.get(sp.summary_key, False)
+                ]
+                if mixed_blocked:
+                    parts.append(f"BLOCKED_TOOLS({', '.join(mixed_blocked)})")
+                if ask_keys:
+                    parts.append(f"NEEDS_APPROVAL({', '.join(ask_keys)})")
         if acct is not None and acct.custom_rules.strip():
             clean_rule = " ".join(acct.custom_rules.split())[:500]
             parts.append(f"RULES: {clean_rule}")
@@ -1153,12 +2091,35 @@ def build_plugin_permissions_prompt_hint(
         if pname in selected or pname in blocked:
             _append_entry(pname, False)
 
+    if mcp_servers:
+        channel = normalize_chat_channel(context_mode)
+        for srv in mcp_servers:
+            if not srv.enabled or not _mcp_server_matches_channel(srv.scope, channel):
+                continue
+            _, resolved_tp = build_mcp_tools_payload(srv)
+            blocked_tools = [k for k, m in resolved_tp.items() if m == "block"]
+            ask_tools = [k for k, m in resolved_tp.items() if m == "ask"]
+            mcp_parts: list[str] = []
+            if blocked_tools:
+                mcp_parts.append(f"BLOCKED_TOOLS({', '.join(blocked_tools)})")
+            if ask_tools:
+                mcp_parts.append(f"NEEDS_APPROVAL({', '.join(ask_tools)})")
+            if mcp_parts:
+                entries.append(f"mcp:{srv.name}: {'; '.join(mcp_parts)}")
+
     if not entries:
         return ""
     joined = " | ".join(entries)
+    has_ask = any("NEEDS_APPROVAL(" in e for e in entries)
+    ask_note = (
+        "For NEEDS_APPROVAL tools, ALWAYS show exact target/parameters in chat and wait for explicit "
+        "user confirmation before executing; "
+        if has_ask
+        else ""
+    )
     return (
-        "[Plugin permissions (STRICTLY ENFORCED – never run denied actions or violate custom RULES, "
-        "inform the user they can change them in Settings → Integrations): "
+        "[Plugin permissions (STRICTLY ENFORCED – never run denied or blocked actions or violate "
+        f"custom RULES, {ask_note}inform the user they can change them in Settings → Integrations): "
         f"{joined}]"
     )
 
@@ -1368,10 +2329,16 @@ class PluginManager:
         ]
 
     def _account_public_dict(
-        self, acct: PluginAccountRecord, *, connected_override: bool | None = None
+        self,
+        acct: PluginAccountRecord,
+        *,
+        connected_override: bool | None = None,
+        lang: str = "en",
     ) -> dict[str, Any]:
         pname = acct.plugin_name.lower()
         perms = normalize_plugin_permissions(pname, acct.permissions_json)
+        tperms = normalize_tool_permissions(pname, acct.tool_permissions_json, perms)
+        tools = localize_tool_specs(pname, tperms, lang=lang)
         return {
             "id": acct.id,
             "plugin_name": acct.plugin_name,
@@ -1380,6 +2347,8 @@ class PluginManager:
             "profile_key": sanitize_profile_key(acct.profile_key),
             "account_email": acct.account_email,
             "permissions": perms,
+            "tool_permissions": tperms,
+            "tools": tools,
             "custom_rules": acct.custom_rules,
             "connected": acct.connected if connected_override is None else connected_override,
             "connected_at": acct.connected_at,
@@ -1453,6 +2422,7 @@ class PluginManager:
     def _custom_mcp_public_dict(srv: McpServerRecord | None) -> dict[str, Any] | None:
         if srv is None:
             return None
+        tools_list, tool_perms = build_mcp_tools_payload(srv)
         return {
             "id": srv.id,
             "name": srv.name,
@@ -1460,6 +2430,8 @@ class PluginManager:
             "scope": srv.scope,
             "has_auth_token": bool(srv.auth_token.strip()),
             "enabled": bool(srv.enabled),
+            "tools": tools_list,
+            "tool_permissions": tool_perms,
         }
 
     def configure_custom_url(
@@ -1502,6 +2474,37 @@ class PluginManager:
             "custom_mcp": self._custom_mcp_public_dict(saved),
         }
 
+    async def discover_plugin_mcp_tools(
+        self, plugin_name: str, *, timeout: float = 10.0
+    ) -> dict[str, Any]:
+        """Načte a uloží seznam nástrojů z připojeného HTTP MCP serveru daného pluginu."""
+        safe_name = validate_plugin_name(plugin_name).lower()
+        srv = self._find_custom_mcp_server(safe_name)
+        if srv is None or not srv.url.strip():
+            raise ValueError(f"Plugin '{safe_name}' nemá nakonfigurovanou vlastní HTTP MCP URL.")
+        try:
+            headers_raw = json.loads(srv.headers_json or "{}")
+            headers = headers_raw if isinstance(headers_raw, dict) else {}
+        except json.JSONDecodeError:
+            headers = {}
+        tools = await asyncio.to_thread(
+            discover_http_mcp_tools_sync,
+            srv.url,
+            auth_token=srv.auth_token,
+            headers=headers,
+            timeout=timeout,
+        )
+        updated = self.db.update_mcp_server_tools(
+            srv.id,
+            cached_tools_json=json.dumps(tools, ensure_ascii=False),
+        )
+        return {
+            "status": "ok",
+            "plugin": safe_name,
+            "count": len(tools),
+            "custom_mcp": self._custom_mcp_public_dict(updated),
+        }
+
     def delete_custom_url(self, plugin_name: str) -> dict[str, Any]:
         """Odebere vlastní HTTP MCP URL navázanou na daný plugin."""
         safe_name = validate_plugin_name(plugin_name).lower()
@@ -1511,7 +2514,7 @@ class PluginManager:
             deleted = self.db.delete_mcp_server(existing.id)
         return {"status": "ok", "plugin": safe_name, "deleted": deleted}
 
-    async def list_catalog_with_status(self) -> dict[str, Any]:
+    async def list_catalog_with_status(self, *, lang: str = "en") -> dict[str, Any]:
         """Sloučí kurátorovaný katalog, nainstalované pluginy, účty a stav připojení."""
         installed_list = await self.list_installed()
         installed_by_name = {item["name"].lower(): item for item in installed_list}
@@ -1554,7 +2557,9 @@ class PluginManager:
                 eff_conn = acct.connected or (
                     len(accts) == 1 and acct.profile_key == "default" and disk_connected
                 )
-                out_accts.append(self._account_public_dict(acct, connected_override=eff_conn))
+                out_accts.append(
+                    self._account_public_dict(acct, connected_override=eff_conn, lang=lang)
+                )
 
             any_conn = any(a["connected"] for a in out_accts) or disk_connected
             first_label = ""
@@ -1586,6 +2591,8 @@ class PluginManager:
             custom_url_conn = bool(
                 custom_mcp_dict and custom_mcp_dict["enabled"] and custom_mcp_dict["url"]
             )
+            schema_tools_count = len(PLUGIN_TOOL_CATALOG.get(low, ()))
+            mcp_tools_count = len((custom_mcp_dict or {}).get("tools") or [])
             plugins_out.append(
                 {
                     "name": item.name,
@@ -1616,6 +2623,7 @@ class PluginManager:
                     "accounts": accts_out,
                     "permissions_schema": [asdict(sp) for sp in item.permissions],
                     "permissions": primary_perms,
+                    "tools_count": schema_tools_count or mcp_tools_count,
                     "custom": False,
                 }
             )
@@ -1659,6 +2667,7 @@ class PluginManager:
                     "accounts": accts_out,
                     "permissions_schema": [],
                     "permissions": {},
+                    "tools_count": len((custom_mcp_dict or {}).get("tools") or []),
                     "custom": True,
                 }
             )
@@ -1772,6 +2781,7 @@ class PluginManager:
         enabled: bool | None = None,
         permissions: dict[str, bool] | None = None,
         custom_rules: str | None = None,
+        lang: str = "en",
     ) -> dict[str, Any]:
         """Uloží nastavení, oblast, oprávnění a pravidla konkrétního účtu pluginu."""
         safe_name = validate_plugin_name(plugin_name).lower()
@@ -1780,15 +2790,28 @@ class PluginManager:
             raise ValueError(f"Účet pluginu '{safe_name}' (#{account_id}) nebyl nalezen.")
 
         perms_json: str | None = None
+        tool_perms_json: str | None = None
         if permissions is not None:
             defaults = default_permissions_for_plugin(safe_name)
             if defaults:
+                old_summary = normalize_plugin_permissions(safe_name, acct.permissions_json)
                 merged = {
-                    **normalize_plugin_permissions(safe_name, acct.permissions_json),
+                    **old_summary,
                     **{k: bool(v) for k, v in permissions.items() if isinstance(v, bool)},
                 }
                 norm = normalize_plugin_permissions(safe_name, merged)
                 perms_json = json.dumps(norm, ensure_ascii=False)
+                specs = PLUGIN_TOOL_CATALOG.get(safe_name, ())
+                if specs:
+                    changed_keys = {k for k, v in norm.items() if old_summary.get(k) != v}
+                    if changed_keys:
+                        cur_tp = parse_tool_permissions_raw(acct.tool_permissions_json)
+                        for sp in specs:
+                            if sp.summary_key in changed_keys:
+                                cur_tp[sp.key] = (
+                                    "allow" if norm.get(sp.summary_key, False) else "block"
+                                )
+                        tool_perms_json = json.dumps(cur_tp, ensure_ascii=False)
             else:
                 perms_json = "{}"
 
@@ -1798,6 +2821,7 @@ class PluginManager:
             scope=scope,
             enabled=enabled,
             permissions_json=perms_json,
+            tool_permissions_json=tool_perms_json,
             custom_rules=custom_rules,
         )
         assert updated is not None
@@ -1806,7 +2830,7 @@ class PluginManager:
                 safe_name,
                 permissions_json=updated.permissions_json,
             )
-        return {"status": "ok", "account": self._account_public_dict(updated)}
+        return {"status": "ok", "account": self._account_public_dict(updated, lang=lang)}
 
     def delete_account(self, plugin_name: str, account_id: int) -> dict[str, Any]:
         """Smaže účet pluginu a uklidí izolovanou profilovou složku, pokud ji už nikdo nepoužívá."""
@@ -1827,8 +2851,107 @@ class PluginManager:
         perms_json = json.dumps(normalized, ensure_ascii=False)
         self.db.upsert_plugin_config(safe_name, permissions_json=perms_json)
         primary = self.ensure_default_account(safe_name)
-        self.db.update_plugin_account(primary.id, permissions_json=perms_json)
+        tool_perms_json: str | None = None
+        specs = PLUGIN_TOOL_CATALOG.get(safe_name, ())
+        if specs:
+            cur_tp = {
+                sp.key: ("allow" if normalized.get(sp.summary_key, False) else "block")
+                for sp in specs
+            }
+            tool_perms_json = json.dumps(cur_tp, ensure_ascii=False)
+        self.db.update_plugin_account(
+            primary.id,
+            permissions_json=perms_json,
+            tool_permissions_json=tool_perms_json,
+        )
         return {"status": "ok", "plugin": safe_name, "permissions": normalized}
+
+    def update_tool_permissions(
+        self,
+        plugin_name: str,
+        *,
+        tool_permissions: dict[str, str],
+        account_id: int | None = None,
+        label: str | None = None,
+        scope: str | None = None,
+        enabled: bool | None = None,
+        custom_rules: str | None = None,
+        lang: str = "en",
+    ) -> dict[str, Any]:
+        """Uloží 3-stavová oprávnění nástrojů (`allow`/`ask`/`block`) pro účet nebo MCP server."""
+        safe_name = validate_plugin_name(plugin_name).lower()
+        for raw_k, raw_v in (tool_permissions or {}).items():
+            if not isinstance(raw_k, str) or not raw_k.strip() or len(raw_k.strip()) > 120:
+                raise ValueError(f"Neplatný název nástroje: {raw_k!r}")
+            if not isinstance(raw_v, str) or raw_v.strip().lower() not in TOOL_PERMISSION_MODES:
+                raise ValueError(
+                    f"Neplatný režim oprávnění pro '{raw_k}': {raw_v!r} "
+                    "(povoleno: allow, ask, block)."
+                )
+
+        if safe_name in PLUGIN_TOOL_CATALOG or account_id is not None:
+            if account_id is not None:
+                acct = self.db.get_plugin_account(account_id)
+                if acct is None or acct.plugin_name.lower() != safe_name:
+                    raise ValueError(f"Účet pluginu '{safe_name}' (#{account_id}) nebyl nalezen.")
+            else:
+                acct = self.ensure_default_account(safe_name)
+
+            perms_json: str | None = None
+            tool_perms_json: str | None = None
+            if safe_name in PLUGIN_TOOL_CATALOG:
+                cur_summary = normalize_plugin_permissions(safe_name, acct.permissions_json)
+                cur_tp = normalize_tool_permissions(
+                    safe_name, acct.tool_permissions_json, cur_summary
+                )
+                valid_keys = {sp.key for sp in PLUGIN_TOOL_CATALOG[safe_name]}
+                for raw_k, raw_v in (tool_permissions or {}).items():
+                    ck = raw_k.strip()
+                    if ck in valid_keys:
+                        cur_tp[ck] = raw_v.strip().lower()
+                new_summary = sync_summary_from_tool_permissions(safe_name, cur_tp, cur_summary)
+                perms_json = json.dumps(new_summary, ensure_ascii=False)
+                tool_perms_json = json.dumps(cur_tp, ensure_ascii=False)
+
+            updated = self.db.update_plugin_account(
+                acct.id,
+                label=label,
+                scope=scope,
+                enabled=enabled,
+                permissions_json=perms_json,
+                tool_permissions_json=tool_perms_json,
+                custom_rules=custom_rules,
+            )
+            assert updated is not None
+            if sanitize_profile_key(updated.profile_key) == "default" and perms_json is not None:
+                self.db.upsert_plugin_config(safe_name, permissions_json=updated.permissions_json)
+            return {
+                "status": "ok",
+                "plugin": safe_name,
+                "account": self._account_public_dict(updated, lang=lang),
+            }
+
+        custom_srv = self._find_custom_mcp_server(safe_name)
+        if custom_srv is None:
+            raise ValueError(
+                f"Plugin '{safe_name}' nemá nastavitelné nástroje ani připojenou MCP URL."
+            )
+        cur_tp = parse_tool_permissions_raw(custom_srv.tool_permissions_json)
+        for raw_k, raw_v in (tool_permissions or {}).items():
+            ck = raw_k.strip()
+            if ck and not any(ch.isspace() for ch in ck):
+                cur_tp[ck] = raw_v.strip().lower()
+            else:
+                raise ValueError(f"Neplatný identifikátor MCP nástroje: {raw_k!r}")
+        updated_srv = self.db.update_mcp_server_tools(
+            custom_srv.id,
+            tool_permissions_json=json.dumps(cur_tp, ensure_ascii=False),
+        )
+        return {
+            "status": "ok",
+            "plugin": safe_name,
+            "custom_mcp": self._custom_mcp_public_dict(updated_srv),
+        }
 
     def get_connect_state(self) -> PluginConnectState:
         """Vrátí aktuální stav PTY relace připojování účtu k pluginu."""

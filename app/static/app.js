@@ -55,6 +55,9 @@
     sparkles: "bi-stars",
     logOut: "bi-box-arrow-right",
     link: "bi-link-45deg",
+    refresh: "bi-arrow-clockwise",
+    shieldCheck: "bi-shield-check",
+    search: "bi-search",
   };
 
   function uiIcon(name, extraCls = "") {
@@ -75,7 +78,7 @@
   let pluginsCatalog = [];
   let activePluginCategory = "all";
   let showAllPlugins = false;
-  const expandedAccountDetails = new Set();
+  let permsModalState = null;
   const addAccountOpenFor = new Set();
   const customUrlOpenFor = new Set();
   let pluginConnectTimer = null;
@@ -1647,10 +1650,22 @@
     return p.description || p.install_target || p.name;
   }
 
+  function countToolModes(tools) {
+    let allow = 0;
+    let ask = 0;
+    let block = 0;
+    (tools || []).forEach((item) => {
+      if (item.mode === "allow") allow += 1;
+      else if (item.mode === "ask") ask += 1;
+      else block += 1;
+    });
+    return { allow, ask, block };
+  }
+
   async function loadPlugins() {
     if (!$("pluginsGrid")) return;
     try {
-      const data = await api("/api/plugins");
+      const data = await api(`/api/plugins?lang=${encodeURIComponent(currentLang || "en")}`);
       pluginsCatalog = Array.isArray(data.plugins) ? data.plugins : [];
       renderPlugins();
     } catch (_) {}
@@ -1950,7 +1965,26 @@
         urlVal.className = "small font-monospace text-body-secondary text-break";
         urlVal.textContent = p.custom_mcp.url;
 
-        urlBox.append(urlHead, urlVal);
+        const mcpTools = Array.isArray(p.custom_mcp.tools) ? p.custom_mcp.tools : [];
+        const urlFoot = document.createElement("div");
+        urlFoot.className = "d-flex align-items-center justify-content-between flex-wrap gap-2 mt-1";
+        const mcpPermsBtn = document.createElement("button");
+        mcpPermsBtn.type = "button";
+        mcpPermsBtn.className = "btn btn-sm btn-outline-primary";
+        const mcpPermsLbl = mcpTools.length
+          ? t("plugin_btn_mcp_tools", { count: mcpTools.length })
+          : t("plugin_btn_mcp_tools_empty");
+        mcpPermsBtn.innerHTML = `${uiIcon("sliders", "me-1")}<span>${escapeHtml(mcpPermsLbl)}</span>`;
+        mcpPermsBtn.onclick = () => openPluginPermsModal(p, { mcpMode: true });
+        urlFoot.appendChild(mcpPermsBtn);
+        if (mcpTools.length) {
+          const mcpSum = document.createElement("span");
+          mcpSum.className = "small text-body-secondary";
+          mcpSum.textContent = t("perms_summary_counts", countToolModes(mcpTools));
+          urlFoot.appendChild(mcpSum);
+        }
+
+        urlBox.append(urlHead, urlVal, urlFoot);
         cardBody.appendChild(urlBox);
       }
 
@@ -2034,7 +2068,7 @@
           if (!urlVal) return;
           saveUrlBtn.disabled = true;
           try {
-            await api(`/api/plugins/${encodeURIComponent(p.name)}/custom-url`, {
+            const urlRes = await api(`/api/plugins/${encodeURIComponent(p.name)}/custom-url`, {
               method: "POST",
               body: JSON.stringify({
                 url: urlVal,
@@ -2043,7 +2077,16 @@
               }),
             });
             customUrlOpenFor.delete(p.name);
-            toast(t("toast_plugin_url_saved", { name: p.display_name || p.name }));
+            if (urlRes && urlRes.discovered_tools_count > 0) {
+              toast(
+                t("toast_mcp_tools_loaded", {
+                  count: urlRes.discovered_tools_count,
+                  name: p.display_name || p.name,
+                })
+              );
+            } else {
+              toast(t("toast_plugin_url_saved", { name: p.display_name || p.name }));
+            }
             await loadPlugins();
             await loadMcp();
           } catch (err) {
@@ -2142,7 +2185,6 @@
       if (p.installed && accounts.length) {
         const schema = Array.isArray(p.permissions_schema) ? p.permissions_schema : [];
         const basicSpecs = schema.filter((sp) => (sp.tier || "basic") === "basic");
-        const detailSpecs = schema.filter((sp) => sp.tier === "detail");
 
         const acctsWrap = document.createElement("div");
         acctsWrap.className = "border-top pt-2 mt-1 d-flex flex-column gap-2";
@@ -2160,7 +2202,7 @@
           const titleRow = document.createElement("div");
           titleRow.className = "d-flex align-items-center flex-wrap gap-1 fw-semibold small";
           const titleSpan = document.createElement("span");
-          titleSpan.textContent = acct.label || scopeLabel(acct.scope) || t("plugin_account_default_label");
+          titleSpan.textContent = acct.label || t("plugin_account_default_label");
           const scopeBadge = document.createElement("span");
           scopeBadge.className = badgeCls();
           scopeBadge.textContent = scopeLabel(acct.scope);
@@ -2217,7 +2259,6 @@
                 await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
                   method: "DELETE",
                 });
-                expandedAccountDetails.delete(acct.id);
                 toast(t("toast_plugin_account_deleted"));
                 await loadPlugins();
               } catch (err) {
@@ -2254,7 +2295,15 @@
                   method: "PUT",
                   body: JSON.stringify({ permissions: updatedPerms }),
                 });
-                acct.permissions = (res && res.account && res.account.permissions) || updatedPerms;
+                if (res && res.account) {
+                  Object.assign(acct, res.account);
+                } else {
+                  acct.permissions = updatedPerms;
+                }
+                const sumSpan = box.querySelector(`[data-acct-summary-for="${acct.id}"]`);
+                if (sumSpan && Array.isArray(acct.tools) && acct.tools.length) {
+                  sumSpan.textContent = t("perms_summary_counts", countToolModes(acct.tools));
+                }
                 toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
               } catch (err) {
                 cb.checked = prev;
@@ -2273,124 +2322,29 @@
             basicSpecs.forEach((sp) => appendPermRow(box, sp));
           }
 
-          const isExpanded = expandedAccountDetails.has(acct.id);
+          const acctTools = Array.isArray(acct.tools) ? acct.tools : [];
+          const footerRow = document.createElement("div");
+          footerRow.className = "d-flex align-items-center justify-content-between flex-wrap gap-2 mt-1";
+
           const detailBtn = document.createElement("button");
           detailBtn.type = "button";
-          detailBtn.className = "btn btn-sm btn-outline-secondary align-self-start";
-          detailBtn.innerHTML = `${uiIcon("sliders", "me-1")}<span>${escapeHtml(isExpanded ? t("plugin_detail_hide") : t("plugin_detail_toggle"))}</span>`;
-          detailBtn.onclick = () => {
-            if (expandedAccountDetails.has(acct.id)) expandedAccountDetails.delete(acct.id);
-            else expandedAccountDetails.add(acct.id);
-            renderPlugins();
-          };
-          box.appendChild(detailBtn);
+          detailBtn.className = "btn btn-sm btn-outline-secondary";
+          const detLabel = acctTools.length
+            ? t("plugin_btn_detailed_perms", { count: acctTools.length })
+            : t("plugin_detail_toggle");
+          detailBtn.innerHTML = `${uiIcon("sliders", "me-1")}<span>${escapeHtml(detLabel)}</span>`;
+          detailBtn.onclick = () => openPluginPermsModal(p, { account: acct, mcpMode: false });
+          footerRow.appendChild(detailBtn);
 
-          if (isExpanded) {
-            const panel = document.createElement("div");
-            panel.className = "border-top pt-2 mt-1 d-flex flex-column gap-2";
-
-            if (detailSpecs.length) {
-              const detTitle = document.createElement("div");
-              detTitle.className = "plugin-perm-title";
-              detTitle.textContent = t("plugin_detail_extra_perms");
-              panel.appendChild(detTitle);
-              detailSpecs.forEach((sp) => appendPermRow(panel, sp));
-            }
-
-            const metaGrid = document.createElement("div");
-            metaGrid.className = "row g-2";
-
-            const lblCol = document.createElement("div");
-            lblCol.className = "col-sm-6";
-            const lblLabel = document.createElement("label");
-            lblLabel.className = "form-label small text-body-secondary mb-1";
-            lblLabel.textContent = t("plugin_detail_account_label");
-            const lblInput = document.createElement("input");
-            lblInput.type = "text";
-            lblInput.className = "form-control form-control-sm";
-            lblInput.value = acct.label || "";
-            lblInput.placeholder = t("plugin_account_label_ph");
-            lblCol.append(lblLabel, lblInput);
-
-            const scCol = document.createElement("div");
-            scCol.className = "col-sm-6";
-            const scLabel = document.createElement("label");
-            scLabel.className = "form-label small text-body-secondary mb-1";
-            scLabel.textContent = t("plugin_detail_scope");
-            const scSelect = document.createElement("select");
-            scSelect.className = "form-select form-select-sm";
-            [
-              ["all", t("scope_all_chats")],
-              ["pracovni", t("scope_work")],
-              ["osobni", t("scope_personal")],
-            ].forEach(([val, txt]) => {
-              const opt = document.createElement("option");
-              opt.value = val;
-              opt.textContent = txt;
-              scSelect.appendChild(opt);
-            });
-            scSelect.value = ["pracovni", "osobni"].includes(acct.scope) ? acct.scope : "all";
-            scCol.append(scLabel, scSelect);
-
-            metaGrid.append(lblCol, scCol);
-            panel.appendChild(metaGrid);
-
-            const enRow = document.createElement("div");
-            enRow.className = "form-check form-switch d-flex justify-content-between align-items-center gap-2 ps-0 mb-0";
-            const enId = `acct_enabled_${p.name}_${acct.id}`;
-            const enLbl = document.createElement("label");
-            enLbl.className = "form-check-label small flex-grow-1 mb-0";
-            enLbl.htmlFor = enId;
-            enLbl.textContent = t("plugin_detail_enabled");
-            const enCb = document.createElement("input");
-            enCb.className = "form-check-input m-0 flex-shrink-0";
-            enCb.type = "checkbox";
-            enCb.role = "switch";
-            enCb.id = enId;
-            enCb.checked = acct.enabled !== false;
-            enRow.append(enLbl, enCb);
-            panel.appendChild(enRow);
-
-            const rulesField = document.createElement("div");
-            const rulesLabel = document.createElement("label");
-            rulesLabel.className = "form-label small text-body-secondary mb-1";
-            rulesLabel.textContent = t("plugin_detail_rules_label");
-            const rulesArea = document.createElement("textarea");
-            rulesArea.className = "form-control form-control-sm plugin-rules-textarea";
-            rulesArea.value = acct.custom_rules || "";
-            rulesArea.placeholder = t("plugin_detail_rules_ph");
-            rulesField.append(rulesLabel, rulesArea);
-            panel.appendChild(rulesField);
-
-            const saveDetailBtn = document.createElement("button");
-            saveDetailBtn.type = "button";
-            saveDetailBtn.className = "btn btn-sm btn-primary align-self-start";
-            saveDetailBtn.textContent = t("plugin_detail_save_btn");
-            saveDetailBtn.onclick = async () => {
-              saveDetailBtn.disabled = true;
-              try {
-                await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
-                  method: "PUT",
-                  body: JSON.stringify({
-                    label: lblInput.value.trim(),
-                    scope: scSelect.value,
-                    enabled: enCb.checked,
-                    custom_rules: rulesArea.value.trim(),
-                  }),
-                });
-                toast(t("toast_plugin_account_saved", { name: lblInput.value.trim() || p.display_name || p.name }));
-                await loadPlugins();
-              } catch (err) {
-                toast(err.message, "err");
-              } finally {
-                saveDetailBtn.disabled = false;
-              }
-            };
-            panel.appendChild(saveDetailBtn);
-
-            box.appendChild(panel);
+          if (acctTools.length) {
+            const summarySpan = document.createElement("span");
+            summarySpan.className = "small text-body-secondary";
+            summarySpan.dataset.acctSummaryFor = String(acct.id);
+            summarySpan.textContent = t("perms_summary_counts", countToolModes(acctTools));
+            footerRow.appendChild(summarySpan);
           }
 
+          box.appendChild(footerRow);
           acctsWrap.appendChild(box);
         });
 
@@ -2607,10 +2561,348 @@
     loadPlugins().catch(() => {});
   }
 
+  // Granulární 3-stavová oprávnění pluginů a MCP nástrojů
+  function setPermsGroupCollapsed(group, collapsed) {
+    if (!permsModalState) return;
+    permsModalState.collapsed[group] = collapsed;
+    const listEl = $(group === "readonly" ? "permsReadonlyList" : "permsWriteList");
+    const chevEl = $(group === "readonly" ? "permsReadonlyChevron" : "permsWriteChevron");
+    const togEl = $(group === "readonly" ? "permsReadonlyToggle" : "permsWriteToggle");
+    if (listEl) listEl.classList.toggle("d-none", collapsed);
+    if (chevEl) chevEl.className = `bi ${collapsed ? "bi-chevron-right" : "bi-chevron-down"} small`;
+    if (togEl) togEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+
+  function syncPermsModalSummaryAndBulk() {
+    if (!permsModalState) return;
+    const allTools = permsModalState.tools || [];
+    [
+      ["readonly", "permsReadonlyCount", "permsReadonlyBulk"],
+      ["write", "permsWriteCount", "permsWriteBulk"],
+    ].forEach(([grp, countId, bulkId]) => {
+      const grpTools = allTools.filter((item) => (item.group === "readonly" ? "readonly" : "write") === grp);
+      if ($(countId)) $(countId).textContent = String(grpTools.length);
+      const bulkSel = $(bulkId);
+      if (bulkSel && grpTools.length) {
+        const uniq = new Set(grpTools.map((x) => x.mode));
+        const mode = uniq.size === 1 ? [...uniq][0] : "mixed";
+        bulkSel.value = mode;
+        bulkSel.dataset.mode = mode;
+      }
+    });
+    if ($("permsFooterSummary")) {
+      $("permsFooterSummary").textContent = allTools.length
+        ? t("perms_summary_counts", countToolModes(allTools))
+        : "";
+    }
+  }
+
+  function renderPermsModalTools() {
+    if (!permsModalState) return;
+    const query = ($("permsSearchInput")?.value || "").trim().toLowerCase();
+    const allTools = permsModalState.tools || [];
+    const roAll = allTools.filter((item) => item.group === "readonly");
+    const wrAll = allTools.filter((item) => item.group !== "readonly");
+    const matchFn = (item) => {
+      if (!query) return true;
+      const hay = `${item.key} ${item.title || ""} ${item.description || ""}`.toLowerCase();
+      return hay.includes(query);
+    };
+    const roVis = roAll.filter(matchFn);
+    const wrVis = wrAll.filter(matchFn);
+
+    if ($("permsEmptyMcp")) {
+      $("permsEmptyMcp").classList.toggle("d-none", !(permsModalState.mcpMode && allTools.length === 0));
+    }
+
+    const renderGroup = (secId, listId, items) => {
+      const sec = $(secId);
+      const listEl = $(listId);
+      if (!sec || !listEl) return;
+      sec.classList.toggle("d-none", items.length === 0);
+      listEl.innerHTML = "";
+      items.forEach((tool) => {
+        const row = document.createElement("div");
+        row.className = `perm-tool-row${tool.mode === "block" ? " is-blocked" : ""}`;
+
+        const info = document.createElement("div");
+        info.className = "min-w-0 flex-grow-1";
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "fw-semibold small";
+        titleDiv.textContent = tool.title || tool.key;
+        if (tool.title && tool.title !== tool.key) {
+          const keyCode = document.createElement("code");
+          keyCode.className = "ms-2 small text-body-secondary fw-normal";
+          keyCode.style.fontSize = "0.72rem";
+          keyCode.textContent = tool.key;
+          titleDiv.appendChild(keyCode);
+        }
+        const descDiv = document.createElement("div");
+        descDiv.className = "small text-body-secondary text-truncate";
+        descDiv.title = tool.description || tool.title || tool.key;
+        descDiv.textContent = tool.description || "";
+        info.append(titleDiv, descDiv);
+
+        const sel = document.createElement("select");
+        sel.className = "form-select form-select-sm perm-mode-select";
+        sel.dataset.mode = tool.mode;
+        [
+          ["allow", t("perms_mode_allow")],
+          ["ask", t("perms_mode_ask")],
+          ["block", t("perms_mode_block")],
+        ].forEach(([val, lbl]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = lbl;
+          sel.appendChild(opt);
+        });
+        sel.value = tool.mode;
+        sel.onchange = () => {
+          tool.mode = sel.value;
+          sel.dataset.mode = sel.value;
+          row.classList.toggle("is-blocked", sel.value === "block");
+          syncPermsModalSummaryAndBulk();
+        };
+
+        row.append(info, sel);
+        listEl.appendChild(row);
+      });
+    };
+
+    renderGroup("permsReadonlySection", "permsReadonlyList", roVis);
+    renderGroup("permsWriteSection", "permsWriteList", wrVis);
+
+    if ($("permsNoMatches")) {
+      $("permsNoMatches").classList.toggle(
+        "d-none",
+        !(allTools.length > 0 && roVis.length === 0 && wrVis.length === 0)
+      );
+    }
+
+    const showControls = allTools.length > 0;
+    ["permsPresetReadonly", "permsPresetSafe", "permsPresetBlockAll"].forEach((id) => {
+      if ($(id)) $(id).disabled = !showControls;
+    });
+
+    syncPermsModalSummaryAndBulk();
+  }
+
+  async function discoverMcpToolsInModal({ quietEmpty = false } = {}) {
+    if (!permsModalState || !permsModalState.mcpMode) return;
+    const p = permsModalState.plugin;
+    const btns = [$("permsDiscoverBtn"), $("permsDiscoverEmptyBtn")].filter(Boolean);
+    btns.forEach((b) => { b.disabled = true; });
+    try {
+      const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/tools/discover`, {
+        method: "POST",
+      });
+      const tools = (res && res.custom_mcp && Array.isArray(res.custom_mcp.tools))
+        ? res.custom_mcp.tools
+        : [];
+      permsModalState.tools = tools.map((item) => ({ ...item }));
+      renderPermsModalTools();
+      if (tools.length > 0) {
+        toast(t("toast_mcp_tools_loaded", { count: tools.length, name: p.display_name || p.name }));
+      } else if (!quietEmpty) {
+        toast(t("toast_mcp_tools_none", { name: p.display_name || p.name }), "warn");
+      }
+      await loadPlugins();
+    } catch (err) {
+      if (!quietEmpty) toast(err.message, "err");
+    } finally {
+      btns.forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  function openPluginPermsModal(plugin, { account = null, mcpMode = false } = {}) {
+    const modal = $("pluginPermsModal");
+    if (!modal) return;
+    const srcTools = mcpMode
+      ? ((plugin.custom_mcp && Array.isArray(plugin.custom_mcp.tools)) ? plugin.custom_mcp.tools : [])
+      : (account && Array.isArray(account.tools) ? account.tools : []);
+
+    permsModalState = {
+      plugin,
+      account,
+      mcpMode: Boolean(mcpMode),
+      tools: srcTools.map((item) => ({ ...item })),
+      collapsed: { readonly: false, write: false },
+    };
+
+    const iconEl = $("permsModalIcon");
+    if (iconEl) {
+      iconEl.innerHTML = "";
+      iconEl.className = "plugin-icon";
+      if (plugin.logo_url) {
+        const img = document.createElement("img");
+        img.className = "plugin-logo";
+        img.src = plugin.logo_url;
+        img.alt = plugin.display_name || plugin.name;
+        img.referrerPolicy = "no-referrer";
+        img.onerror = () => {
+          iconEl.classList.remove("has-logo");
+          iconEl.innerHTML = uiIcon("puzzle", "fs-5");
+        };
+        iconEl.classList.add("has-logo");
+        iconEl.appendChild(img);
+      } else {
+        iconEl.innerHTML = uiIcon("puzzle", "fs-5");
+      }
+    }
+
+    if ($("permsModalTitle")) {
+      $("permsModalTitle").textContent = t("perms_modal_title", {
+        name: plugin.display_name || plugin.name,
+      });
+    }
+    if ($("permsModalSubtitle")) {
+      $("permsModalSubtitle").textContent = mcpMode
+        ? ((plugin.custom_mcp && plugin.custom_mcp.url) || "")
+        : [
+            account ? (account.label || t("plugin_account_default_label")) : "",
+            account && account.account_email ? account.account_email : "",
+            account ? scopeLabel(account.scope) : "",
+          ].filter(Boolean).join(" · ");
+    }
+
+    if ($("permsSearchInput")) $("permsSearchInput").value = "";
+    if ($("permsDiscoverBtn")) $("permsDiscoverBtn").classList.toggle("d-none", !mcpMode);
+
+    const showAccountSection = !mcpMode && Boolean(account);
+    if ($("permsAccountSection")) $("permsAccountSection").classList.toggle("d-none", !showAccountSection);
+    if (showAccountSection && account) {
+      if ($("permsAccountLabel")) $("permsAccountLabel").value = account.label || "";
+      if ($("permsAccountScope")) {
+        $("permsAccountScope").value = ["pracovni", "osobni"].includes(account.scope) ? account.scope : "all";
+      }
+      if ($("permsAccountEnabled")) $("permsAccountEnabled").checked = account.enabled !== false;
+      if ($("permsAccountRules")) $("permsAccountRules").value = account.custom_rules || "";
+    }
+
+    setPermsGroupCollapsed("readonly", false);
+    setPermsGroupCollapsed("write", false);
+    renderPermsModalTools();
+    modal.classList.remove("d-none");
+
+    if (mcpMode && permsModalState.tools.length === 0) {
+      discoverMcpToolsInModal({ quietEmpty: true });
+    }
+  }
+
+  function closePluginPermsModal() {
+    const modal = $("pluginPermsModal");
+    if (modal) modal.classList.add("d-none");
+    permsModalState = null;
+  }
+
+  if ($("closePluginPermsBtn")) $("closePluginPermsBtn").onclick = closePluginPermsModal;
+  if ($("cancelPluginPermsBtn")) $("cancelPluginPermsBtn").onclick = closePluginPermsModal;
+  if ($("pluginPermsModal")) {
+    $("pluginPermsModal").onclick = (e) => {
+      if (e.target === $("pluginPermsModal")) closePluginPermsModal();
+    };
+  }
+  if ($("permsSearchInput")) $("permsSearchInput").oninput = renderPermsModalTools;
+  if ($("permsDiscoverBtn")) $("permsDiscoverBtn").onclick = () => discoverMcpToolsInModal();
+  if ($("permsDiscoverEmptyBtn")) $("permsDiscoverEmptyBtn").onclick = () => discoverMcpToolsInModal();
+
+  if ($("permsReadonlyToggle")) {
+    const toggleRo = () => setPermsGroupCollapsed("readonly", !(permsModalState && permsModalState.collapsed.readonly));
+    $("permsReadonlyToggle").onclick = toggleRo;
+    $("permsReadonlyToggle").onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleRo(); }
+    };
+  }
+  if ($("permsWriteToggle")) {
+    const toggleWr = () => setPermsGroupCollapsed("write", !(permsModalState && permsModalState.collapsed.write));
+    $("permsWriteToggle").onclick = toggleWr;
+    $("permsWriteToggle").onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleWr(); }
+    };
+  }
+
+  if ($("permsReadonlyBulk")) {
+    $("permsReadonlyBulk").onchange = () => {
+      if (!permsModalState) return;
+      const val = $("permsReadonlyBulk").value;
+      if (!["allow", "ask", "block"].includes(val)) return;
+      permsModalState.tools.forEach((item) => {
+        if (item.group === "readonly") item.mode = val;
+      });
+      renderPermsModalTools();
+    };
+  }
+  if ($("permsWriteBulk")) {
+    $("permsWriteBulk").onchange = () => {
+      if (!permsModalState) return;
+      const val = $("permsWriteBulk").value;
+      if (!["allow", "ask", "block"].includes(val)) return;
+      permsModalState.tools.forEach((item) => {
+        if (item.group !== "readonly") item.mode = val;
+      });
+      renderPermsModalTools();
+    };
+  }
+
+  const applyPermsPreset = (preset) => {
+    if (!permsModalState) return;
+    permsModalState.tools.forEach((item) => {
+      if (preset === "readonly") {
+        item.mode = item.group === "readonly" ? "allow" : "block";
+      } else if (preset === "safe") {
+        item.mode = item.group === "readonly" ? "allow" : "ask";
+      } else if (preset === "block_all") {
+        item.mode = "block";
+      }
+    });
+    renderPermsModalTools();
+  };
+  if ($("permsPresetReadonly")) $("permsPresetReadonly").onclick = () => applyPermsPreset("readonly");
+  if ($("permsPresetSafe")) $("permsPresetSafe").onclick = () => applyPermsPreset("safe");
+  if ($("permsPresetBlockAll")) $("permsPresetBlockAll").onclick = () => applyPermsPreset("block_all");
+
+  if ($("savePluginPermsBtn")) {
+    $("savePluginPermsBtn").onclick = async () => {
+      if (!permsModalState) return;
+      const btn = $("savePluginPermsBtn");
+      const p = permsModalState.plugin;
+      const toolPerms = {};
+      permsModalState.tools.forEach((item) => {
+        toolPerms[item.key] = item.mode;
+      });
+      const payload = { tool_permissions: toolPerms };
+      if (!permsModalState.mcpMode && permsModalState.account) {
+        payload.account_id = permsModalState.account.id;
+        payload.label = ($("permsAccountLabel")?.value || "").trim();
+        payload.scope = $("permsAccountScope")?.value || "all";
+        payload.enabled = Boolean($("permsAccountEnabled")?.checked);
+        payload.custom_rules = ($("permsAccountRules")?.value || "").trim();
+      }
+      btn.disabled = true;
+      try {
+        await api(`/api/plugins/${encodeURIComponent(p.name)}/tool-permissions`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
+        closePluginPermsModal();
+        await loadPlugins();
+        await loadMcp();
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
   if ($("closePluginConnectBtn")) $("closePluginConnectBtn").onclick = closePluginConnectModal;
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("d-none")) {
+    if (e.key !== "Escape") return;
+    if ($("pluginConnectModal") && !$("pluginConnectModal").classList.contains("d-none")) {
       closePluginConnectModal();
+    } else if ($("pluginPermsModal") && !$("pluginPermsModal").classList.contains("d-none")) {
+      closePluginPermsModal();
     }
   });
 

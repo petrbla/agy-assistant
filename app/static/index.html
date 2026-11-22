@@ -404,91 +404,7 @@
 
     <!-- 4. SETTINGS -->
     <section id="tab-settings" class="d-none">
-      <!-- Antigravity CLI & OAuth -->
-      <div class="card shadow-sm mb-3">
-        <div id="agyAuthHeader" class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 border-bottom-0">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="agy_title">Antigravity CLI &amp; Sign-in</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="agy_subtitle">Google OAuth sign-in or custom Gemini API key + version management for agy.</p>
-          </div>
-          <div class="d-flex align-items-center flex-wrap gap-2">
-            <span id="agyAuthBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_unverified">Not verified</span>
-            <span id="appVerBadge" class="badge rounded-pill text-bg-secondary d-none"></span>
-            <span id="agyVerBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_ver_loading">Version…</span>
-            <button id="checkVerBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_check_ver">Check version</button>
-            <button id="updateAgyBtn" type="button" class="btn btn-primary btn-sm d-none" data-i18n="btn_update_agy">Update agy</button>
-            <button id="logoutAgyBtn" type="button" class="btn btn-outline-danger btn-sm d-none" data-i18n="btn_logout_agy">Sign out of agy</button>
-          </div>
-        </div>
-        <div id="agyAuthBody" class="card-body d-none">
-          <div class="row g-4">
-            <div class="col-lg-6">
-              <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-                <button id="startOauthBtn" type="button" class="btn btn-primary btn-sm" data-i18n="btn_start_oauth">Start OAuth sign-in (agy)</button>
-                <button id="oauthEnterBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_enter">Send Enter</button>
-                <button id="stopOauthBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_stop">Stop</button>
-              </div>
-              <div id="oauthUrls" class="d-flex align-items-center flex-wrap gap-2 mb-2"></div>
-              <pre id="oauthOutput" class="term" data-i18n="oauth_ready">Ready to sign in…</pre>
-              <form id="oauthInputForm" class="d-flex align-items-center gap-2 mt-2">
-                <input id="oauthCodeInput" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="Paste authorization code from browser…" data-i18n-placeholder="oauth_code_placeholder" />
-                <button type="submit" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_code">Send code</button>
-              </form>
-            </div>
-            <div class="col-lg-6">
-              <form id="geminiKeyForm">
-                <div class="mb-3">
-                  <label for="cfgGeminiKey" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gemini_key">Alternative: custom Gemini API key (optional)</label>
-                  <input id="cfgGeminiKey" type="password" class="form-control form-control-sm" placeholder="AIza… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gemini_key" />
-                </div>
-                <div class="d-flex align-items-center flex-wrap gap-2">
-                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_api_key">Save API key</button>
-                  <button id="clearGeminiKeyBtn" type="button" class="btn btn-outline-danger btn-sm" data-i18n="btn_clear_api_key">Delete API key</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Integrations & Plugins -->
-      <div id="pluginsCard" class="card shadow-sm mb-3">
-        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="plugins_title">Integrations &amp; Plugins</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="plugins_subtitle">Connect Google Workspace (Gmail, Calendar, Drive, Docs) and popular apps without Google Cloud Console, and toggle what the assistant is allowed to do.</p>
-          </div>
-          <div>
-            <button id="refreshPluginsBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_refresh">Refresh</button>
-          </div>
-        </div>
-        <div class="card-body">
-          <div id="pluginsFilterBar" class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 d-none">
-            <div id="pluginCategoryBar" class="d-flex flex-wrap gap-2">
-              <button type="button" class="btn btn-sm rounded-pill btn-primary active filter-pill" data-cat="all" data-i18n="plugin_cat_all">All</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="google" data-i18n="plugin_cat_google">Google Workspace</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="productivity" data-i18n="plugin_cat_productivity">Productivity</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="business" data-i18n="plugin_cat_business">Business &amp; Design</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="dev" data-i18n="plugin_cat_dev">Cloud &amp; Dev</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="installed" data-i18n="plugin_cat_installed">Installed</button>
-            </div>
-            <input id="pluginSearchInput" type="text" class="form-control form-control-sm" style="max-width:240px;" placeholder="Filter plugins…" data-i18n-placeholder="plugin_search_placeholder" />
-          </div>
-
-          <div id="pluginsGrid" class="plugins-grid"></div>
-          <div id="pluginsMoreWrap" class="d-flex justify-content-center mt-3 d-none">
-            <button id="toggleMorePluginsBtn" type="button" class="btn btn-outline-secondary btn-sm"></button>
-          </div>
-          <div id="customPluginWrap" class="d-none">
-            <hr class="my-3" />
-            <form id="customPluginForm" class="d-flex align-items-center flex-wrap gap-2">
-              <input id="customPluginTarget" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="plugin-name@antigravity-plugins-partners or https://github.com/owner/repo" data-i18n-placeholder="plugin_custom_placeholder" />
-              <button type="submit" class="btn btn-primary btn-sm" data-i18n="plugin_btn_install_custom">Install other plugin</button>
-            </form>
-          </div>
-        </div>
-      </div>
-
+      <!-- Assistant, Telegram & Scheduler + Account Security -->
       <div class="row g-3 mb-3">
         <!-- Assistant, Telegram & Scheduler -->
         <div class="col-lg-6">
@@ -595,91 +511,17 @@
           </div>
         </div>
 
-        <!-- MCP servers -->
+        <!-- Account Security (Password & 2FA) -->
         <div class="col-lg-6">
           <div class="card shadow-sm h-100">
-            <div class="card-header">
-              <h2 class="h6 fw-bold mb-0" data-i18n="mcp_title">MCP Servers</h2>
-              <p class="small text-body-secondary mb-0" data-i18n="mcp_subtitle">Connect external apps &amp; data sources (e.g. Google Calendar, Gmail, NocoDB, n8n) so the assistant can read data and run actions.</p>
+            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div>
+                <h2 class="h6 fw-bold mb-0" data-i18n="sec_title">Account Security &amp; 2FA (TOTP)</h2>
+                <p class="small text-body-secondary mb-0" data-i18n="sec_subtitle">Password for Web UI access and two-factor authentication (Google Authenticator, Authy, 1Password).</p>
+              </div>
+              <span id="totpBadge" class="badge rounded-pill text-bg-secondary" data-i18n="totp_off">2FA disabled</span>
             </div>
             <div class="card-body">
-              <div class="table-responsive mb-3">
-                <table class="table table-sm table-hover align-middle small mb-0">
-                  <thead>
-                    <tr>
-                      <th data-i18n="th_name">Name</th>
-                      <th data-i18n="th_scope">Area</th>
-                      <th data-i18n="th_target">Target</th>
-                      <th data-i18n="th_action">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody id="mcpBody"></tbody>
-                </table>
-              </div>
-
-              <form id="mcpForm">
-                <div class="row g-2 mb-3">
-                  <div class="col-md-4">
-                    <label for="mcpName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_name">Name</label>
-                    <input id="mcpName" type="text" class="form-control form-control-sm" required placeholder="e.g. google" data-i18n-placeholder="placeholder_mcp_name" />
-                  </div>
-                  <div class="col-md-4">
-                    <label for="mcpScope" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_scope">Area</label>
-                    <select id="mcpScope" class="form-select form-select-sm">
-                      <option value="all" data-i18n="scope_all_chats">All chats</option>
-                      <option value="pracovni" data-i18n="scope_work">Work</option>
-                      <option value="osobni" data-i18n="scope_personal">Personal</option>
-                    </select>
-                  </div>
-                  <div class="col-md-4">
-                    <label for="mcpTransport" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_transport">Type</label>
-                    <select id="mcpTransport" class="form-select form-select-sm">
-                      <option value="http">HTTP</option>
-                      <option value="stdio">stdio</option>
-                    </select>
-                  </div>
-                </div>
-                <div id="mcpUrlWrap" class="mb-3">
-                  <label for="mcpUrl" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_url">MCP URL</label>
-                  <input id="mcpUrl" type="text" class="form-control form-control-sm" placeholder="https://…" />
-                </div>
-                <div id="mcpTokenWrap" class="mb-3">
-                  <label for="mcpToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_token">Bearer Token (optional)</label>
-                  <input id="mcpToken" type="password" class="form-control form-control-sm" placeholder="secret token" data-i18n-placeholder="placeholder_mcp_token" />
-                </div>
-                <div id="mcpCmdWrap" class="mb-3 d-none">
-                  <label for="mcpCommand" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_cmd">Command (stdio)</label>
-                  <input id="mcpCommand" type="text" class="form-control form-control-sm font-monospace" placeholder="npx" />
-                </div>
-                <div id="mcpArgsWrap" class="mb-3 d-none">
-                  <label for="mcpArgs" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_args">Arguments (JSON array)</label>
-                  <input id="mcpArgs" type="text" class="form-control form-control-sm font-monospace" placeholder='["-y", "@modelcontextprotocol/server"]' />
-                </div>
-                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                  <div class="form-check form-switch mb-0">
-                    <input id="mcpEnabled" class="form-check-input" type="checkbox" role="switch" checked />
-                    <label for="mcpEnabled" class="form-check-label small fw-semibold" data-i18n="cfg_active">Active</label>
-                  </div>
-                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_mcp">Save MCP</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Account Security (Password & 2FA) -->
-      <div class="card shadow-sm">
-        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="sec_title">Account Security &amp; 2FA (TOTP)</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="sec_subtitle">Password for Web UI access and two-factor authentication (Google Authenticator, Authy, 1Password).</p>
-          </div>
-          <span id="totpBadge" class="badge rounded-pill text-bg-secondary" data-i18n="totp_off">2FA disabled</span>
-        </div>
-        <div class="card-body">
-          <div class="row g-4">
-            <div class="col-lg-6">
               <form id="accountEmailForm" class="mb-3">
                 <label for="accEmail" class="form-label small fw-semibold text-body-secondary" data-i18n="label_account_email">Account email</label>
                 <div class="d-flex align-items-center gap-2">
@@ -704,9 +546,9 @@
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_password">Save password</button>
               </form>
-            </div>
 
-            <div class="col-lg-6">
+              <hr class="my-3" />
+
               <div id="totpDisabledBox">
                 <button id="start2faBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_setup_2fa">Set up 2FA (QR code)</button>
                 <div id="totpSetupArea" class="d-none mt-3">
@@ -743,8 +585,282 @@
           </div>
         </div>
       </div>
+
+      <!-- Antigravity CLI & OAuth -->
+      <div class="card shadow-sm mb-3">
+        <div id="agyAuthHeader" class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 border-bottom-0">
+          <div>
+            <h2 class="h6 fw-bold mb-0" data-i18n="agy_title">Antigravity CLI &amp; Sign-in</h2>
+            <p class="small text-body-secondary mb-0" data-i18n="agy_subtitle">Google OAuth sign-in or custom Gemini API key + version management for agy.</p>
+          </div>
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <span id="agyAuthBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_unverified">Not verified</span>
+            <span id="appVerBadge" class="badge rounded-pill text-bg-secondary d-none"></span>
+            <span id="agyVerBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_ver_loading">Version…</span>
+            <button id="checkVerBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_check_ver">Check version</button>
+            <button id="updateAgyBtn" type="button" class="btn btn-primary btn-sm d-none" data-i18n="btn_update_agy">Update agy</button>
+            <button id="logoutAgyBtn" type="button" class="btn btn-outline-danger btn-sm d-none" data-i18n="btn_logout_agy">Sign out of agy</button>
+          </div>
+        </div>
+        <div id="agyAuthBody" class="card-body d-none">
+          <div class="row g-4">
+            <div class="col-lg-6">
+              <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                <button id="startOauthBtn" type="button" class="btn btn-primary btn-sm" data-i18n="btn_start_oauth">Start OAuth sign-in (agy)</button>
+                <button id="oauthEnterBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_enter">Send Enter</button>
+                <button id="stopOauthBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_stop">Stop</button>
+              </div>
+              <div id="oauthUrls" class="d-flex align-items-center flex-wrap gap-2 mb-2"></div>
+              <pre id="oauthOutput" class="term" data-i18n="oauth_ready">Ready to sign in…</pre>
+              <form id="oauthInputForm" class="d-flex align-items-center gap-2 mt-2">
+                <input id="oauthCodeInput" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="Paste authorization code from browser…" data-i18n-placeholder="oauth_code_placeholder" />
+                <button type="submit" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_code">Send code</button>
+              </form>
+            </div>
+            <div class="col-lg-6">
+              <form id="geminiKeyForm">
+                <div class="mb-3">
+                  <label for="cfgGeminiKey" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gemini_key">Alternative: custom Gemini API key (optional)</label>
+                  <input id="cfgGeminiKey" type="password" class="form-control form-control-sm" placeholder="AIza… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gemini_key" />
+                </div>
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_api_key">Save API key</button>
+                  <button id="clearGeminiKeyBtn" type="button" class="btn btn-outline-danger btn-sm" data-i18n="btn_clear_api_key">Delete API key</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Integrations & Plugins -->
+      <div id="pluginsCard" class="card shadow-sm mb-3">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div>
+            <h2 class="h6 fw-bold mb-0" data-i18n="plugins_title">Integrations &amp; Plugins</h2>
+            <p class="small text-body-secondary mb-0" data-i18n="plugins_subtitle">Connect Google Workspace (Gmail, Calendar, Drive, Docs) and popular apps without Google Cloud Console, and toggle what the assistant is allowed to do.</p>
+          </div>
+          <div>
+            <button id="refreshPluginsBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_refresh">Refresh</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="pluginsFilterBar" class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 d-none">
+            <div id="pluginCategoryBar" class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-sm rounded-pill btn-primary active filter-pill" data-cat="all" data-i18n="plugin_cat_all">All</button>
+              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="google" data-i18n="plugin_cat_google">Google Workspace</button>
+              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="productivity" data-i18n="plugin_cat_productivity">Productivity</button>
+              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="business" data-i18n="plugin_cat_business">Business &amp; Design</button>
+              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="dev" data-i18n="plugin_cat_dev">Cloud &amp; Dev</button>
+              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="installed" data-i18n="plugin_cat_installed">Installed</button>
+            </div>
+            <input id="pluginSearchInput" type="text" class="form-control form-control-sm" style="max-width:240px;" placeholder="Filter plugins…" data-i18n-placeholder="plugin_search_placeholder" />
+          </div>
+
+          <div id="pluginsGrid" class="plugins-grid"></div>
+          <div id="pluginsMoreWrap" class="d-flex justify-content-center mt-3 d-none">
+            <button id="toggleMorePluginsBtn" type="button" class="btn btn-outline-secondary btn-sm"></button>
+          </div>
+          <div id="customPluginWrap" class="d-none">
+            <hr class="my-3" />
+            <form id="customPluginForm" class="d-flex align-items-center flex-wrap gap-2">
+              <input id="customPluginTarget" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="plugin-name@antigravity-plugins-partners or https://github.com/owner/repo" data-i18n-placeholder="plugin_custom_placeholder" />
+              <button type="submit" class="btn btn-primary btn-sm" data-i18n="plugin_btn_install_custom">Install other plugin</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom MCP servers (full width bottom) -->
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h6 fw-bold mb-0" data-i18n="mcp_title">MCP Servers</h2>
+          <p class="small text-body-secondary mb-0" data-i18n="mcp_subtitle">Connect external apps &amp; data sources (e.g. Google Calendar, Gmail, NocoDB, n8n) so the assistant can read data and run actions.</p>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive mb-3">
+            <table class="table table-sm table-hover align-middle small mb-0">
+              <thead>
+                <tr>
+                  <th data-i18n="th_name">Name</th>
+                  <th data-i18n="th_scope">Area</th>
+                  <th data-i18n="th_target">Target</th>
+                  <th data-i18n="th_action">Action</th>
+                </tr>
+              </thead>
+              <tbody id="mcpBody"></tbody>
+            </table>
+          </div>
+
+          <hr class="my-3" />
+
+          <form id="mcpForm">
+            <div class="row g-2 mb-3">
+              <div class="col-md-4">
+                <label for="mcpName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_name">Name</label>
+                <input id="mcpName" type="text" class="form-control form-control-sm" required placeholder="e.g. google" data-i18n-placeholder="placeholder_mcp_name" />
+              </div>
+              <div class="col-md-4">
+                <label for="mcpScope" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_scope">Area</label>
+                <select id="mcpScope" class="form-select form-select-sm">
+                  <option value="all" data-i18n="scope_all_chats">All chats</option>
+                  <option value="pracovni" data-i18n="scope_work">Work</option>
+                  <option value="osobni" data-i18n="scope_personal">Personal</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label for="mcpTransport" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_transport">Type</label>
+                <select id="mcpTransport" class="form-select form-select-sm">
+                  <option value="http">HTTP</option>
+                  <option value="stdio">stdio</option>
+                </select>
+              </div>
+            </div>
+            <div class="row g-2 mb-3">
+              <div id="mcpUrlWrap" class="col-md-7">
+                <label for="mcpUrl" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_url">MCP URL</label>
+                <input id="mcpUrl" type="text" class="form-control form-control-sm" placeholder="https://…" />
+              </div>
+              <div id="mcpTokenWrap" class="col-md-5">
+                <label for="mcpToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_token">Bearer Token (optional)</label>
+                <input id="mcpToken" type="password" class="form-control form-control-sm" placeholder="secret token" data-i18n-placeholder="placeholder_mcp_token" />
+              </div>
+              <div id="mcpCmdWrap" class="col-md-5 d-none">
+                <label for="mcpCommand" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_cmd">Command (stdio)</label>
+                <input id="mcpCommand" type="text" class="form-control form-control-sm font-monospace" placeholder="npx" />
+              </div>
+              <div id="mcpArgsWrap" class="col-md-7 d-none">
+                <label for="mcpArgs" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_args">Arguments (JSON array)</label>
+                <input id="mcpArgs" type="text" class="form-control form-control-sm font-monospace" placeholder='["-y", "@modelcontextprotocol/server"]' />
+              </div>
+            </div>
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div class="form-check form-switch mb-0">
+                <input id="mcpEnabled" class="form-check-input" type="checkbox" role="switch" checked />
+                <label for="mcpEnabled" class="form-check-label small fw-semibold" data-i18n="cfg_active">Active</label>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_mcp">Save MCP</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </section>
   </main>
+
+  <div id="pluginPermsModal" class="modal-backdrop-custom d-none" role="dialog" aria-modal="true" aria-labelledby="permsModalTitle">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable w-100" style="max-width:860px;">
+      <div class="modal-content shadow-lg">
+        <div class="modal-header gap-2">
+          <div class="d-flex align-items-center gap-2 min-w-0">
+            <span id="permsModalIcon" class="plugin-icon"></span>
+            <div class="min-w-0">
+              <h2 id="permsModalTitle" class="modal-title h6 fw-bold mb-0 text-truncate">Permissions</h2>
+              <div id="permsModalSubtitle" class="small text-body-secondary text-truncate"></div>
+            </div>
+          </div>
+          <button id="closePluginPermsBtn" type="button" class="btn btn-outline-secondary btn-sm ms-auto" data-i18n="btn_close">Close</button>
+        </div>
+        <div class="modal-body d-flex flex-column gap-3">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="input-group input-group-sm" style="max-width:270px;">
+              <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
+              <input id="permsSearchInput" type="text" class="form-control" placeholder="Filter tools…" data-i18n-placeholder="perms_search_placeholder" />
+            </div>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <div class="btn-group btn-group-sm" role="group">
+                <button id="permsPresetReadonly" type="button" class="btn btn-outline-secondary" data-i18n="perms_preset_readonly">Read-only</button>
+                <button id="permsPresetSafe" type="button" class="btn btn-outline-secondary" data-i18n="perms_preset_safe">Safe (ask on write)</button>
+                <button id="permsPresetBlockAll" type="button" class="btn btn-outline-danger" data-i18n="perms_preset_block_all">Block all</button>
+              </div>
+              <button id="permsDiscoverBtn" type="button" class="btn btn-outline-primary btn-sm d-none">
+                <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i><span data-i18n="perms_btn_discover">Load tools from server</span>
+              </button>
+            </div>
+          </div>
+
+          <p class="small text-body-secondary mb-0" data-i18n="perms_modal_note">Choose whether each tool is always allowed, requires your approval in chat, or is blocked. Blocked Google CLI tools are also locked in settings.json.</p>
+
+          <div id="permsEmptyMcp" class="alert alert-secondary d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0 d-none">
+            <span class="small mb-0" data-i18n="perms_mcp_empty">No tools loaded from this MCP server yet. Click “Load tools from server” to fetch the live list via JSON-RPC tools/list.</span>
+            <button id="permsDiscoverEmptyBtn" type="button" class="btn btn-primary btn-sm text-nowrap">
+              <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i><span data-i18n="perms_btn_discover">Load tools from server</span>
+            </button>
+          </div>
+
+          <div id="permsReadonlySection" class="border rounded overflow-hidden d-none">
+            <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 bg-body-tertiary border-bottom">
+              <div id="permsReadonlyToggle" class="perm-group-toggle d-flex align-items-center gap-2 flex-grow-1" role="button" tabindex="0" aria-expanded="true">
+                <i id="permsReadonlyChevron" class="bi bi-chevron-down small" aria-hidden="true"></i>
+                <span class="fw-semibold small" data-i18n="perms_group_readonly">Read-only tools</span>
+                <span id="permsReadonlyCount" class="badge rounded-pill text-bg-secondary">0</span>
+              </div>
+              <select id="permsReadonlyBulk" class="form-select form-select-sm perm-mode-select">
+                <option value="allow" data-i18n="perms_mode_allow">Always allow</option>
+                <option value="ask" data-i18n="perms_mode_ask">Needs approval</option>
+                <option value="block" data-i18n="perms_mode_block">Blocked</option>
+                <option value="mixed" hidden disabled data-i18n="perms_mode_mixed">Mixed</option>
+              </select>
+            </div>
+            <div id="permsReadonlyList"></div>
+          </div>
+
+          <div id="permsWriteSection" class="border rounded overflow-hidden d-none">
+            <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2 bg-body-tertiary border-bottom">
+              <div id="permsWriteToggle" class="perm-group-toggle d-flex align-items-center gap-2 flex-grow-1" role="button" tabindex="0" aria-expanded="true">
+                <i id="permsWriteChevron" class="bi bi-chevron-down small" aria-hidden="true"></i>
+                <span class="fw-semibold small" data-i18n="perms_group_write">Write / delete tools</span>
+                <span id="permsWriteCount" class="badge rounded-pill text-bg-secondary">0</span>
+              </div>
+              <select id="permsWriteBulk" class="form-select form-select-sm perm-mode-select">
+                <option value="allow" data-i18n="perms_mode_allow">Always allow</option>
+                <option value="ask" data-i18n="perms_mode_ask">Needs approval</option>
+                <option value="block" data-i18n="perms_mode_block">Blocked</option>
+                <option value="mixed" hidden disabled data-i18n="perms_mode_mixed">Mixed</option>
+              </select>
+            </div>
+            <div id="permsWriteList"></div>
+          </div>
+
+          <div id="permsNoMatches" class="text-body-secondary small text-center py-3 d-none" data-i18n="perms_no_matches">No tools match your filter.</div>
+
+          <div id="permsAccountSection" class="border rounded p-3 bg-body-tertiary d-flex flex-column gap-2 d-none">
+            <div class="plugin-perm-title" data-i18n="perms_account_section">Account &amp; custom rules</div>
+            <div class="row g-2">
+              <div class="col-sm-5">
+                <label for="permsAccountLabel" class="form-label small text-body-secondary mb-1" data-i18n="plugin_detail_account_label">Account label</label>
+                <input id="permsAccountLabel" type="text" class="form-control form-control-sm" placeholder="Label (e.g. Work or Personal)" data-i18n-placeholder="plugin_account_label_ph" />
+              </div>
+              <div class="col-sm-4">
+                <label for="permsAccountScope" class="form-label small text-body-secondary mb-1" data-i18n="plugin_detail_scope">Chat area</label>
+                <select id="permsAccountScope" class="form-select form-select-sm">
+                  <option value="all" data-i18n="scope_all_chats">All chats</option>
+                  <option value="pracovni" data-i18n="scope_work">Work</option>
+                  <option value="osobni" data-i18n="scope_personal">Personal</option>
+                </select>
+              </div>
+              <div class="col-sm-3 d-flex align-items-end pb-1">
+                <div class="form-check form-switch mb-0">
+                  <input id="permsAccountEnabled" class="form-check-input" type="checkbox" role="switch" checked />
+                  <label for="permsAccountEnabled" class="form-check-label small" data-i18n="plugin_detail_enabled">Account enabled</label>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label for="permsAccountRules" class="form-label small text-body-secondary mb-1" data-i18n="plugin_detail_rules_label">Custom rules &amp; restrictions</label>
+              <textarea id="permsAccountRules" class="form-control form-control-sm plugin-rules-textarea" placeholder="e.g. Never send emails outside @company.com without asking first; focus on label Invoices…" data-i18n-placeholder="plugin_detail_rules_ph"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer justify-content-between gap-2">
+          <div id="permsFooterSummary" class="small text-body-secondary"></div>
+          <div class="d-flex align-items-center gap-2">
+            <button id="cancelPluginPermsBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="plugin_account_btn_cancel">Cancel</button>
+            <button id="savePluginPermsBtn" type="button" class="btn btn-primary btn-sm" data-i18n="perms_btn_save">Save permissions</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="pluginConnectModal" class="modal-backdrop-custom d-none" role="dialog" aria-modal="true" aria-labelledby="pluginConnectTitle">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable w-100">

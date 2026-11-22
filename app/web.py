@@ -164,6 +164,15 @@ class PluginCustomUrlRequest(BaseModel):
     clear_token: bool = False
 
 
+class PluginToolPermissionsRequest(BaseModel):
+    account_id: int | None = None
+    tool_permissions: dict[str, Literal["allow", "ask", "block"]] = Field(default_factory=dict)
+    label: str | None = Field(default=None, max_length=80)
+    scope: Literal["all", "pracovni", "osobni"] | None = None
+    enabled: bool | None = None
+    custom_rules: str | None = Field(default=None, max_length=1000)
+
+
 class PluginConnectCallbackRequest(BaseModel):
     callback_url: str = Field(min_length=1, max_length=4000)
 
@@ -790,8 +799,12 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/api/plugins")
-    async def list_plugins(_: OwnerConfig = Depends(require_auth)) -> dict[str, Any]:
-        return await plugin_manager.list_catalog_with_status()
+    async def list_plugins(
+        lang: str = "",
+        owner: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        eff_lang = normalize_language(lang or owner.language)
+        return await plugin_manager.list_catalog_with_status(lang=eff_lang)
 
     @app.post("/api/plugins/install")
     async def install_plugin(
@@ -904,7 +917,7 @@ def create_app(
         plugin_name: str,
         account_id: int,
         payload: PluginAccountUpdateRequest,
-        _: OwnerConfig = Depends(require_auth),
+        owner: OwnerConfig = Depends(require_auth),
     ) -> dict[str, Any]:
         try:
             res = plugin_manager.update_account(
@@ -915,6 +928,7 @@ def create_app(
                 enabled=payload.enabled,
                 permissions=payload.permissions,
                 custom_rules=payload.custom_rules,
+                lang=normalize_language(owner.language),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -922,6 +936,40 @@ def create_app(
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return res
+
+    @app.put("/api/plugins/{plugin_name}/tool-permissions")
+    async def update_plugin_tool_permissions(
+        plugin_name: str,
+        payload: PluginToolPermissionsRequest,
+        owner: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            res = plugin_manager.update_tool_permissions(
+                plugin_name,
+                tool_permissions=payload.tool_permissions,
+                account_id=payload.account_id,
+                label=payload.label,
+                scope=payload.scope,
+                enabled=payload.enabled,
+                custom_rules=payload.custom_rules,
+                lang=normalize_language(owner.language),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.post("/api/plugins/{plugin_name}/tools/discover")
+    async def discover_plugin_tools(
+        plugin_name: str,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        try:
+            return await plugin_manager.discover_plugin_mcp_tools(plugin_name)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.delete("/api/plugins/{plugin_name}/accounts/{account_id}")
     async def delete_plugin_account(
@@ -957,6 +1005,14 @@ def create_app(
         _sync_all_plugin_contexts()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
+        discovered_count = 0
+        try:
+            disc = await plugin_manager.discover_plugin_mcp_tools(plugin_name, timeout=4.0)
+            res["custom_mcp"] = disc["custom_mcp"]
+            discovered_count = int(disc.get("count") or 0)
+        except Exception:
+            discovered_count = 0
+        res["discovered_tools_count"] = discovered_count
         return res
 
     @app.delete("/api/plugins/{plugin_name}/custom-url")

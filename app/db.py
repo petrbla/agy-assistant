@@ -98,6 +98,8 @@ class McpServerRecord:
     env_json: str
     enabled: bool
     created_at: str
+    tool_permissions_json: str = "{}"
+    cached_tools_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,7 @@ class PluginAccountRecord:
     enabled: bool
     created_at: str
     updated_at: str
+    tool_permissions_json: str = "{}"
 
 
 @dataclass(frozen=True)
@@ -275,7 +278,9 @@ class AssistantDB:
                     args_json TEXT NOT NULL DEFAULT '[]',
                     env_json TEXT NOT NULL DEFAULT '{}',
                     enabled INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    tool_permissions_json TEXT NOT NULL DEFAULT '{}',
+                    cached_tools_json TEXT NOT NULL DEFAULT '[]'
                 );
 
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -338,12 +343,16 @@ class AssistantDB:
                     connected_at TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    tool_permissions_json TEXT NOT NULL DEFAULT '{}'
                 );
                 """
             )
             self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
             self._ensure_column(conn, "plugin_configs", "account_label", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "mcp_servers", "tool_permissions_json", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column(conn, "mcp_servers", "cached_tools_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "plugin_accounts", "tool_permissions_json", "TEXT NOT NULL DEFAULT '{}'")
             self._migrate_plugin_configs_to_accounts(conn)
             self._migrate_from_legacy_multiuser(conn)
             self._normalize_legacy_context_modes(conn)
@@ -584,6 +593,7 @@ class AssistantDB:
 
     @staticmethod
     def _row_to_mcp(row: sqlite3.Row) -> McpServerRecord:
+        keys = set(row.keys())
         return McpServerRecord(
             id=int(row["id"]),
             name=row["name"],
@@ -597,6 +607,16 @@ class AssistantDB:
             env_json=row["env_json"],
             enabled=bool(row["enabled"]),
             created_at=row["created_at"],
+            tool_permissions_json=(
+                str(row["tool_permissions_json"] or "{}")
+                if "tool_permissions_json" in keys
+                else "{}"
+            ),
+            cached_tools_json=(
+                str(row["cached_tools_json"] or "[]")
+                if "cached_tools_json" in keys
+                else "[]"
+            ),
         )
 
     @staticmethod
@@ -628,6 +648,7 @@ class AssistantDB:
 
     @staticmethod
     def _row_to_plugin_account(row: sqlite3.Row) -> PluginAccountRecord:
+        keys = set(row.keys())
         return PluginAccountRecord(
             id=int(row["id"]),
             plugin_name=row["plugin_name"],
@@ -642,6 +663,11 @@ class AssistantDB:
             enabled=bool(row["enabled"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            tool_permissions_json=(
+                str(row["tool_permissions_json"] or "{}")
+                if "tool_permissions_json" in keys
+                else "{}"
+            ),
         )
 
     def _migrate_plugin_configs_to_accounts(self, conn: sqlite3.Connection) -> None:
@@ -944,6 +970,39 @@ class AssistantDB:
             raise KeyError("MCP server nebyl nalezen.")
         return self._row_to_mcp(row)
 
+    def get_mcp_server(self, server_id: int) -> McpServerRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM mcp_servers WHERE id = ?", (int(server_id),)
+            ).fetchone()
+            return self._row_to_mcp(row) if row else None
+
+    def update_mcp_server_tools(
+        self,
+        server_id: int,
+        *,
+        cached_tools_json: str | None = None,
+        tool_permissions_json: str | None = None,
+    ) -> McpServerRecord | None:
+        existing = self.get_mcp_server(server_id)
+        if existing is None:
+            return None
+        eff_tools = cached_tools_json if cached_tools_json is not None else existing.cached_tools_json
+        eff_perms = (
+            tool_permissions_json
+            if tool_permissions_json is not None
+            else existing.tool_permissions_json
+        )
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE mcp_servers SET cached_tools_json = ?, tool_permissions_json = ? WHERE id = ?",
+                (eff_tools or "[]", eff_perms or "{}", int(server_id)),
+            )
+            row = conn.execute(
+                "SELECT * FROM mcp_servers WHERE id = ?", (int(server_id),)
+            ).fetchone()
+        return self._row_to_mcp(row) if row else None
+
     def delete_mcp_server(self, server_id: int) -> bool:
         with self._connect() as conn:
             cur = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
@@ -1089,6 +1148,7 @@ class AssistantDB:
         connected: bool = False,
         connected_at: str = "",
         enabled: bool = True,
+        tool_permissions_json: str = "{}",
     ) -> PluginAccountRecord:
         clean_name = plugin_name.strip().lower()
         if not clean_name:
@@ -1104,8 +1164,8 @@ class AssistantDB:
                 INSERT INTO plugin_accounts (
                     plugin_name, label, scope, profile_key, account_email,
                     permissions_json, custom_rules, connected, connected_at,
-                    enabled, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    enabled, created_at, updated_at, tool_permissions_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clean_name,
@@ -1120,6 +1180,7 @@ class AssistantDB:
                     1 if enabled else 0,
                     now_iso,
                     now_iso,
+                    tool_permissions_json or "{}",
                 ),
             )
             row = conn.execute(
@@ -1142,6 +1203,7 @@ class AssistantDB:
         connected: bool | None = None,
         connected_at: str | None = None,
         enabled: bool | None = None,
+        tool_permissions_json: str | None = None,
     ) -> PluginAccountRecord | None:
         existing = self.get_plugin_account(account_id)
         if existing is None:
@@ -1157,6 +1219,11 @@ class AssistantDB:
             else existing.profile_key
         )
         eff_perms = permissions_json if permissions_json is not None else existing.permissions_json
+        eff_tool_perms = (
+            tool_permissions_json
+            if tool_permissions_json is not None
+            else existing.tool_permissions_json
+        )
         eff_rules = custom_rules.strip()[:1000] if custom_rules is not None else existing.custom_rules
         eff_connected = bool(connected) if connected is not None else existing.connected
         if connected_at is not None:
@@ -1184,7 +1251,8 @@ class AssistantDB:
                 UPDATE plugin_accounts
                 SET label = ?, scope = ?, profile_key = ?, account_email = ?,
                     permissions_json = ?, custom_rules = ?, connected = ?,
-                    connected_at = ?, enabled = ?, updated_at = ?
+                    connected_at = ?, enabled = ?, updated_at = ?,
+                    tool_permissions_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -1198,6 +1266,7 @@ class AssistantDB:
                     eff_connected_at,
                     1 if eff_enabled else 0,
                     now_iso,
+                    eff_tool_perms or "{}",
                     int(account_id),
                 ),
             )

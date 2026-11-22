@@ -1058,11 +1058,13 @@ class AgyRunner:
             }
             plugin_cfgs = self.db.list_plugin_configs()
             plugin_accounts = self.db.list_plugin_accounts()
+            mcp_servers = self.db.list_mcp_servers()
             plugin_perm_hint = build_plugin_permissions_prompt_hint(
                 enabled_plugins,
                 plugin_cfgs,
                 accounts=plugin_accounts,
                 context_mode=effective_ctx,
+                mcp_servers=mcp_servers,
             )
             unattended = should_set_agy_unattended(
                 enabled_plugins,

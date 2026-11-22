@@ -884,3 +884,305 @@ def test_plugin_custom_url_configure_sync_and_delete(tmp_path: Path) -> None:
     assert n8n_after["custom_mcp"] is None
 
 
+def test_granular_three_state_tool_permissions_and_card_sync(tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    (ws_dir / "MEMORY.md").write_text("# Mem", encoding="utf-8")
+
+    for pname in ("gmail", "gcalendar", "gdrive"):
+        pdir = home_dir / ".gemini" / "config" / "plugins" / pname
+        pdir.mkdir(parents=True, exist_ok=True)
+        (pdir / "plugin.json").write_text(json.dumps({"name": pname}), encoding="utf-8")
+
+    s = Settings(
+        workspace_dir=ws_dir,
+        data_dir=tmp_path / "data",
+        home_dir=home_dir,
+        web_auth_token="tajne-3state",
+    )
+    db = AssistantDB(s.db_path)
+    pm = PluginManager(s, db)
+
+    async def _list_only(*cli_args: str, timeout: float = 45.0) -> tuple[int, str]:
+        if cli_args == ("list", "--json"):
+            return 0, json.dumps(
+                [
+                    {"name": n, "enabled": True, "version": "0.0.8"}
+                    for n in ("gmail", "gcalendar", "gdrive")
+                ]
+            )
+        return 0, "ok"
+
+    pm._run_agy_plugin_cmd = _list_only  # type: ignore[method-assign]
+    client = TestClient(
+        create_app(s, db, WorkspaceMemory(ws_dir), AsyncMock(), plugin_manager=pm)
+    )
+    hdr = {"Authorization": "Bearer tajne-3state"}
+
+    # Auth guard na novém endpointu
+    assert (
+        client.put(
+            "/api/plugins/gmail/tool-permissions",
+            json={"tool_permissions": {"send_message": "block"}},
+        ).status_code
+        == 401
+    )
+
+    # Katalog v češtině vrací 25 nástrojů Gmailu, 10 pro Kalendář a 11 pro Disk
+    cat_cs = client.get("/api/plugins?lang=cs", headers=hdr).json()["plugins"]
+    gmail_entry = next(p for p in cat_cs if p["name"] == "gmail")
+    gcal_entry = next(p for p in cat_cs if p["name"] == "gcalendar")
+    gdrive_entry = next(p for p in cat_cs if p["name"] == "gdrive")
+    gmail_tools = gmail_entry["accounts"][0]["tools"]
+    assert len(gmail_tools) == 25
+    assert sum(1 for item in gmail_tools if item["group"] == "readonly") == 7
+    assert sum(1 for item in gmail_tools if item["group"] == "write") == 18
+    assert gmail_tools[0]["title"] == "Vyhledávat vlákna e-mailů"
+    assert len(gcal_entry["accounts"][0]["tools"]) == 10
+    assert len(gdrive_entry["accounts"][0]["tools"]) == 11
+
+    acct_id = gmail_entry["accounts"][0]["id"]
+    save_res = client.put(
+        "/api/plugins/gmail/tool-permissions",
+        headers=hdr,
+        json={
+            "account_id": acct_id,
+            "label": "Pracovní pošta",
+            "scope": "pracovni",
+            "enabled": True,
+            "custom_rules": "Před odesláním vždy zkontroluj příjemce.",
+            "tool_permissions": {
+                "search_threads": "allow",
+                "create_draft": "allow",
+                "send_message": "block",
+                "send_with_attachment": "block",
+                "send_draft": "ask",
+                "reply_email": "ask",
+                "forward_email": "block",
+                "trash_or_spam": "block",
+            },
+        },
+    )
+    assert save_res.status_code == 200
+    saved_acct = save_res.json()["account"]
+    assert saved_acct["permissions"]["send"] is True
+    assert saved_acct["permissions"]["reply_forward"] is True
+    assert saved_acct["tool_permissions"]["send_draft"] == "ask"
+    assert saved_acct["tool_permissions"]["send_message"] == "block"
+
+    # Pracovní profil má v settings.json zablokované jen `block` nástroje (NIKDY `ask`)
+    work_home = get_profile_home_dir(s, saved_acct["profile_key"])
+    deny_list = json.loads(
+        (work_home / ".gemini" / "antigravity-cli" / "settings.json").read_text(encoding="utf-8")
+    )["permissions"]["deny"]
+    assert "command(gmail mutate send)" in deny_list
+    assert "command(gmail mutate send-with-attachment)" in deny_list
+    assert "command(gmail mutate forward)" in deny_list
+    assert "command(gmail mutate trash)" in deny_list
+    assert "command(gmail mutate send-draft)" not in deny_list
+    assert "command(gmail mutate reply)" not in deny_list
+    assert "command(gmail mutate create-draft)" not in deny_list
+
+    # AGY_UNATTENDED nesmí být zapnuté, pokud některá odesílací akce má mód `ask`
+    all_accts = db.list_plugin_accounts()
+    assert (
+        should_set_agy_unattended(
+            {"gmail"}, {}, accounts=all_accts, context_mode="pracovni"
+        )
+        is False
+    )
+
+    hint = build_plugin_permissions_prompt_hint(
+        {"gmail"}, {}, accounts=all_accts, context_mode="pracovni"
+    )
+    assert "NEEDS_APPROVAL(send_draft, reply_email)" in hint
+    assert "BLOCKED_TOOLS(send_message, send_with_attachment, forward_email)" in hint
+    assert "RULES: Před odesláním vždy zkontroluj příjemce." in hint
+
+    # Rychlý přepínač na kartě (`send = False`) přepíše pouze skupinu `send`, ponechá `reply_email="ask"`
+    card_upd = client.put(
+        f"/api/plugins/gmail/accounts/{acct_id}",
+        headers=hdr,
+        json={"permissions": {"send": False}},
+    )
+    assert card_upd.status_code == 200
+    tp_after = card_upd.json()["account"]["tool_permissions"]
+    assert tp_after["send_message"] == "block"
+    assert tp_after["send_with_attachment"] == "block"
+    assert tp_after["send_draft"] == "block"
+    assert tp_after["reply_email"] == "ask"
+
+
+def test_http_mcp_tool_discovery_sse_json_and_permissions(tmp_path: Path) -> None:
+    from app.plugins import classify_mcp_tool_group, parse_mcp_jsonrpc_response
+
+    assert classify_mcp_tool_group("custom_reader", {"readOnlyHint": True}) == "readonly"
+    assert classify_mcp_tool_group("get_orders", {"destructiveHint": True}) == "write"
+    assert classify_mcp_tool_group("list_workflows", None) == "readonly"
+    assert classify_mcp_tool_group("execute_workflow", None) == "write"
+
+    sse_sample = (
+        b"event: message\n"
+        b'data: {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-03-26"}}\n\n'
+    )
+    assert parse_mcp_jsonrpc_response(sse_sample, "text/event-stream")["result"]["protocolVersion"] == "2025-03-26"
+
+    seen_auth: list[str] = []
+    seen_methods: list[str] = []
+
+    class _MockMcpHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("Content-Length") or "0")
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            seen_auth.append(str(self.headers.get("Authorization") or ""))
+            method = str(body.get("method") or "")
+            seen_methods.append(method)
+            if self.headers.get("Authorization") != "Bearer mcp-tajny":
+                self.send_response(401)
+                self.end_headers()
+                return
+
+            if method == "initialize":
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "result": {"protocolVersion": "2025-03-26", "capabilities": {}},
+                }
+                raw = f"event: message\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Mcp-Session-Id", "sess-mcp-42")
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+
+            if method == "notifications/initialized":
+                self.send_response(202)
+                self.end_headers()
+                return
+
+            if method == "tools/list":
+                assert self.headers.get("Mcp-Session-Id") == "sess-mcp-42"
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "list_workflows",
+                                "description": "Lists automation workflows.",
+                                "annotations": {"readOnlyHint": True},
+                            },
+                            {
+                                "name": "execute_workflow",
+                                "description": "Triggers a workflow execution.",
+                            },
+                            {
+                                "name": "delete_workflow",
+                                "description": "Deletes an automation workflow.",
+                                "annotations": {"destructiveHint": True},
+                            },
+                        ]
+                    },
+                }
+                raw = f"event: message\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, fmt: str, *args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), _MockMcpHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        home_dir = tmp_path / "home"
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir(parents=True, exist_ok=True)
+        (ws_dir / "MEMORY.md").write_text("# Mem", encoding="utf-8")
+        s = Settings(
+            workspace_dir=ws_dir,
+            data_dir=tmp_path / "data",
+            home_dir=home_dir,
+            web_auth_token="tok-ui",
+        )
+        db = AssistantDB(s.db_path)
+        client = TestClient(create_app(s, db, WorkspaceMemory(ws_dir), AsyncMock()))
+        hdr = {"Authorization": "Bearer tok-ui"}
+
+        assert client.post("/api/plugins/n8n-skills/tools/discover").status_code == 401
+
+        # Uložení vlastní URL automaticky načte seznam nástrojů přes SSE + Mcp-Session-Id
+        save_res = client.post(
+            "/api/plugins/n8n-skills/custom-url",
+            headers=hdr,
+            json={
+                "url": f"http://127.0.0.1:{port}/mcp-server/http",
+                "auth_token": "mcp-tajny",
+                "scope": "all",
+            },
+        )
+        assert save_res.status_code == 200
+        save_body = save_res.json()
+        assert save_body["discovered_tools_count"] == 3
+        tools = save_body["custom_mcp"]["tools"]
+        by_key = {t["key"]: t for t in tools}
+        assert by_key["list_workflows"]["group"] == "readonly"
+        assert by_key["list_workflows"]["mode"] == "allow"
+        assert by_key["execute_workflow"]["group"] == "write"
+        assert by_key["execute_workflow"]["mode"] == "ask"
+        assert by_key["delete_workflow"]["group"] == "write"
+        assert by_key["delete_workflow"]["mode"] == "ask"
+
+        # Ruční refresh /discover funguje stejně spolehlivě
+        disc_res = client.post("/api/plugins/n8n-skills/tools/discover", headers=hdr)
+        assert disc_res.status_code == 200
+        assert disc_res.json()["count"] == 3
+        assert "Bearer mcp-tajny" in seen_auth
+        assert "initialize" in seen_methods and "tools/list" in seen_methods
+
+        # Nastavení 3-stavových práv pro MCP nástroje
+        upd_res = client.put(
+            "/api/plugins/n8n-skills/tool-permissions",
+            headers=hdr,
+            json={
+                "tool_permissions": {
+                    "list_workflows": "allow",
+                    "execute_workflow": "ask",
+                    "delete_workflow": "block",
+                }
+            },
+        )
+        assert upd_res.status_code == 200
+        upd_tools = {t["key"]: t for t in upd_res.json()["custom_mcp"]["tools"]}
+        assert upd_tools["delete_workflow"]["mode"] == "block"
+        assert upd_tools["execute_workflow"]["mode"] == "ask"
+
+        # GET /api/plugins vrací aktualizované MCP nástroje i v katalogu
+        cat = client.get("/api/plugins", headers=hdr).json()["plugins"]
+        n8n_row = next(p for p in cat if p["name"] == "n8n-skills")
+        assert n8n_row["tools_count"] == 3
+        assert len(n8n_row["custom_mcp"]["tools"]) == 3
+
+        # Prompt hint vynutí BLOCKED_TOOLS a NEEDS_APPROVAL pro mcp:n8n
+        hint = build_plugin_permissions_prompt_hint(
+            set(), {}, mcp_servers=db.list_mcp_servers(), context_mode="auto"
+        )
+        assert "mcp:n8n" in hint
+        assert "BLOCKED_TOOLS(delete_workflow)" in hint
+        assert "NEEDS_APPROVAL(execute_workflow)" in hint
+        assert "ALWAYS show exact target/parameters" in hint
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
