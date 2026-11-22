@@ -404,16 +404,16 @@
 
     <!-- 4. SETTINGS -->
     <section id="tab-settings" class="d-none">
-      <!-- Assistant, Telegram & Scheduler + Account Security -->
+      <!-- Assistant & Telegram + Account Security -->
       <div class="row g-3 mb-3">
-        <!-- Assistant, Telegram & Scheduler -->
+        <!-- Assistant & Telegram -->
         <div class="col-lg-6">
           <div class="card shadow-sm h-100">
             <div class="card-header">
-              <h2 class="h6 fw-bold mb-0" data-i18n="cfg_card_title">Assistant, Telegram &amp; Scheduler</h2>
+              <h2 class="h6 fw-bold mb-0" data-i18n="cfg_assistant_title">Assistant &amp; Telegram</h2>
             </div>
-            <div class="card-body">
-              <form id="settingsForm">
+            <div class="card-body d-flex flex-column">
+              <form id="settingsForm" class="d-flex flex-column flex-grow-1">
                 <div class="row g-2 mb-3">
                   <div class="col-md-4">
                     <label for="cfgAssistantName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_assistant_name">Assistant name</label>
@@ -470,42 +470,9 @@
                 </div>
                 <div class="form-text mb-3" data-i18n="help_telegram">Connect Telegram: create a bot token via @BotFather and find your numeric ID via @userinfobot.</div>
 
-                <hr class="my-3" />
-
-                <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                  <div class="flex-grow-1">
-                    <div class="form-check form-switch mb-0">
-                      <input id="cfgHbEnabled" class="form-check-input" type="checkbox" role="switch" checked />
-                      <label for="cfgHbEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_hb_enabled">Heartbeat enabled</label>
-                    </div>
-                    <div class="form-text mt-1" data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</div>
-                  </div>
-                  <input id="cfgHbInterval" type="number" class="form-control form-control-sm flex-shrink-0" min="1" value="60" style="width:100px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title" />
+                <div class="mt-auto">
+                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_settings">Save settings</button>
                 </div>
-
-                <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                  <div class="flex-grow-1">
-                    <div class="form-check form-switch mb-0">
-                      <input id="cfgBriefEnabled" class="form-check-input" type="checkbox" role="switch" checked />
-                      <label for="cfgBriefEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_brief_enabled">Morning briefing</label>
-                    </div>
-                    <div class="form-text mt-1" data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</div>
-                  </div>
-                  <input id="cfgBriefCron" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="0 8 * * *" style="width:140px;" data-i18n-title="th_schedule" />
-                </div>
-
-                <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                  <div class="flex-grow-1">
-                    <div class="form-check form-switch mb-0">
-                      <input id="cfgNightlyEnabled" class="form-check-input" type="checkbox" role="switch" checked />
-                      <label for="cfgNightlyEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_nightly_enabled">Nightly memory cleanup &amp; reset</label>
-                    </div>
-                    <div class="form-text mt-1" data-i18n="help_nightly">Saves important facts from today's chats into long-term memory at night and clears old context (saves tokens and keeps replies sharp).</div>
-                  </div>
-                  <input id="cfgNightlyCron" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="15 0 * * *" style="width:140px;" data-i18n-title="th_schedule" />
-                </div>
-
-                <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_settings">Save settings</button>
               </form>
             </div>
           </div>
@@ -514,12 +481,12 @@
         <!-- Account Security (Password & 2FA) -->
         <div class="col-lg-6">
           <div class="card shadow-sm h-100">
-            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-              <div>
+            <div class="card-header d-flex align-items-start justify-content-between gap-2">
+              <div class="min-w-0">
                 <h2 class="h6 fw-bold mb-0" data-i18n="sec_title">Account Security &amp; 2FA (TOTP)</h2>
                 <p class="small text-body-secondary mb-0" data-i18n="sec_subtitle">Password for Web UI access and two-factor authentication (Google Authenticator, Authy, 1Password).</p>
               </div>
-              <span id="totpBadge" class="badge rounded-pill text-bg-secondary" data-i18n="totp_off">2FA disabled</span>
+              <span id="totpBadge" class="badge rounded-pill text-bg-secondary text-nowrap flex-shrink-0 mt-1" data-i18n="totp_off">2FA disabled</span>
             </div>
             <div class="card-body">
               <form id="accountEmailForm" class="mb-3">
@@ -580,6 +547,59 @@
                   <input id="disable2faCode" type="text" class="form-control form-control-sm font-monospace" style="max-width:160px;" required placeholder="2FA code" data-i18n-placeholder="placeholder_2fa_short" />
                   <button type="submit" class="btn btn-danger btn-sm" data-i18n="btn_disable_2fa">Disable 2FA</button>
                 </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Automation & Scheduler (3 columns full width) -->
+      <div class="card shadow-sm mb-3">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div>
+            <h2 class="h6 fw-bold mb-0" data-i18n="cfg_scheduler_title">Automation &amp; Scheduler</h2>
+            <p class="small text-body-secondary mb-0" data-i18n="cfg_scheduler_subtitle">Background checks, morning briefing, and nightly memory cleanup.</p>
+          </div>
+          <button type="submit" form="settingsForm" class="btn btn-primary btn-sm text-nowrap" data-i18n="btn_save_settings">Save settings</button>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-lg-4">
+              <div class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2">
+                <div class="d-flex align-items-center justify-content-between gap-2">
+                  <div class="form-check form-switch mb-0">
+                    <input id="cfgHbEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
+                    <label for="cfgHbEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_hb_enabled">Heartbeat enabled</label>
+                  </div>
+                  <input id="cfgHbInterval" form="settingsForm" type="number" class="form-control form-control-sm flex-shrink-0" min="1" value="60" style="width:90px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title" />
+                </div>
+                <div class="form-text mt-0" data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</div>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2">
+                <div class="d-flex align-items-center justify-content-between gap-2">
+                  <div class="form-check form-switch mb-0">
+                    <input id="cfgBriefEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
+                    <label for="cfgBriefEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_brief_enabled">Morning briefing</label>
+                  </div>
+                  <input id="cfgBriefCron" form="settingsForm" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="0 8 * * *" style="width:120px;" data-i18n-title="th_schedule" />
+                </div>
+                <div class="form-text mt-0" data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</div>
+              </div>
+            </div>
+
+            <div class="col-lg-4">
+              <div class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2">
+                <div class="d-flex align-items-center justify-content-between gap-2">
+                  <div class="form-check form-switch mb-0">
+                    <input id="cfgNightlyEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
+                    <label for="cfgNightlyEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_nightly_enabled">Nightly memory cleanup &amp; reset</label>
+                  </div>
+                  <input id="cfgNightlyCron" form="settingsForm" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="15 0 * * *" style="width:120px;" data-i18n-title="th_schedule" />
+                </div>
+                <div class="form-text mt-0" data-i18n="help_nightly">Saves important facts from today's chats into long-term memory at night and clears old context (saves tokens and keeps replies sharp).</div>
               </div>
             </div>
           </div>
