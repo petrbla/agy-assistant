@@ -864,12 +864,11 @@
             <span class="fw-semibold small" data-i18n="perms_group_readonly">Read-only tools</span>
             <span id="permsReadonlyCount" class="badge rounded-pill text-bg-secondary">0</span>
           </div>
-          <select id="permsReadonlyBulk" class="form-select form-select-sm perm-mode-select">
-            <option value="allow" data-i18n="perms_mode_allow">Always allow</option>
-            <option value="ask" data-i18n="perms_mode_ask">Needs approval</option>
-            <option value="block" data-i18n="perms_mode_block">Blocked</option>
-            <option value="mixed" hidden disabled data-i18n="perms_mode_mixed">Mixed</option>
-          </select>
+          <div id="permsReadonlyBulk" class="perm-seg" role="group">
+            <button type="button" class="perm-seg-btn" data-mode="allow" data-i18n-title="perms_mode_allow" title="Always allow" aria-label="Always allow"><i class="bi bi-check-lg" aria-hidden="true"></i></button>
+            <button type="button" class="perm-seg-btn" data-mode="ask" data-i18n-title="perms_mode_ask" title="Needs approval" aria-label="Needs approval"><i class="bi bi-question-lg" aria-hidden="true"></i></button>
+            <button type="button" class="perm-seg-btn" data-mode="block" data-i18n-title="perms_mode_block" title="Blocked" aria-label="Blocked"><i class="bi bi-slash-circle" aria-hidden="true"></i></button>
+          </div>
         </div>
         <div id="permsReadonlyList"></div>
       </div>
@@ -881,12 +880,11 @@
             <span class="fw-semibold small" data-i18n="perms_group_write">Write / delete tools</span>
             <span id="permsWriteCount" class="badge rounded-pill text-bg-secondary">0</span>
           </div>
-          <select id="permsWriteBulk" class="form-select form-select-sm perm-mode-select">
-            <option value="allow" data-i18n="perms_mode_allow">Always allow</option>
-            <option value="ask" data-i18n="perms_mode_ask">Needs approval</option>
-            <option value="block" data-i18n="perms_mode_block">Blocked</option>
-            <option value="mixed" hidden disabled data-i18n="perms_mode_mixed">Mixed</option>
-          </select>
+          <div id="permsWriteBulk" class="perm-seg" role="group">
+            <button type="button" class="perm-seg-btn" data-mode="allow" data-i18n-title="perms_mode_allow" title="Always allow" aria-label="Always allow"><i class="bi bi-check-lg" aria-hidden="true"></i></button>
+            <button type="button" class="perm-seg-btn" data-mode="ask" data-i18n-title="perms_mode_ask" title="Needs approval" aria-label="Needs approval"><i class="bi bi-question-lg" aria-hidden="true"></i></button>
+            <button type="button" class="perm-seg-btn" data-mode="block" data-i18n-title="perms_mode_block" title="Blocked" aria-label="Blocked"><i class="bi bi-slash-circle" aria-hidden="true"></i></button>
+          </div>
         </div>
         <div id="permsWriteList"></div>
       </div>

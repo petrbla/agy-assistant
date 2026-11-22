@@ -4,10 +4,20 @@ import asyncio
 import time
 import urllib.request
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from app import __version__
 from app.agy_runner import extract_semver, is_version_up_to_date
 from app.config import Settings
+
+
+def _with_cache_buster(url: str) -> str:
+    """Přidá timestamp pro obejití 5minutové CDN cache na `raw.githubusercontent.com`."""
+    parsed = urlparse(url)
+    if (parsed.hostname or "").lower() != "raw.githubusercontent.com":
+        return url
+    sep = "&" if parsed.query else "?"
+    return f"{url}{sep}_={int(time.time())}"
 
 
 def fetch_latest_app_version_sync(url: str, timeout: float = 3.0) -> str | None:
@@ -15,8 +25,9 @@ def fetch_latest_app_version_sync(url: str, timeout: float = 3.0) -> str | None:
     cleaned = (url or "").strip()
     if not cleaned or not cleaned.startswith(("https://", "http://")):
         return None
+    req_url = _with_cache_buster(cleaned)
     req = urllib.request.Request(
-        cleaned,
+        req_url,
         headers={
             "User-Agent": f"asistent-antigravity/{__version__}",
             "Cache-Control": "no-cache",
@@ -49,14 +60,14 @@ class AppVersionChecker:
         self._cache: tuple[float, str | None] | None = None
 
     async def check_latest_version(self, *, force_refresh: bool = False) -> str | None:
-        """Vrátí nejnovější dostupnou verzi aplikace (s cache 15 min, u chyby 60 s)."""
+        """Vrátí nejnovější dostupnou verzi aplikace (s cache 2 min, u chyby 60 s)."""
         url = (self.settings.app_version_check_url or "").strip()
         if not url:
             return None
         now = time.monotonic()
         if not force_refresh and self._cache is not None:
             cached_at, cached_ver = self._cache
-            ttl = 900.0 if cached_ver is not None else 60.0
+            ttl = 120.0 if cached_ver is not None else 60.0
             if (now - cached_at) < ttl:
                 return cached_ver
         latest = await asyncio.to_thread(self._fetcher, url)

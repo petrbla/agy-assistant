@@ -245,7 +245,12 @@
     });
     document.querySelectorAll("[data-i18n-title]").forEach((el) => {
       const k = el.getAttribute("data-i18n-title");
-      if (k && typeof uiDict[k] === "string") el.title = uiDict[k];
+      if (k && typeof uiDict[k] === "string") {
+        el.title = uiDict[k];
+        if (el.classList.contains("perm-seg-btn")) {
+          el.setAttribute("aria-label", uiDict[k]);
+        }
+      }
     });
     const langSel = $("langSelect");
     if (langSel) langSel.setAttribute("aria-label", t("label_language"));
@@ -3282,6 +3287,45 @@
   }
 
   // Granulární 3-stavová oprávnění pluginů a MCP nástrojů
+  const PERM_MODE_SPECS = [
+    { mode: "allow", icon: "bi-check-lg", key: "perms_mode_allow" },
+    { mode: "ask", icon: "bi-question-lg", key: "perms_mode_ask" },
+    { mode: "block", icon: "bi-slash-circle", key: "perms_mode_block" },
+  ];
+
+  function setPermSegActive(segEl, activeMode) {
+    if (!segEl) return;
+    segEl.dataset.mode = activeMode || "mixed";
+    segEl.querySelectorAll(".perm-seg-btn").forEach((btn) => {
+      const isAct = btn.dataset.mode === activeMode;
+      btn.classList.toggle("active", isAct);
+      btn.setAttribute("aria-pressed", isAct ? "true" : "false");
+    });
+  }
+
+  function createPermSegControl(currentMode, onSelect) {
+    const wrap = document.createElement("div");
+    wrap.className = "perm-seg";
+    wrap.setAttribute("role", "group");
+    PERM_MODE_SPECS.forEach(({ mode, icon, key }) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "perm-seg-btn";
+      btn.dataset.mode = mode;
+      const lbl = t(key);
+      btn.title = lbl;
+      btn.setAttribute("aria-label", lbl);
+      btn.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i>`;
+      btn.onclick = () => {
+        setPermSegActive(wrap, mode);
+        onSelect(mode);
+      };
+      wrap.appendChild(btn);
+    });
+    setPermSegActive(wrap, currentMode);
+    return wrap;
+  }
+
   function setPermsGroupCollapsed(group, collapsed) {
     if (!permsModalState) return;
     permsModalState.collapsed[group] = collapsed;
@@ -3302,12 +3346,16 @@
     ].forEach(([grp, countId, bulkId]) => {
       const grpTools = allTools.filter((item) => (item.group === "readonly" ? "readonly" : "write") === grp);
       if ($(countId)) $(countId).textContent = String(grpTools.length);
-      const bulkSel = $(bulkId);
-      if (bulkSel && grpTools.length) {
+      const bulkEl = $(bulkId);
+      if (bulkEl && grpTools.length) {
         const uniq = new Set(grpTools.map((x) => x.mode));
         const mode = uniq.size === 1 ? [...uniq][0] : "mixed";
-        bulkSel.value = mode;
-        bulkSel.dataset.mode = mode;
+        setPermSegActive(bulkEl, mode);
+        if (mode === "mixed") {
+          bulkEl.title = t("perms_mode_mixed");
+        } else {
+          bulkEl.removeAttribute("title");
+        }
       }
     });
     const sumText = allTools.length
@@ -3363,28 +3411,13 @@
         descDiv.textContent = tool.description || "";
         info.append(titleDiv, descDiv);
 
-        const sel = document.createElement("select");
-        sel.className = "form-select form-select-sm perm-mode-select";
-        sel.dataset.mode = tool.mode;
-        [
-          ["allow", t("perms_mode_allow")],
-          ["ask", t("perms_mode_ask")],
-          ["block", t("perms_mode_block")],
-        ].forEach(([val, lbl]) => {
-          const opt = document.createElement("option");
-          opt.value = val;
-          opt.textContent = lbl;
-          sel.appendChild(opt);
-        });
-        sel.value = tool.mode;
-        sel.onchange = () => {
-          tool.mode = sel.value;
-          sel.dataset.mode = sel.value;
-          row.classList.toggle("is-blocked", sel.value === "block");
+        const switcher = createPermSegControl(tool.mode, (nextMode) => {
+          tool.mode = nextMode;
+          row.classList.toggle("is-blocked", nextMode === "block");
           syncPermsModalSummaryAndBulk();
-        };
+        });
 
-        row.append(info, sel);
+        row.append(info, switcher);
         listEl.appendChild(row);
       });
     };
@@ -3556,28 +3589,24 @@
     };
   }
 
-  if ($("permsReadonlyBulk")) {
-    $("permsReadonlyBulk").onchange = () => {
-      if (!permsModalState) return;
-      const val = $("permsReadonlyBulk").value;
-      if (!["allow", "ask", "block"].includes(val)) return;
-      permsModalState.tools.forEach((item) => {
-        if (item.group === "readonly") item.mode = val;
-      });
-      renderPermsModalTools();
-    };
-  }
-  if ($("permsWriteBulk")) {
-    $("permsWriteBulk").onchange = () => {
-      if (!permsModalState) return;
-      const val = $("permsWriteBulk").value;
-      if (!["allow", "ask", "block"].includes(val)) return;
-      permsModalState.tools.forEach((item) => {
-        if (item.group !== "readonly") item.mode = val;
-      });
-      renderPermsModalTools();
-    };
-  }
+  [
+    ["permsReadonlyBulk", (item) => item.group === "readonly"],
+    ["permsWriteBulk", (item) => item.group !== "readonly"],
+  ].forEach(([bulkId, pred]) => {
+    const el = $(bulkId);
+    if (!el) return;
+    el.querySelectorAll(".perm-seg-btn").forEach((btn) => {
+      btn.onclick = () => {
+        if (!permsModalState) return;
+        const val = btn.dataset.mode;
+        if (!["allow", "ask", "block"].includes(val)) return;
+        permsModalState.tools.forEach((item) => {
+          if (pred(item)) item.mode = val;
+        });
+        renderPermsModalTools();
+      };
+    });
+  });
 
   const applyPermsPreset = (preset) => {
     if (!permsModalState) return;
@@ -3812,6 +3841,15 @@
       toast(t("toast_2fa_disabled"));
     } catch (err) { toast(err.message, "err"); }
   };
+
+  setInterval(async () => {
+    if (!isAuthenticated || inAgyOnboarding || document.hidden) return;
+    try {
+      const info = await api("/api/app/version?refresh=false");
+      if (lastStatus) Object.assign(lastStatus, info);
+      updateAppVersionBadge(info);
+    } catch (_) {}
+  }, 5 * 60 * 1000);
 
   loadAuthAndBootstrap();
 })();

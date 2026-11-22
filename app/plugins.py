@@ -3277,7 +3277,15 @@ class PluginManager:
         profile_key: str = "default",
         interactive_config: bool = False,
     ) -> None:
-        """Automaticky otevře `/plugin`, vybere plugin a spustí OAuth přihlášení nebo MCP nastavení."""
+        """Automaticky projde případného průvodce, otevře `/plugin`, vybere plugin a spustí OAuth."""
+
+        def _recent_lower(mark: int) -> str:
+            if mark <= 0 and not self._raw_output and self._connect_state.output:
+                return self._connect_state.output.lower()
+            if mark > len(self._raw_output):
+                return self._connect_state.output.lower()
+            return clean_terminal_output(self._raw_output[mark:]).lower()
+
         try:
             # 1. Počkej, až TUI naběhne (první výstup + krátká prodleva nebo max 8 s)
             for _ in range(40):
@@ -3287,39 +3295,43 @@ class PluginManager:
                     or self._manual_override
                 ):
                     return
-                if self._connect_state.output.strip():
+                if self._connect_state.output.strip() or self._raw_output.strip():
                     await asyncio.sleep(1.2)
                     break
                 await asyncio.sleep(0.2)
             else:
                 await asyncio.sleep(0.5)
 
-            if (
-                not self._connect_state.running
-                or self._connect_state.auth_url
-                or self._manual_override
-            ):
-                return
-
-            # Pokud agy při prvním spuštění zobrazí interaktivní onboarding wizard ([Previous]/[Done]),
-            # nezasahuj do něj – uživatel ho pohodlně odkliká přímo v živém xterm.js terminálu.
-            low_start = self._connect_state.output.lower()
-            if "[previous]" in low_start and "[done]" in low_start:
-                return
-
-            # Jednoduchý Trust/Terms prompt bez wizardu lze potvrdit Enterem
-            for _ in range(2):
+            # 1b. Projdi případného 2-krokového průvodce agy (výběr barev [Next] -> Terms [Done] -> Trust)
+            screen_mark = 0
+            next_attempts = 0
+            done_attempts = 0
+            for _ in range(6):
                 if (
                     not self._connect_state.running
                     or self._connect_state.auth_url
                     or self._manual_override
                 ):
                     return
-                low_start = self._connect_state.output.lower()
-                if "[previous]" in low_start and "[done]" in low_start:
-                    return
-                if any(
-                    tok in low_start
+                recent = _recent_lower(screen_mark)
+                if any(tok in recent for tok in ("installed", "discover", "marketplace:")):
+                    break
+                is_step1_color = (
+                    "choose your color scheme" in recent
+                    or ("welcome to antigravity cli" in recent and "[next]" in recent)
+                )
+                is_step2_done = "[done]" in recent and any(
+                    tok in recent
+                    for tok in (
+                        "[previous]",
+                        "terms of service",
+                        "privacy policy",
+                        "antigravity.google/terms",
+                        "opt out",
+                    )
+                )
+                is_simple_prompt = any(
+                    tok in recent
                     for tok in (
                         "antigravity.google/terms",
                         "terms of service",
@@ -3329,13 +3341,26 @@ class PluginManager:
                         "do you trust",
                         "trust workspace",
                     )
-                ) and not any(
-                    tok in low_start for tok in ("installed", "discover", "marketplace:")
-                ):
+                )
+                if is_step1_color:
+                    screen_mark = len(self._raw_output)
+                    self._write_pty("\r" if next_attempts == 0 else "\t\r")
+                    next_attempts += 1
+                    await asyncio.sleep(1.3)
+                    continue
+                if is_step2_done:
+                    screen_mark = len(self._raw_output)
+                    seq = ("\r", "\x1b[C\r", "\t\r")[min(done_attempts, 2)]
+                    self._write_pty(seq)
+                    done_attempts += 1
+                    await asyncio.sleep(1.3)
+                    continue
+                if is_simple_prompt:
+                    screen_mark = len(self._raw_output)
                     self._write_pty("\r")
                     await asyncio.sleep(1.2)
-                else:
-                    break
+                    continue
+                break
 
             if (
                 not self._connect_state.running
@@ -3343,6 +3368,7 @@ class PluginManager:
                 or self._manual_override
             ):
                 return
+            plugin_mark = len(self._raw_output)
             self._write_pty("/plugin\r")
 
             # 2. Vyčkej na obrazovku Správce pluginů
@@ -3353,7 +3379,7 @@ class PluginManager:
                     or self._manual_override
                 ):
                     return
-                low = self._connect_state.output.lower()
+                low = _recent_lower(plugin_mark)
                 if "installed" in low or "discover" in low or "plugins" in low:
                     break
                 if step == 15:
@@ -3367,6 +3393,7 @@ class PluginManager:
             ):
                 return
             await asyncio.sleep(0.5)
+            detail_mark = len(self._raw_output)
             # Napiš název pluginu pro odfiltrování v záložce Installed a rozbal detail
             self._write_pty(plugin_name)
             await asyncio.sleep(0.6)
@@ -3386,7 +3413,7 @@ class PluginManager:
                     or self._manual_override
                 ):
                     return
-                low = self._connect_state.output.lower()
+                low = _recent_lower(detail_mark) or self._connect_state.output.lower()
                 if any(
                     tok in low
                     for tok in (
@@ -3455,8 +3482,8 @@ class PluginManager:
 
             # 4. Spusť přihlášení (`Sign in`) a čekej na OAuth URL
             self._write_pty("\r")
-            nudged_down = False
-            for step in range(25):
+            nudged_count = 0
+            for step in range(30):
                 if (
                     not self._connect_state.running
                     or self._connect_state.auth_url
@@ -3479,9 +3506,12 @@ class PluginManager:
                             with contextlib.suppress(OSError):
                                 self._proc.terminate()
                         return
-                if not nudged_down and step >= 12:
+                if nudged_count == 0 and step >= 12:
                     self._write_pty("\x1b[B\r")
-                    nudged_down = True
+                    nudged_count = 1
+                elif nudged_count == 1 and step >= 22:
+                    self._write_pty("\x1b[B\r")
+                    nudged_count = 2
                 await asyncio.sleep(0.2)
         except asyncio.CancelledError:
             return

@@ -1225,9 +1225,14 @@ def test_ensure_profile_home_seeded_copies_main_oauth_and_state_without_plugin_t
 
     main_home = tmp_path / "home"
     (main_home / ".gemini" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
+    (main_home / ".gemini" / "config").mkdir(parents=True, exist_ok=True)
     (main_home / ".config" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
     (main_home / ".local" / "share" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
 
+    (main_home / ".gemini" / "config" / "config.json").write_text(
+        '{"plugins": {"gmail": {"enabled": true}}}\n',
+        encoding="utf-8",
+    )
     (main_home / ".gemini" / "antigravity-cli" / "jetski_state.pbtxt").write_text(
         'refresh_token: "1//sample-refresh-token"\nuser_email: "user@example.com"\n',
         encoding="utf-8",
@@ -1256,10 +1261,75 @@ def test_ensure_profile_home_seeded_copies_main_oauth_and_state_without_plugin_t
     assert "sample-refresh-token" in (
         prof_home / ".gemini" / "antigravity-cli" / "jetski_state.pbtxt"
     ).read_text(encoding="utf-8")
-    assert (prof_home / ".gemini" / "antigravity-cli" / "settings.json").is_file()
+    assert (prof_home / ".gemini" / "config" / "config.json").is_file()
+    seeded_settings = json.loads(
+        (prof_home / ".gemini" / "antigravity-cli" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert seeded_settings.get("colorScheme") == "terminal"
     assert (prof_home / ".config" / "antigravity-cli" / "oauth_creds.json").is_file()
     assert (prof_home / ".local" / "share" / "antigravity-cli" / "session_auth.json").is_file()
     assert not (prof_home / ".gemini" / "mcp_oauth_tokens.json").exists()
+
+
+async def test_auto_navigate_passes_agy_onboarding_wizard_to_gmail_signin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.plugins as plugins_mod
+
+    s = Settings(workspace_dir=tmp_path / "ws", data_dir=tmp_path / "data", home_dir=tmp_path / "home")
+    db = AssistantDB(s.db_path)
+    pm = PluginManager(s, db)
+
+    async def _fast_sleep(_sec: float) -> None:
+        return None
+
+    monkeypatch.setattr(plugins_mod.asyncio, "sleep", _fast_sleep)
+
+    sent: list[str] = []
+    stage = 0
+    pm._master_fd = 1
+    pm._connect_state = PluginConnectState(running=True, plugin_name="gmail")
+    pm._raw_output = "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\n[Next]\n"
+    pm._connect_state.output = pm._raw_output
+
+    def _fake_write_pty(data: str) -> None:
+        nonlocal stage
+        sent.append(data)
+        if stage == 0 and data == "\r":
+            stage = 1
+            chunk = "Terms of Service: https://antigravity.google/terms\n[Previous]  [Done]\n"
+        elif stage == 1 and data == "\r":
+            stage = 2
+            chunk = "Ready > \n"
+        elif stage == 2 and data == "/plugin\r":
+            stage = 3
+            chunk = "Plugins manager: Installed  Discover\n"
+        elif stage == 3 and data == "gmail":
+            stage = 4
+            chunk = "> gmail\n"
+        elif stage == 4 and data == "\r":
+            stage = 5
+            chunk = "Marketplace: antigravity-plugins-official\nSign-in: Not signed in\nSign in\n"
+        elif stage == 5 and data == "\r":
+            stage = 6
+            oauth = (
+                "https://accounts.google.com/o/oauth2/v2/auth?client_id=c1"
+                "&redirect_uri=http%3A%2F%2F127.0.0.1%3A44535%2Fcallback&state=S1"
+            )
+            chunk = f"Open browser: {oauth}\n"
+            pm._connect_state.auth_url = oauth
+        else:
+            chunk = ""
+        if chunk:
+            pm._raw_output += chunk
+            pm._connect_state.output = pm._raw_output
+
+    pm._write_pty = _fake_write_pty  # type: ignore[method-assign]
+    await pm._auto_navigate_to_signin("gmail", force_reconnect=True, profile_key="pracovni")
+
+    assert sent[:4] == ["\r", "\r", "/plugin\r", "gmail"]
+    assert "accounts.google.com/o/oauth2/v2/auth" in pm._connect_state.auth_url
+
 
 
 

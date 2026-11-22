@@ -79,6 +79,7 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert "memoryModeSeg" in home_res.text
     assert "memoryToolbar" in home_res.text
     assert "memoryPreview" in home_res.text
+    assert "perm-seg-btn" in home_res.text
     assert "tabler-icons" not in home_res.text
     assert "no-cache" in (home_res.headers.get("cache-control") or "").lower()
     assert f"/static/styles.css?v={__version__}-" in home_res.text
@@ -272,8 +273,14 @@ def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_p
 
 
 async def test_app_version_checker_and_api(tmp_path: Path) -> None:
+    from app.version_check import _with_cache_buster
+
     assert fetch_latest_app_version_sync("") is None
     assert fetch_latest_app_version_sync("file:///etc/passwd") is None
+    assert "?_=" in _with_cache_buster(
+        "https://raw.githubusercontent.com/petrbla/agy-assistant/main/VERSION"
+    )
+    assert _with_cache_buster("https://example.invalid/VERSION") == "https://example.invalid/VERSION"
 
     calls = 0
     remote_value: str | None = "0.0.6"

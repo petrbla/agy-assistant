@@ -445,6 +445,14 @@ def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
         with contextlib.suppress(OSError):
             os.symlink(main_plugins, prof_plugins, target_is_directory=True)
 
+    # Sdílej globální config.json (zapnuté pluginy a userSettings) pokud v profilu ještě není
+    main_cfg = main_home / ".gemini" / "config" / "config.json"
+    prof_cfg = prof_home / ".gemini" / "config" / "config.json"
+    if main_cfg.is_file() and not main_cfg.is_symlink() and not prof_cfg.exists():
+        prof_cfg.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            shutil.copy2(main_cfg, prof_cfg)
+
     # Zkopíruj hlavní OAuth soubory a onboarding/TOS stav agy napříč známými CLI složkami
     # (bez tokenů pluginů v mcp_oauth_tokens.json, aby měl každý účet izolované OAuth)
     seed_roots = (
@@ -473,6 +481,10 @@ def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
         cli_subdir = src_root / "antigravity-cli"
         if cli_subdir.is_dir() and not cli_subdir.is_symlink():
             state_dirs.append(cli_subdir)
+        if rel_root == Path(".gemini"):
+            agy_subdir = src_root / "antigravity"
+            if agy_subdir.is_dir() and not agy_subdir.is_symlink():
+                state_dirs.append(agy_subdir)
         for state_dir in state_dirs:
             try:
                 items = sorted(state_dir.iterdir(), key=lambda p: p.name)
@@ -501,6 +513,23 @@ def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                 with contextlib.suppress(OSError):
                     shutil.copy2(item, dst_file)
+
+    prof_settings = prof_home / ".gemini" / "antigravity-cli" / "settings.json"
+    try:
+        sdata: dict[str, Any] = {}
+        if prof_settings.is_file():
+            loaded = json.loads(prof_settings.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                sdata = loaded
+        if not sdata.get("colorScheme"):
+            sdata["colorScheme"] = "terminal"
+            prof_settings.parent.mkdir(parents=True, exist_ok=True)
+            prof_settings.write_text(
+                json.dumps(sdata, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+    except (OSError, json.JSONDecodeError):
+        pass
 
     return prof_home
 
