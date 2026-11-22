@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -18,6 +18,7 @@ from app.config import ContextMode, Settings
 from app.db import AssistantDB
 from app.github_backup import GitHubBackupResult, run_github_backup as execute_github_backup
 from app.i18n import t
+from app.memory import WorkspaceMemory
 from app.user_env import ensure_workspace
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,10 @@ Notifier = Callable[[str], Awaitable[None]]
 HEARTBEAT_PROMPT = t("prompts.heartbeat", "en")
 MORNING_BRIEFING_PROMPT = t("prompts.morning_briefing", "en")
 NIGHTLY_MEMORY_FLUSH_PROMPT = t("prompts.nightly_memory_flush", "en")
+
+IDLE_RESET_MIN_RUNS = 6
+IDLE_RESET_MIN_TOKENS = 20_000
+IDLE_RESET_CHECK_INTERVAL_MINUTES = 10
 
 
 def is_heartbeat_ok(text: str) -> bool:
@@ -110,6 +115,11 @@ class AssistantScheduler:
         nightly_cron = (
             owner.nightly_reset_cron if owner is not None else self.settings.nightly_reset_cron
         )
+        idle_enabled = (
+            owner.idle_reset_enabled
+            if owner is not None
+            else self.settings.idle_reset_enabled
+        )
         gh_enabled = (
             owner.github_backup_enabled
             if owner is not None
@@ -160,6 +170,15 @@ class AssistantScheduler:
                 )
             except ValueError as exc:
                 logger.warning("Neplatný cron výraz nočního resetu '%s': %s", nightly_cron, exc)
+
+        if idle_enabled:
+            self.scheduler.add_job(
+                self.run_idle_reset,
+                trigger=IntervalTrigger(minutes=IDLE_RESET_CHECK_INTERVAL_MINUTES),
+                id="idle_reset",
+                name=t("ui.job_name_idle_reset", owner_lang),
+                replace_existing=True,
+            )
 
         if gh_enabled and gh_repo and gh_token:
             try:
@@ -263,57 +282,170 @@ class AssistantScheduler:
             )
         return result
 
-    async def run_nightly_reset(self) -> dict[str, object]:
-        """Uloží důležité poznatky z aktivních konverzací do paměti a poté resetuje jejich conversation_id."""
-        if self.db is None:
-            return {"flushed_sessions": 0, "reset_sessions": 0, "errors": []}
+    async def _flush_session_memory(
+        self,
+        session_key: str,
+        raw_ctx: str,
+        *,
+        source: str,
+        flush_prompt: str,
+    ) -> tuple[bool, str | None]:
+        ctx: ContextMode = (
+            raw_ctx if raw_ctx in ("auto", "pracovni", "osobni") else "auto"
+        )  # type: ignore[assignment]
+        owner = self.db.get_owner() if self.db is not None else None
+        try:
+            ensure_workspace(self.settings, owner)
+            res = await self.runner.run(
+                flush_prompt,
+                session_key=session_key,
+                source=source,
+                context_mode=ctx,
+                use_conversation=True,
+            )
+            if res.success:
+                return True, None
+            return False, f"{session_key}: {res.error or res.text}"
+        except Exception as exc:
+            logger.exception("Úklid paměti (%s) pro %s selhal: %s", source, session_key, exc)
+            return False, f"{session_key}: {exc}"
 
-        active_sessions = self.db.list_active_sessions()
-        if not active_sessions:
-            logger.info("Noční reset přeskočen – žádné aktivní konverzace.")
-            return {"flushed_sessions": 0, "reset_sessions": 0, "errors": []}
+    async def run_nightly_reset(self) -> dict[str, object]:
+        """Uloží důležité poznatky z aktivních konverzací do paměti, promaže staré denní logy a resetuje conversation_id."""
+        if self.db is None:
+            return {
+                "flushed_sessions": 0,
+                "reset_sessions": 0,
+                "pruned_daily_files": 0,
+                "errors": [],
+            }
 
         owner = self.db.get_owner()
         lang = owner.language if owner is not None else self.settings.language
-        flush_prompt = t("prompts.nightly_memory_flush", lang)
+        tz_name = owner.tz if owner is not None else self.settings.tz
+        retention_days = (
+            owner.daily_memory_retention_days
+            if owner is not None
+            else self.settings.daily_memory_retention_days
+        )
+
+        active_sessions = self.db.list_active_sessions()
         flushed = 0
         errors: list[str] = []
-        try:
-            for session_key, _conv_id, raw_ctx in active_sessions:
-                ctx: ContextMode = (
-                    raw_ctx
-                    if raw_ctx in ("auto", "pracovni", "osobni")
-                    else "auto"
-                )  # type: ignore[assignment]
-                try:
-                    ensure_workspace(self.settings, owner)
-                    res = await self.runner.run(
-                        flush_prompt,
-                        session_key=session_key,
+        if not active_sessions:
+            logger.info("Noční reset konverzací přeskočen – žádné aktivní konverzace.")
+        else:
+            flush_prompt = t("prompts.nightly_memory_flush", lang)
+            try:
+                for session_key, _conv_id, raw_ctx in active_sessions:
+                    ok, err = await self._flush_session_memory(
+                        session_key,
+                        raw_ctx,
                         source="nightly_reset",
-                        context_mode=ctx,
-                        use_conversation=True,
+                        flush_prompt=flush_prompt,
                     )
-                    if res.success:
+                    if ok:
                         flushed += 1
-                    else:
-                        errors.append(f"{session_key}: {res.error or res.text}")
-                except Exception as exc:
-                    logger.exception("Noční uložení paměti pro %s selhalo: %s", session_key, exc)
-                    errors.append(f"{session_key}: {exc}")
-        finally:
-            self.db.reset_all_sessions()
-            if isinstance(self.runner, AgyRunner):
-                await self.runner.close_all()
+                    elif err:
+                        errors.append(err)
+            finally:
+                self.db.reset_all_sessions()
+                if isinstance(self.runner, AgyRunner):
+                    await self.runner.close_all()
 
-        logger.info(
-            "Noční úklid dokončen (uloženo %s/%s relací, vše resetováno).",
-            flushed,
-            len(active_sessions),
-        )
+        pruned = WorkspaceMemory(
+            self.settings.workspace_dir, timezone_name=tz_name
+        ).prune_old_daily_memory(retention_days)
+        if pruned:
+            logger.info("Promazáno %s starých denních poznámek z memory/.", len(pruned))
+
+        if active_sessions:
+            logger.info(
+                "Noční úklid dokončen (uloženo %s/%s relací, vše resetováno, smazáno %s starých dnů).",
+                flushed,
+                len(active_sessions),
+                len(pruned),
+            )
         return {
             "flushed_sessions": flushed,
             "reset_sessions": len(active_sessions),
+            "pruned_daily_files": len(pruned),
+            "errors": errors,
+        }
+
+    async def run_idle_reset(self, *, now: datetime | None = None) -> dict[str, object]:
+        """Po uplynutí doby nečinnosti uloží paměť a resetuje delší konverzace."""
+        if self.db is None:
+            return {"checked_sessions": 0, "flushed_sessions": 0, "reset_sessions": 0, "errors": []}
+
+        owner = self.db.get_owner()
+        idle_enabled = (
+            owner.idle_reset_enabled if owner is not None else self.settings.idle_reset_enabled
+        )
+        if not idle_enabled:
+            return {"checked_sessions": 0, "flushed_sessions": 0, "reset_sessions": 0, "errors": []}
+
+        idle_minutes = (
+            owner.idle_reset_minutes if owner is not None else self.settings.idle_reset_minutes
+        )
+        lang = owner.language if owner is not None else self.settings.language
+        ref_now = now or datetime.now(timezone.utc)
+        cutoff = ref_now - timedelta(minutes=max(15, int(idle_minutes)))
+
+        sessions = self.db.list_active_sessions_with_updated_at()
+        if not sessions:
+            return {"checked_sessions": 0, "flushed_sessions": 0, "reset_sessions": 0, "errors": []}
+
+        flush_prompt = t("prompts.nightly_memory_flush", lang)
+        flushed = 0
+        reset_count = 0
+        errors: list[str] = []
+
+        for session_key, conv_id, raw_ctx, updated_at_raw in sessions:
+            try:
+                updated_dt = datetime.fromisoformat(updated_at_raw)
+                if updated_dt.tzinfo is None:
+                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if updated_dt > cutoff:
+                continue
+
+            runs, tokens = self.db.get_conversation_stats(conv_id)
+            if runs < IDLE_RESET_MIN_RUNS and tokens < IDLE_RESET_MIN_TOKENS:
+                continue
+
+            ctx: ContextMode = (
+                raw_ctx if raw_ctx in ("auto", "pracovni", "osobni") else "auto"
+            )  # type: ignore[assignment]
+            try:
+                ok, err = await self._flush_session_memory(
+                    session_key,
+                    ctx,
+                    source="idle_reset",
+                    flush_prompt=flush_prompt,
+                )
+                if ok:
+                    flushed += 1
+                elif err:
+                    errors.append(err)
+            finally:
+                self.db.reset_conversation(session_key, default_context=ctx)
+                if isinstance(self.runner, AgyRunner):
+                    await self.runner.close_session(session_key)
+                reset_count += 1
+
+        if reset_count:
+            logger.info(
+                "Úklid po nečinnosti dokončen (zkontrolováno %s, uloženo %s, resetováno %s).",
+                len(sessions),
+                flushed,
+                reset_count,
+            )
+        return {
+            "checked_sessions": len(sessions),
+            "flushed_sessions": flushed,
+            "reset_sessions": reset_count,
             "errors": errors,
         }
 

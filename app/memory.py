@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
+
+_DAILY_MEMORY_FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.md$")
 
 
 CORE_MEMORY_FILES = (
@@ -86,6 +89,45 @@ class WorkspaceMemory:
                 )
             )
         return results
+
+    def prune_old_daily_memory(
+        self, retention_days: int, *, today: date | None = None
+    ) -> list[str]:
+        """Smaže staré denní poznámky `memory/YYYY-MM-DD.md` starší než `retention_days` dní.
+
+        Nikdy nemaže `MEMORY.md`, `memory/rozdelane.md`, `memory/archiv.md` ani jiné tematické soubory.
+        """
+        if retention_days <= 0:
+            return []
+        memory_dir = self.workspace_dir / "memory"
+        if not memory_dir.is_dir() or memory_dir.is_symlink():
+            return []
+
+        ref_today = today or datetime.now(self.tz).date()
+        cutoff = ref_today - timedelta(days=int(retention_days))
+        removed: list[str] = []
+
+        for item in sorted(memory_dir.iterdir(), key=lambda p: p.name):
+            if item.is_symlink() or not item.is_file():
+                continue
+            match = _DAILY_MEMORY_FILE_RE.match(item.name)
+            if not match:
+                continue
+            try:
+                resolved = item.resolve()
+            except OSError:
+                continue
+            if not resolved.is_relative_to(self.workspace_dir):
+                continue
+            try:
+                file_date = date.fromisoformat(match.group(1))
+            except ValueError:
+                continue
+            if file_date < cutoff:
+                item.unlink(missing_ok=True)
+                removed.append(f"memory/{item.name}")
+
+        return removed
 
     def list_skills(self) -> list[str]:
         """Vrátí názvy nainstalovaných skillů ve složce .agents/skills."""

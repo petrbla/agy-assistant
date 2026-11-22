@@ -106,6 +106,9 @@ class SettingsUpdateRequest(BaseModel):
     morning_briefing_cron: str | None = None
     nightly_reset_enabled: bool | None = None
     nightly_reset_cron: str | None = None
+    idle_reset_enabled: bool | None = None
+    idle_reset_minutes: int | None = Field(default=None, ge=15, le=1440)
+    daily_memory_retention_days: int | None = Field(default=None, ge=0, le=3650)
     agy_model: str | None = Field(default=None, max_length=120)
     github_backup_enabled: bool | None = None
     github_backup_repo: str | None = Field(default=None, max_length=300)
@@ -272,6 +275,9 @@ def _owner_public_dict(owner: OwnerConfig, settings: Settings) -> dict[str, obje
         "morning_briefing_cron": owner.morning_briefing_cron,
         "nightly_reset_enabled": owner.nightly_reset_enabled,
         "nightly_reset_cron": owner.nightly_reset_cron,
+        "idle_reset_enabled": owner.idle_reset_enabled,
+        "idle_reset_minutes": owner.idle_reset_minutes,
+        "daily_memory_retention_days": owner.daily_memory_retention_days,
         "agy_model": owner.agy_model,
         "has_gemini_api_key": has_key,
         "has_agy_oauth": has_oauth,
@@ -726,6 +732,9 @@ def create_app(
             "morning_briefing_cron",
             "nightly_reset_enabled",
             "nightly_reset_cron",
+            "idle_reset_enabled",
+            "idle_reset_minutes",
+            "daily_memory_retention_days",
             "agy_model",
             "gemini_api_key",
             "github_backup_enabled",

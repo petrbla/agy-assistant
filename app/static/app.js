@@ -30,6 +30,7 @@
     heartbeat: "job_name_heartbeat",
     briefing: "job_name_briefing",
     nightly_reset: "job_name_nightly",
+    idle_reset: "job_name_idle_reset",
     github_backup: "job_name_github_backup",
   };
 
@@ -630,6 +631,7 @@
       ["cfgHbEnabled", "hbTile", "cfgHbInterval"],
       ["cfgBriefEnabled", "briefTile", "cfgBriefCron"],
       ["cfgNightlyEnabled", "nightlyTile", "cfgNightlyCron"],
+      ["cfgIdleResetEnabled", "idleTile", "cfgIdleResetMinutes"],
     ].forEach(([chkId, tileId, inpId]) => {
       const chk = $(chkId);
       const tile = $(tileId);
@@ -640,7 +642,7 @@
       if (inp) inp.disabled = !active;
     });
   }
-  ["cfgHbEnabled", "cfgBriefEnabled", "cfgNightlyEnabled"].forEach((chkId) => {
+  ["cfgHbEnabled", "cfgBriefEnabled", "cfgNightlyEnabled", "cfgIdleResetEnabled"].forEach((chkId) => {
     if ($(chkId)) $(chkId).addEventListener("change", syncAutomationTiles);
   });
 
@@ -2045,6 +2047,15 @@
       $("cfgBriefCron").value = s.morning_briefing_cron || "0 8 * * *";
       $("cfgNightlyEnabled").checked = s.nightly_reset_enabled !== false;
       $("cfgNightlyCron").value = s.nightly_reset_cron || "15 0 * * *";
+      if ($("cfgDailyRetentionDays")) {
+        $("cfgDailyRetentionDays").value = Number.isFinite(Number(s.daily_memory_retention_days))
+          ? s.daily_memory_retention_days
+          : 30;
+      }
+      if ($("cfgIdleResetEnabled")) $("cfgIdleResetEnabled").checked = s.idle_reset_enabled !== false;
+      if ($("cfgIdleResetMinutes")) {
+        $("cfgIdleResetMinutes").value = s.idle_reset_minutes || 120;
+      }
       syncAutomationTiles();
       renderGithubBackupUi(s);
       updateAgyBadges(s);
@@ -2181,6 +2192,16 @@
       nightly_reset_enabled: $("cfgNightlyEnabled").checked,
       nightly_reset_cron: $("cfgNightlyCron").value.trim() || "15 0 * * *",
     };
+    if ($("cfgIdleResetEnabled")) body.idle_reset_enabled = $("cfgIdleResetEnabled").checked;
+    if ($("cfgIdleResetMinutes")) {
+      const idleMin = Number($("cfgIdleResetMinutes").value || 120);
+      body.idle_reset_minutes = Number.isFinite(idleMin) ? idleMin : 120;
+    }
+    if ($("cfgDailyRetentionDays")) {
+      const retRaw = $("cfgDailyRetentionDays").value.trim();
+      const retDays = retRaw === "" ? 30 : Number(retRaw);
+      body.daily_memory_retention_days = Number.isFinite(retDays) ? retDays : 30;
+    }
     const tgTok = $("cfgTgToken").value.trim();
     if (tgTok) body.telegram_bot_token = tgTok;
     try {

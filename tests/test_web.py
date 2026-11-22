@@ -640,5 +640,39 @@ def test_2fa_enable_and_disable_validation_returns_400_without_logout(tmp_path: 
     assert ok_dis.json()["owner"]["totp_enabled"] is False
 
 
+def test_idle_reset_and_daily_retention_settings_api(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    html_res = client.get("/")
+    assert html_res.status_code == 200
+    assert 'id="cfgIdleResetEnabled"' in html_res.text
+    assert 'id="cfgIdleResetMinutes"' in html_res.text
+    assert 'id="cfgDailyRetentionDays"' in html_res.text
+
+    cur = client.get("/api/settings")
+    assert cur.status_code == 200
+    assert cur.json()["idle_reset_enabled"] is True
+    assert cur.json()["idle_reset_minutes"] == 120
+    assert cur.json()["daily_memory_retention_days"] == 30
+
+    upd = client.post(
+        "/api/settings",
+        json={
+            "idle_reset_enabled": False,
+            "idle_reset_minutes": 90,
+            "daily_memory_retention_days": 14,
+        },
+    )
+    assert upd.status_code == 200
+    body = upd.json()
+    assert body["idle_reset_enabled"] is False
+    assert body["idle_reset_minutes"] == 90
+    assert body["daily_memory_retention_days"] == 14
+
+    bad_idle = client.post("/api/settings", json={"idle_reset_minutes": 5})
+    assert bad_idle.status_code == 422
+    bad_ret = client.post("/api/settings", json={"daily_memory_retention_days": -1})
+    assert bad_ret.status_code == 422
+
+
 
 

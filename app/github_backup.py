@@ -125,6 +125,9 @@ def build_scheduler_backup_payload(db: AssistantDB, owner: OwnerConfig) -> dict[
             "morning_briefing_cron": owner.morning_briefing_cron,
             "nightly_reset_enabled": bool(owner.nightly_reset_enabled),
             "nightly_reset_cron": owner.nightly_reset_cron,
+            "idle_reset_enabled": bool(owner.idle_reset_enabled),
+            "idle_reset_minutes": int(owner.idle_reset_minutes),
+            "daily_memory_retention_days": int(owner.daily_memory_retention_days),
         },
         "tasks": [
             {
@@ -182,6 +185,7 @@ def restore_scheduler_backup_payload(
             "heartbeat_enabled",
             "morning_briefing_enabled",
             "nightly_reset_enabled",
+            "idle_reset_enabled",
         ):
             if bool_field in raw_system and raw_system[bool_field] is not None:
                 owner_updates[bool_field] = bool(raw_system[bool_field])
@@ -197,6 +201,27 @@ def restore_scheduler_backup_payload(
             if hb_int < 1 or hb_int > 10080:
                 raise ValueError("Interval Heartbeatu musí být mezi 1 a 10080 minutami.")
             owner_updates["heartbeat_interval_minutes"] = hb_int
+
+        if "idle_reset_minutes" in raw_system and raw_system["idle_reset_minutes"] is not None:
+            try:
+                idle_min = int(raw_system["idle_reset_minutes"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Neplatný limit nečinnosti v záloze plánovače.") from exc
+            if idle_min < 15 or idle_min > 1440:
+                raise ValueError("Limit nečinnosti musí být mezi 15 a 1440 minutami.")
+            owner_updates["idle_reset_minutes"] = idle_min
+
+        if (
+            "daily_memory_retention_days" in raw_system
+            and raw_system["daily_memory_retention_days"] is not None
+        ):
+            try:
+                ret_days = int(raw_system["daily_memory_retention_days"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Neplatný počet dní uchování denní paměti.") from exc
+            if ret_days < 0 or ret_days > 3650:
+                raise ValueError("Počet dní uchování denní paměti musí být mezi 0 a 3650.")
+            owner_updates["daily_memory_retention_days"] = ret_days
 
         for cron_field in ("morning_briefing_cron", "nightly_reset_cron"):
             if cron_field in raw_system and raw_system[cron_field] is not None:

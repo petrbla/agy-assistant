@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     morning_briefing_cron: str = "0 8 * * *"
     nightly_reset_enabled: bool = True
     nightly_reset_cron: str = "15 0 * * *"
+    idle_reset_enabled: bool = True
+    idle_reset_minutes: int = 120
+    daily_memory_retention_days: int = 30
     github_backup_enabled: bool = False
     github_backup_repo: str = ""
     github_backup_branch: str = "main"

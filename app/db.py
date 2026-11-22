@@ -32,6 +32,9 @@ OWNER_UPDATABLE_FIELDS = frozenset(
         "morning_briefing_cron",
         "nightly_reset_enabled",
         "nightly_reset_cron",
+        "idle_reset_enabled",
+        "idle_reset_minutes",
+        "daily_memory_retention_days",
         "agy_model",
         "gemini_api_key",
         "password_hash",
@@ -80,6 +83,9 @@ class OwnerConfig:
     totp_pending_secret: str
     totp_recovery_hashes_json: str
     created_at: str
+    idle_reset_enabled: bool = True
+    idle_reset_minutes: int = 120
+    daily_memory_retention_days: int = 30
     github_backup_enabled: bool = False
     github_backup_repo: str = ""
     github_backup_branch: str = "main"
@@ -266,6 +272,9 @@ class AssistantDB:
                     morning_briefing_cron TEXT NOT NULL DEFAULT '0 8 * * *',
                     nightly_reset_enabled INTEGER NOT NULL DEFAULT 1,
                     nightly_reset_cron TEXT NOT NULL DEFAULT '15 0 * * *',
+                    idle_reset_enabled INTEGER NOT NULL DEFAULT 1,
+                    idle_reset_minutes INTEGER NOT NULL DEFAULT 120,
+                    daily_memory_retention_days INTEGER NOT NULL DEFAULT 30,
                     agy_model TEXT NOT NULL DEFAULT '',
                     gemini_api_key TEXT NOT NULL DEFAULT '',
                     password_hash TEXT NOT NULL DEFAULT '',
@@ -373,6 +382,9 @@ class AssistantDB:
                 """
             )
             self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
+            self._ensure_column(conn, "owner_config", "idle_reset_enabled", "INTEGER NOT NULL DEFAULT 1")
+            self._ensure_column(conn, "owner_config", "idle_reset_minutes", "INTEGER NOT NULL DEFAULT 120")
+            self._ensure_column(conn, "owner_config", "daily_memory_retention_days", "INTEGER NOT NULL DEFAULT 30")
             self._ensure_column(conn, "owner_config", "github_backup_enabled", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "owner_config", "github_backup_repo", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "owner_config", "github_backup_branch", "TEXT NOT NULL DEFAULT 'main'")
@@ -613,6 +625,20 @@ class AssistantDB:
             morning_briefing_cron=row["morning_briefing_cron"],
             nightly_reset_enabled=bool(row["nightly_reset_enabled"]),
             nightly_reset_cron=row["nightly_reset_cron"],
+            idle_reset_enabled=(
+                bool(row["idle_reset_enabled"]) if "idle_reset_enabled" in keys else True
+            ),
+            idle_reset_minutes=(
+                int(row["idle_reset_minutes"])
+                if "idle_reset_minutes" in keys and row["idle_reset_minutes"] is not None
+                else 120
+            ),
+            daily_memory_retention_days=(
+                int(row["daily_memory_retention_days"])
+                if "daily_memory_retention_days" in keys
+                and row["daily_memory_retention_days"] is not None
+                else 30
+            ),
             agy_model=row["agy_model"],
             gemini_api_key=row["gemini_api_key"],
             password_hash=row["password_hash"],
@@ -794,10 +820,11 @@ class AssistantDB:
                     telegram_notify_chat_id, heartbeat_enabled, heartbeat_interval_minutes,
                     morning_briefing_enabled, morning_briefing_cron,
                     nightly_reset_enabled, nightly_reset_cron,
+                    idle_reset_enabled, idle_reset_minutes, daily_memory_retention_days,
                     agy_model, gemini_api_key,
                     github_backup_enabled, github_backup_repo, github_backup_branch,
                     github_backup_token, github_backup_cron, created_at
-                ) VALUES (1, 'admin', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (1, 'admin', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     default_display,
@@ -815,6 +842,9 @@ class AssistantDB:
                     settings.morning_briefing_cron,
                     1 if settings.nightly_reset_enabled else 0,
                     settings.nightly_reset_cron,
+                    1 if settings.idle_reset_enabled else 0,
+                    max(15, min(1440, int(settings.idle_reset_minutes))),
+                    max(0, min(3650, int(settings.daily_memory_retention_days))),
                     settings.agy_model.strip(),
                     settings.gemini_api_key.strip(),
                     1 if settings.github_backup_enabled else 0,
@@ -843,12 +873,17 @@ class AssistantDB:
                 "heartbeat_enabled",
                 "morning_briefing_enabled",
                 "nightly_reset_enabled",
+                "idle_reset_enabled",
                 "totp_enabled",
                 "github_backup_enabled",
             }:
                 filtered[key] = 1 if bool(value) else 0
             elif key == "heartbeat_interval_minutes":
                 filtered[key] = max(1, int(value))
+            elif key == "idle_reset_minutes":
+                filtered[key] = max(15, min(1440, int(value)))
+            elif key == "daily_memory_retention_days":
+                filtered[key] = max(0, min(3650, int(value)))
             elif key in {"email", "username"} and isinstance(value, str):
                 filtered[key] = value.strip().lower()
             elif key == "language" and isinstance(value, str):
@@ -1571,12 +1606,12 @@ class AssistantDB:
                 (self._now_iso(),),
             )
 
-    def list_active_sessions(self) -> list[tuple[str, str, str]]:
-        """Vrátí seznam `(session_key, conversation_id, context_mode)` pro aktivní relace."""
+    def list_active_sessions_with_updated_at(self) -> list[tuple[str, str, str, str]]:
+        """Vrátí seznam `(session_key, conversation_id, context_mode, updated_at)` pro aktivní relace."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT session_key, conversation_id, context_mode
+                SELECT session_key, conversation_id, context_mode, updated_at
                 FROM sessions
                 WHERE conversation_id IS NOT NULL
                   AND TRIM(conversation_id) != ''
@@ -1584,9 +1619,21 @@ class AssistantDB:
                 """
             ).fetchall()
             return [
-                (row["session_key"], row["conversation_id"], row["context_mode"])
+                (
+                    row["session_key"],
+                    row["conversation_id"],
+                    row["context_mode"],
+                    str(row["updated_at"] or ""),
+                )
                 for row in rows
             ]
+
+    def list_active_sessions(self) -> list[tuple[str, str, str]]:
+        """Vrátí seznam `(session_key, conversation_id, context_mode)` pro aktivní relace."""
+        return [
+            (session_key, conv_id, ctx)
+            for session_key, conv_id, ctx, _ in self.list_active_sessions_with_updated_at()
+        ]
 
     def get_conversation_stats(self, conversation_id: str) -> tuple[int, int]:
         """Vrátí `(počet_běhů, součet_tokenů)` pro konkrétní `conversation_id`."""

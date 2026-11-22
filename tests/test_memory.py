@@ -114,3 +114,36 @@ def test_memory_export_and_import_zip_merge_replace_and_security(tmp_path: Path)
 
     with pytest.raises(ValueError):
         dst_mem.import_memory_zip(b"neplatny-zip", mode="merge")
+
+
+def test_prune_old_daily_memory(tmp_path: Path) -> None:
+    from datetime import date
+
+    (tmp_path / "MEMORY.md").write_text("# Dlouhodobá paměť", encoding="utf-8")
+    mem_dir = tmp_path / "memory"
+    mem_dir.mkdir()
+    (mem_dir / "2026-10-01.md").write_text("starý den", encoding="utf-8")
+    (mem_dir / "2026-10-22.md").write_text("těsně starší než 30 dní", encoding="utf-8")
+    (mem_dir / "2026-10-23.md").write_text("přesně hranice 30 dní", encoding="utf-8")
+    (mem_dir / "2026-11-22.md").write_text("dnešek", encoding="utf-8")
+    (mem_dir / "rozdelane.md").write_text("rozdělané úkoly", encoding="utf-8")
+    (mem_dir / "archiv.md").write_text("archiv", encoding="utf-8")
+    (mem_dir / "projekty.md").write_text("projekty", encoding="utf-8")
+
+    mem = WorkspaceMemory(tmp_path)
+    today = date(2026, 11, 22)
+
+    assert mem.prune_old_daily_memory(0, today=today) == []
+    assert (mem_dir / "2026-10-01.md").is_file()
+
+    removed = mem.prune_old_daily_memory(30, today=today)
+    assert removed == ["memory/2026-10-01.md", "memory/2026-10-22.md"]
+    assert not (mem_dir / "2026-10-01.md").exists()
+    assert not (mem_dir / "2026-10-22.md").exists()
+    assert (mem_dir / "2026-10-23.md").is_file()
+    assert (mem_dir / "2026-11-22.md").is_file()
+    assert (mem_dir / "rozdelane.md").is_file()
+    assert (mem_dir / "archiv.md").is_file()
+    assert (mem_dir / "projekty.md").is_file()
+    assert (tmp_path / "MEMORY.md").is_file()
+
