@@ -459,148 +459,155 @@
 
     <!-- 4. SETTINGS -->
     <section id="tab-settings" class="d-none">
-      <!-- Assistant & Telegram + Account Security -->
-      <div class="row g-3 mb-3">
-        <!-- Assistant & Telegram -->
-        <div class="col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-header">
-              <h2 class="h6 fw-bold mb-0" data-i18n="cfg_assistant_title">Assistant &amp; Telegram</h2>
-            </div>
-            <div class="card-body d-flex flex-column">
-              <form id="settingsForm" class="d-flex flex-column flex-grow-1">
-                <div class="row g-2 mb-3">
-                  <div class="col-md-4">
-                    <label for="cfgAssistantName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_assistant_name">Assistant name</label>
-                    <input id="cfgAssistantName" type="text" class="form-control form-control-sm" placeholder="Assistant" data-i18n-placeholder="placeholder_assistant_name" />
-                  </div>
-                  <div class="col-md-4">
-                    <label for="cfgLanguage" class="form-label small fw-semibold text-body-secondary" data-i18n="label_language">Language</label>
-                    <select id="cfgLanguage" class="form-select form-select-sm">
-                      <option value="en">English</option>
-                      <option value="cs">Čeština</option>
-                      <option value="de">Deutsch</option>
-                      <option value="es">Español</option>
-                      <option value="pl">Polski</option>
-                      <option value="sk">Slovenčina</option>
-                    </select>
-                  </div>
-                  <div class="col-md-4">
-                    <label for="cfgTz" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tz">Timezone</label>
-                    <input id="cfgTz" type="text" class="form-control form-control-sm" placeholder="Europe/Prague" />
-                  </div>
-                </div>
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <ul id="settingsSubnav" class="nav nav-pills settings-subnav p-1 rounded-pill gap-1 flex-wrap" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button type="button" class="nav-link active" data-settings-tab="general">
+              <i class="bi bi-sliders me-1" aria-hidden="true"></i><span data-i18n="settings_tab_general">General &amp; Telegram</span>
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button type="button" class="nav-link" data-settings-tab="integrations">
+              <i class="bi bi-puzzle me-1" aria-hidden="true"></i><span data-i18n="settings_tab_integrations">Integrations &amp; MCP</span>
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button type="button" class="nav-link" data-settings-tab="automation">
+              <i class="bi bi-clock-history me-1" aria-hidden="true"></i><span data-i18n="settings_tab_automation">Automation &amp; Backup</span>
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button type="button" class="nav-link" data-settings-tab="security">
+              <i class="bi bi-shield-lock me-1" aria-hidden="true"></i><span data-i18n="settings_tab_security">Account &amp; Security</span>
+            </button>
+          </li>
+        </ul>
+      </div>
 
-                <div class="row g-2 mb-3">
-                  <div class="col-md-6">
-                    <label for="cfgDefaultContext" class="form-label small fw-semibold text-body-secondary" data-i18n="label_default_context">Default chat area</label>
-                    <select id="cfgDefaultContext" class="form-select form-select-sm">
-                      <option value="auto" data-i18n="channel_auto">Auto</option>
-                      <option value="pracovni" data-i18n="channel_work">Work</option>
-                      <option value="osobni" data-i18n="channel_personal">Personal</option>
-                    </select>
-                    <div class="form-text" data-i18n="help_default_context">Separates work and personal tools (Auto uses all, Work only work tools, Personal only personal tools).</div>
-                  </div>
-                  <div class="col-md-6">
-                    <label for="cfgModel" class="form-label small fw-semibold text-body-secondary" data-i18n="label_default_model">Default AI model</label>
-                    <input id="cfgModel" type="text" class="form-control form-control-sm" list="modelsDatalist" placeholder="empty = default from agy" data-i18n-placeholder="placeholder_default_model" />
-                    <datalist id="modelsDatalist"></datalist>
-                  </div>
+      <!-- 4a. GENERAL & TELEGRAM -->
+      <div class="settings-pane" data-settings-pane="general">
+        <div class="card shadow-sm mb-3">
+          <div class="card-header">
+            <h2 class="h6 fw-bold mb-0" data-i18n="cfg_assistant_title">Assistant &amp; Telegram</h2>
+          </div>
+          <div class="card-body">
+            <form id="settingsForm">
+              <div class="row g-2 mb-3">
+                <div class="col-md-4">
+                  <label for="cfgAssistantName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_assistant_name">Assistant name</label>
+                  <input id="cfgAssistantName" type="text" class="form-control form-control-sm" placeholder="Assistant" data-i18n-placeholder="placeholder_assistant_name" />
                 </div>
+                <div class="col-md-4">
+                  <label for="cfgLanguage" class="form-label small fw-semibold text-body-secondary" data-i18n="label_language">Language</label>
+                  <select id="cfgLanguage" class="form-select form-select-sm">
+                    <option value="en">English</option>
+                    <option value="cs">Čeština</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                    <option value="pl">Polski</option>
+                    <option value="sk">Slovenčina</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label for="cfgTz" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tz">Timezone</label>
+                  <input id="cfgTz" type="text" class="form-control form-control-sm" placeholder="Europe/Prague" />
+                </div>
+              </div>
 
-                <div class="mb-3">
+              <div class="row g-2 mb-3">
+                <div class="col-md-6">
+                  <label for="cfgDefaultContext" class="form-label small fw-semibold text-body-secondary" data-i18n="label_default_context">Default chat area</label>
+                  <select id="cfgDefaultContext" class="form-select form-select-sm">
+                    <option value="auto" data-i18n="channel_auto">Auto</option>
+                    <option value="pracovni" data-i18n="channel_work">Work</option>
+                    <option value="osobni" data-i18n="channel_personal">Personal</option>
+                  </select>
+                  <div class="form-text" data-i18n="help_default_context">Separates work and personal tools (Auto uses all, Work only work tools, Personal only personal tools).</div>
+                </div>
+                <div class="col-md-6">
+                  <label for="cfgModel" class="form-label small fw-semibold text-body-secondary" data-i18n="label_default_model">Default AI model</label>
+                  <input id="cfgModel" type="text" class="form-control form-control-sm" list="modelsDatalist" placeholder="empty = default from agy" data-i18n-placeholder="placeholder_default_model" />
+                  <datalist id="modelsDatalist"></datalist>
+                </div>
+              </div>
+
+              <div class="row g-2 mb-2">
+                <div class="col-md-6">
                   <label for="cfgTgToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tg_token">Telegram Bot Token (from @BotFather)</label>
                   <input id="cfgTgToken" type="password" class="form-control form-control-sm" placeholder="empty = keep unchanged" data-i18n-placeholder="placeholder_tg_token" />
                 </div>
-
-                <div class="row g-2 mb-2">
-                  <div class="col-md-6">
-                    <label for="cfgTgUsers" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tg_users">Allowed Telegram User IDs</label>
-                    <input id="cfgTgUsers" type="text" class="form-control form-control-sm" placeholder="123456789" />
-                  </div>
-                  <div class="col-md-6">
-                    <label for="cfgTgNotify" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tg_notify">Notification Chat ID (optional)</label>
-                    <input id="cfgTgNotify" type="text" class="form-control form-control-sm" placeholder="empty = first allowed" data-i18n-placeholder="placeholder_tg_notify" />
-                  </div>
+                <div class="col-md-6">
+                  <label for="cfgTgUsers" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tg_users">Allowed Telegram User IDs</label>
+                  <input id="cfgTgUsers" type="text" class="form-control form-control-sm" placeholder="123456789" />
                 </div>
-                <div class="form-text mb-3" data-i18n="help_telegram">Connect Telegram: create a bot token via @BotFather and find your numeric ID via @userinfobot.</div>
+              </div>
+              <div class="form-text mb-3" data-i18n="help_telegram">Connect Telegram: create a bot token via @BotFather and find your numeric ID via @userinfobot.</div>
 
-                <div class="mt-auto">
-                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_settings">Save settings</button>
+              <details id="tgAdvancedBox" class="help-box border rounded-3 p-2 px-3 mb-3 bg-body-tertiary">
+                <summary class="small fw-semibold text-body-secondary" data-i18n="tg_advanced_toggle">Advanced Telegram options</summary>
+                <div class="mt-2">
+                  <label for="cfgTgNotify" class="form-label small fw-semibold text-body-secondary" data-i18n="label_tg_notify">Notification Chat ID (optional)</label>
+                  <input id="cfgTgNotify" type="text" class="form-control form-control-sm" placeholder="empty = first allowed" data-i18n-placeholder="placeholder_tg_notify" />
+                  <div class="form-text mt-1" data-i18n="help_tg_notify">Leave empty to send briefings, reminders, and alerts to your normal private chat (first allowed ID). Only needed if you want alerts in a Telegram group.</div>
                 </div>
-              </form>
-            </div>
+              </details>
+
+              <div>
+                <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_settings">Save settings</button>
+              </div>
+            </form>
           </div>
         </div>
 
-        <!-- Account Security (Password & 2FA) -->
-        <div class="col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-header d-flex align-items-start justify-content-between gap-2">
-              <div class="min-w-0">
-                <h2 class="h6 fw-bold mb-0" data-i18n="sec_title">Account Security &amp; 2FA (TOTP)</h2>
-                <p class="small text-body-secondary mb-0" data-i18n="sec_subtitle">Password for Web UI access and two-factor authentication (Google Authenticator, Authy, 1Password).</p>
-              </div>
-              <span id="totpBadge" class="badge rounded-pill text-bg-secondary text-nowrap flex-shrink-0 mt-1" data-i18n="totp_off">2FA disabled</span>
+        <!-- Antigravity CLI & OAuth -->
+        <div class="card shadow-sm mb-3">
+          <div id="agyAuthHeader" class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 border-bottom-0">
+            <div>
+              <h2 class="h6 fw-bold mb-0" data-i18n="agy_title">Antigravity CLI &amp; Sign-in</h2>
+              <p class="small text-body-secondary mb-0" data-i18n="agy_subtitle">Google OAuth sign-in or custom Gemini API key + version management for agy.</p>
             </div>
-            <div class="card-body">
-              <form id="accountEmailForm" class="mb-3">
-                <label for="accEmail" class="form-label small fw-semibold text-body-secondary" data-i18n="label_account_email">Account email</label>
-                <div class="d-flex align-items-center gap-2">
-                  <input id="accEmail" type="email" class="form-control form-control-sm flex-grow-1" required placeholder="you@example.com" data-i18n-placeholder="placeholder_email" />
-                  <button type="submit" class="btn btn-outline-secondary btn-sm text-nowrap" data-i18n="btn_save_email">Save email</button>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <span id="agyAuthBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_unverified">Not verified</span>
+              <span id="appVerBadge" class="badge rounded-pill text-bg-secondary d-none"></span>
+              <span id="agyVerBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_ver_loading">Version…</span>
+              <button id="checkVerBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_check_ver">Check version</button>
+              <button id="updateAgyBtn" type="button" class="btn btn-primary btn-sm d-none" data-i18n="btn_update_agy">Update agy</button>
+              <button id="logoutAgyBtn" type="button" class="btn btn-outline-danger btn-sm d-none" data-i18n="btn_logout_agy">Sign out of agy</button>
+            </div>
+          </div>
+          <div id="agyAuthBody" class="card-body d-none">
+            <div class="row g-4">
+              <div class="col-lg-8">
+                <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                  <button id="startOauthBtn" type="button" class="btn btn-primary btn-sm" data-i18n="btn_start_oauth">Start OAuth sign-in (agy)</button>
+                  <button id="oauthEnterBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_enter">Send Enter</button>
+                  <button id="stopOauthBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_stop">Stop</button>
                 </div>
-              </form>
-              <form id="accountPasswordForm">
-                <div id="pwdCurrentWrap" class="mb-3 d-none">
-                  <label for="accCurrentPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_current_password">Current password</label>
-                  <input id="accCurrentPassword" type="password" class="form-control form-control-sm" autocomplete="current-password" />
-                </div>
-                <div class="row g-2 mb-3">
-                  <div class="col-sm-6">
-                    <label for="accNewPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_new_password">New password (min. 8 chars)</label>
-                    <input id="accNewPassword" type="password" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" />
+                <div id="oauthUrls" class="d-flex align-items-center flex-wrap gap-2 mb-2"></div>
+                <div class="live-term-box mb-2">
+                  <div class="live-term-bar">
+                    <span class="small fw-semibold"><i class="bi bi-terminal me-1" aria-hidden="true"></i><span data-i18n="term_header_title">Interactive terminal (agy)</span></span>
+                    <span id="oauthTermStatus" class="badge rounded-pill text-bg-secondary" data-i18n="term_status_offline">Disconnected</span>
                   </div>
-                  <div class="col-sm-6">
-                    <label for="accConfirmPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_password_confirm">Confirm password</label>
-                    <input id="accConfirmPassword" type="password" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" />
-                  </div>
+                  <div id="oauthTerminal" class="xterm-host d-none"></div>
+                  <pre id="oauthOutput" class="term border-0 rounded-0" data-i18n="oauth_ready">Ready to sign in…</pre>
+                  <div class="live-term-foot small text-body-secondary" data-i18n="term_hint_focus">Click inside the terminal to type directly (arrows, Tab, Space, Enter, Ctrl+C).</div>
                 </div>
-                <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_password">Save password</button>
-              </form>
-
-              <hr class="my-3" />
-
-              <div id="totpDisabledBox">
-                <button id="start2faBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_setup_2fa">Set up 2FA (QR code)</button>
-                <div id="totpSetupArea" class="d-none mt-3">
-                  <div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
-                    <div id="totpQrBox" class="qr-box flex-shrink-0"></div>
-                    <div class="flex-grow-1">
-                      <div class="small text-body-secondary mb-1" data-i18n="totp_secret_label">Secret key (Base32):</div>
-                      <code id="totpSecretCode" class="font-monospace d-block p-2 bg-body border rounded text-break mb-2"></code>
-                      <button id="copy2faSecretBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_copy_key">Copy key</button>
-                    </div>
-                  </div>
-                  <form id="enable2faForm" class="d-flex align-items-center gap-2">
-                    <input id="enable2faCode" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="6-digit code from app" data-i18n-placeholder="placeholder_2fa_code" />
-                    <button type="submit" class="btn btn-success btn-sm text-nowrap" data-i18n="btn_enable_2fa">Verify and enable</button>
-                  </form>
-                </div>
+                <form id="oauthInputForm" class="d-flex align-items-center gap-2 mt-2">
+                  <input id="oauthCodeInput" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="Paste authorization code from browser…" data-i18n-placeholder="oauth_code_placeholder" />
+                  <button type="submit" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_code">Send code</button>
+                </form>
               </div>
-
-              <div id="recoveryCodesBox" class="alert alert-warning d-none mt-3">
-                <strong data-i18n="recovery_codes_title">Save your recovery codes (shown only once):</strong>
-                <div id="recoveryCodesList" class="recovery-grid font-monospace"></div>
-                <button id="copyRecoveryBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_copy_codes">Copy codes</button>
-              </div>
-
-              <div id="totpEnabledBox" class="d-none">
-                <p class="small text-body-secondary mb-2" data-i18n="totp_active_desc">2FA is active. A TOTP or recovery code is required to sign in.</p>
-                <form id="disable2faForm" class="d-flex align-items-center flex-wrap gap-2">
-                  <input id="disable2faPwd" type="password" class="form-control form-control-sm d-none" style="max-width:170px;" placeholder="Password" data-i18n-placeholder="label_password" />
-                  <input id="disable2faCode" type="text" class="form-control form-control-sm font-monospace" style="max-width:160px;" required placeholder="2FA code" data-i18n-placeholder="placeholder_2fa_short" />
-                  <button type="submit" class="btn btn-danger btn-sm" data-i18n="btn_disable_2fa">Disable 2FA</button>
+              <div class="col-lg-4">
+                <form id="geminiKeyForm">
+                  <div class="mb-3">
+                    <label for="cfgGeminiKey" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gemini_key">Alternative: custom Gemini API key (optional)</label>
+                    <input id="cfgGeminiKey" type="password" class="form-control form-control-sm" placeholder="AIza… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gemini_key" />
+                  </div>
+                  <div class="d-flex align-items-center flex-wrap gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_api_key">Save API key</button>
+                    <button id="clearGeminiKeyBtn" type="button" class="btn btn-outline-danger btn-sm" data-i18n="btn_clear_api_key">Delete API key</button>
+                  </div>
                 </form>
               </div>
             </div>
@@ -608,277 +615,313 @@
         </div>
       </div>
 
-      <!-- Automation & Scheduler (3 columns full width) -->
-      <div class="card shadow-sm mb-3">
-        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="cfg_scheduler_title">Automation &amp; Scheduler</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="cfg_scheduler_subtitle">Background checks, morning briefing, and nightly memory cleanup.</p>
-          </div>
-          <button type="submit" form="settingsForm" class="btn btn-primary btn-sm text-nowrap" data-i18n="btn_save_settings">Save settings</button>
-        </div>
-        <div class="card-body">
-          <div class="row g-3">
-            <div class="col-lg-4">
-              <div class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2">
-                <div class="d-flex align-items-center justify-content-between gap-2">
-                  <div class="form-check form-switch mb-0">
-                    <input id="cfgHbEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
-                    <label for="cfgHbEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_hb_enabled">Heartbeat enabled</label>
-                  </div>
-                  <input id="cfgHbInterval" form="settingsForm" type="number" class="form-control form-control-sm flex-shrink-0" min="1" value="60" style="width:90px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title" />
-                </div>
-                <div class="form-text mt-0" data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</div>
-              </div>
+      <!-- 4b. INTEGRATIONS & MCP -->
+      <div class="settings-pane d-none" data-settings-pane="integrations">
+        <!-- Integrations & Plugins -->
+        <div id="pluginsCard" class="card shadow-sm mb-3">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <h2 class="h6 fw-bold mb-0" data-i18n="plugins_title">Integrations &amp; Plugins</h2>
+              <p class="small text-body-secondary mb-0" data-i18n="plugins_subtitle">Connect Google Workspace (Gmail, Calendar, Drive, Docs) and popular apps without Google Cloud Console, and toggle what the assistant is allowed to do.</p>
             </div>
-
-            <div class="col-lg-4">
-              <div class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2">
-                <div class="d-flex align-items-center justify-content-between gap-2">
-                  <div class="form-check form-switch mb-0">
-                    <input id="cfgBriefEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
-                    <label for="cfgBriefEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_brief_enabled">Morning briefing</label>
-                  </div>
-                  <input id="cfgBriefCron" form="settingsForm" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="0 8 * * *" style="width:120px;" data-i18n-title="th_schedule" />
-                </div>
-                <div class="form-text mt-0" data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</div>
-              </div>
-            </div>
-
-            <div class="col-lg-4">
-              <div class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2">
-                <div class="d-flex align-items-center justify-content-between gap-2">
-                  <div class="form-check form-switch mb-0">
-                    <input id="cfgNightlyEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
-                    <label for="cfgNightlyEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_nightly_enabled">Nightly memory cleanup &amp; reset</label>
-                  </div>
-                  <input id="cfgNightlyCron" form="settingsForm" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="15 0 * * *" style="width:120px;" data-i18n-title="th_schedule" />
-                </div>
-                <div class="form-text mt-0" data-i18n="help_nightly">Saves important facts from today's chats into long-term memory at night and clears old context (saves tokens and keeps replies sharp).</div>
-              </div>
+            <div>
+              <button id="refreshPluginsBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_refresh">Refresh</button>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- GitHub Agent Backup -->
-      <div class="card shadow-sm mb-3">
-        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="gh_backup_title">Daily GitHub Agent Backup</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="gh_backup_subtitle">Automatically pushes a sanitized snapshot of workspace memory, custom skills, scheduled tasks, and plugin/MCP configuration to GitHub.</p>
-          </div>
-          <div class="d-flex align-items-center flex-wrap gap-2">
-            <span id="ghBackupBadge" class="badge rounded-pill text-bg-secondary" data-i18n="gh_backup_status_off">Disabled</span>
-            <button id="runGhBackupBtn" type="button" class="btn btn-outline-primary btn-sm" data-i18n="btn_run_gh_backup">Back up now</button>
-          </div>
-        </div>
-        <div class="card-body">
-          <form id="githubBackupForm">
-            <div class="row g-2 align-items-center mb-3">
-              <div class="col-md-5">
-                <div class="form-check form-switch mb-0">
-                  <input id="cfgGhBackupEnabled" class="form-check-input" type="checkbox" role="switch" />
-                  <label for="cfgGhBackupEnabled" class="form-check-label fw-semibold small" data-i18n="gh_backup_enabled">Daily GitHub backup enabled</label>
-                </div>
+          <div class="card-body">
+            <div id="pluginsFilterBar" class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 d-none">
+              <div id="pluginCategoryBar" class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-sm rounded-pill btn-primary active filter-pill" data-cat="all" data-i18n="plugin_cat_all">All</button>
+                <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="google" data-i18n="plugin_cat_google">Google Workspace</button>
+                <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="productivity" data-i18n="plugin_cat_productivity">Productivity</button>
+                <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="business" data-i18n="plugin_cat_business">Business &amp; Design</button>
+                <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="dev" data-i18n="plugin_cat_dev">Cloud &amp; Dev</button>
+                <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="installed" data-i18n="plugin_cat_installed">Installed</button>
               </div>
-              <div class="col-md-3">
-                <input id="cfgGhBackupCron" type="text" class="form-control form-control-sm font-monospace" placeholder="30 2 * * *" data-i18n-title="gh_backup_cron_title" title="Backup schedule (cron, e.g. 30 2 * * * = daily at 2:30)" />
-              </div>
-              <div class="col-md-4 text-md-end">
-                <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_gh_backup">Save backup settings</button>
-              </div>
+              <input id="pluginSearchInput" type="text" class="form-control form-control-sm" style="max-width:240px;" placeholder="Filter plugins…" data-i18n-placeholder="plugin_search_placeholder" />
             </div>
 
-            <div class="row g-2 mb-3">
-              <div class="col-md-8">
-                <label for="cfgGhBackupRepo" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_repo">GitHub repository</label>
-                <input id="cfgGhBackupRepo" type="text" class="form-control form-control-sm font-monospace" placeholder="owner/private-backup-repo or https://github.com/owner/repo" data-i18n-placeholder="placeholder_gh_backup_repo" />
-              </div>
-              <div class="col-md-4">
-                <label for="cfgGhBackupBranch" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_branch">Branch</label>
-                <input id="cfgGhBackupBranch" type="text" class="form-control form-control-sm font-monospace" placeholder="main" />
-              </div>
+            <div id="pluginsGrid" class="plugins-grid"></div>
+            <div id="pluginsMoreWrap" class="d-flex justify-content-center mt-3 d-none">
+              <button id="toggleMorePluginsBtn" type="button" class="btn btn-outline-secondary btn-sm"></button>
             </div>
-
-            <div class="mb-2">
-              <label for="cfgGhBackupToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_token">GitHub Personal Access Token (PAT)</label>
-              <div class="d-flex align-items-center gap-2">
-                <input id="cfgGhBackupToken" type="password" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="github_pat_… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gh_backup_token" />
-                <button id="clearGhBackupTokenBtn" type="button" class="btn btn-outline-danger btn-sm d-none text-nowrap" data-i18n="btn_clear_gh_token">Clear token</button>
-              </div>
-            </div>
-
-            <div class="form-text mb-2" data-i18n="gh_backup_help">Use a private repository and a Fine-grained PAT with Contents: Read and write permission. Passwords, API keys, and OAuth tokens are never included in backups.</div>
-            <div id="ghBackupLastInfo" class="small text-body-secondary"></div>
-          </form>
-        </div>
-      </div>
-
-      <!-- Antigravity CLI & OAuth -->
-      <div class="card shadow-sm mb-3">
-        <div id="agyAuthHeader" class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 border-bottom-0">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="agy_title">Antigravity CLI &amp; Sign-in</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="agy_subtitle">Google OAuth sign-in or custom Gemini API key + version management for agy.</p>
-          </div>
-          <div class="d-flex align-items-center flex-wrap gap-2">
-            <span id="agyAuthBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_unverified">Not verified</span>
-            <span id="appVerBadge" class="badge rounded-pill text-bg-secondary d-none"></span>
-            <span id="agyVerBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_ver_loading">Version…</span>
-            <button id="checkVerBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_check_ver">Check version</button>
-            <button id="updateAgyBtn" type="button" class="btn btn-primary btn-sm d-none" data-i18n="btn_update_agy">Update agy</button>
-            <button id="logoutAgyBtn" type="button" class="btn btn-outline-danger btn-sm d-none" data-i18n="btn_logout_agy">Sign out of agy</button>
-          </div>
-        </div>
-        <div id="agyAuthBody" class="card-body d-none">
-          <div class="row g-4">
-            <div class="col-lg-8">
-              <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-                <button id="startOauthBtn" type="button" class="btn btn-primary btn-sm" data-i18n="btn_start_oauth">Start OAuth sign-in (agy)</button>
-                <button id="oauthEnterBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_enter">Send Enter</button>
-                <button id="stopOauthBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_stop">Stop</button>
-              </div>
-              <div id="oauthUrls" class="d-flex align-items-center flex-wrap gap-2 mb-2"></div>
-              <div class="live-term-box mb-2">
-                <div class="live-term-bar">
-                  <span class="small fw-semibold"><i class="bi bi-terminal me-1" aria-hidden="true"></i><span data-i18n="term_header_title">Interactive terminal (agy)</span></span>
-                  <span id="oauthTermStatus" class="badge rounded-pill text-bg-secondary" data-i18n="term_status_offline">Disconnected</span>
-                </div>
-                <div id="oauthTerminal" class="xterm-host d-none"></div>
-                <pre id="oauthOutput" class="term border-0 rounded-0" data-i18n="oauth_ready">Ready to sign in…</pre>
-                <div class="live-term-foot small text-body-secondary" data-i18n="term_hint_focus">Click inside the terminal to type directly (arrows, Tab, Space, Enter, Ctrl+C).</div>
-              </div>
-              <form id="oauthInputForm" class="d-flex align-items-center gap-2 mt-2">
-                <input id="oauthCodeInput" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="Paste authorization code from browser…" data-i18n-placeholder="oauth_code_placeholder" />
-                <button type="submit" class="btn btn-outline-secondary btn-sm" data-i18n="btn_send_code">Send code</button>
-              </form>
-            </div>
-            <div class="col-lg-4">
-              <form id="geminiKeyForm">
-                <div class="mb-3">
-                  <label for="cfgGeminiKey" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gemini_key">Alternative: custom Gemini API key (optional)</label>
-                  <input id="cfgGeminiKey" type="password" class="form-control form-control-sm" placeholder="AIza… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gemini_key" />
-                </div>
-                <div class="d-flex align-items-center flex-wrap gap-2">
-                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_api_key">Save API key</button>
-                  <button id="clearGeminiKeyBtn" type="button" class="btn btn-outline-danger btn-sm" data-i18n="btn_clear_api_key">Delete API key</button>
-                </div>
+            <div id="customPluginWrap" class="d-none">
+              <hr class="my-3" />
+              <form id="customPluginForm" class="d-flex align-items-center flex-wrap gap-2">
+                <input id="customPluginTarget" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="plugin-name@antigravity-plugins-partners or https://github.com/owner/repo" data-i18n-placeholder="plugin_custom_placeholder" />
+                <button type="submit" class="btn btn-primary btn-sm" data-i18n="plugin_btn_install_custom">Install other plugin</button>
               </form>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Integrations & Plugins -->
-      <div id="pluginsCard" class="card shadow-sm mb-3">
-        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h2 class="h6 fw-bold mb-0" data-i18n="plugins_title">Integrations &amp; Plugins</h2>
-            <p class="small text-body-secondary mb-0" data-i18n="plugins_subtitle">Connect Google Workspace (Gmail, Calendar, Drive, Docs) and popular apps without Google Cloud Console, and toggle what the assistant is allowed to do.</p>
-          </div>
-          <div>
-            <button id="refreshPluginsBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_refresh">Refresh</button>
-          </div>
-        </div>
-        <div class="card-body">
-          <div id="pluginsFilterBar" class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 d-none">
-            <div id="pluginCategoryBar" class="d-flex flex-wrap gap-2">
-              <button type="button" class="btn btn-sm rounded-pill btn-primary active filter-pill" data-cat="all" data-i18n="plugin_cat_all">All</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="google" data-i18n="plugin_cat_google">Google Workspace</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="productivity" data-i18n="plugin_cat_productivity">Productivity</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="business" data-i18n="plugin_cat_business">Business &amp; Design</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="dev" data-i18n="plugin_cat_dev">Cloud &amp; Dev</button>
-              <button type="button" class="btn btn-sm rounded-pill btn-outline-secondary filter-pill" data-cat="installed" data-i18n="plugin_cat_installed">Installed</button>
+        <!-- Custom MCP servers -->
+        <div id="mcpCard" class="card shadow-sm">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <h2 class="h6 fw-bold mb-0" data-i18n="mcp_title">MCP Servers</h2>
+              <p class="small text-body-secondary mb-0" data-i18n="mcp_subtitle">Connect external apps &amp; data sources (e.g. Google Calendar, Gmail, NocoDB, n8n) so the assistant can read data and run actions.</p>
             </div>
-            <input id="pluginSearchInput" type="text" class="form-control form-control-sm" style="max-width:240px;" placeholder="Filter plugins…" data-i18n-placeholder="plugin_search_placeholder" />
+            <div class="d-flex align-items-center gap-2">
+              <span id="mcpCountBadge" class="badge rounded-pill text-bg-secondary">0</span>
+              <button id="toggleMcpCardBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_collapse">Collapse</button>
+            </div>
           </div>
+          <div id="mcpCardBody" class="card-body">
+            <div class="table-responsive mb-3">
+              <table class="table table-sm table-hover align-middle small mb-0">
+                <thead>
+                  <tr>
+                    <th data-i18n="th_name">Name</th>
+                    <th data-i18n="th_scope">Area</th>
+                    <th data-i18n="th_target">Target</th>
+                    <th data-i18n="th_action">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="mcpBody"></tbody>
+              </table>
+            </div>
 
-          <div id="pluginsGrid" class="plugins-grid"></div>
-          <div id="pluginsMoreWrap" class="d-flex justify-content-center mt-3 d-none">
-            <button id="toggleMorePluginsBtn" type="button" class="btn btn-outline-secondary btn-sm"></button>
-          </div>
-          <div id="customPluginWrap" class="d-none">
             <hr class="my-3" />
-            <form id="customPluginForm" class="d-flex align-items-center flex-wrap gap-2">
-              <input id="customPluginTarget" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="plugin-name@antigravity-plugins-partners or https://github.com/owner/repo" data-i18n-placeholder="plugin_custom_placeholder" />
-              <button type="submit" class="btn btn-primary btn-sm" data-i18n="plugin_btn_install_custom">Install other plugin</button>
+
+            <form id="mcpForm">
+              <div class="row g-2 mb-3">
+                <div class="col-md-4">
+                  <label for="mcpName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_name">Name</label>
+                  <input id="mcpName" type="text" class="form-control form-control-sm" required placeholder="e.g. google" data-i18n-placeholder="placeholder_mcp_name" />
+                </div>
+                <div class="col-md-4">
+                  <label for="mcpScope" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_scope">Area</label>
+                  <select id="mcpScope" class="form-select form-select-sm">
+                    <option value="all" data-i18n="scope_all_chats">All chats</option>
+                    <option value="pracovni" data-i18n="scope_work">Work</option>
+                    <option value="osobni" data-i18n="scope_personal">Personal</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label for="mcpTransport" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_transport">Type</label>
+                  <select id="mcpTransport" class="form-select form-select-sm">
+                    <option value="http">HTTP</option>
+                    <option value="stdio">stdio</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row g-2 mb-3">
+                <div id="mcpUrlWrap" class="col-md-7">
+                  <label for="mcpUrl" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_url">MCP URL</label>
+                  <input id="mcpUrl" type="text" class="form-control form-control-sm" placeholder="https://…" />
+                </div>
+                <div id="mcpTokenWrap" class="col-md-5">
+                  <label for="mcpToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_token">Bearer Token (optional)</label>
+                  <input id="mcpToken" type="password" class="form-control form-control-sm" placeholder="secret token" data-i18n-placeholder="placeholder_mcp_token" />
+                </div>
+                <div id="mcpCmdWrap" class="col-md-5 d-none">
+                  <label for="mcpCommand" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_cmd">Command (stdio)</label>
+                  <input id="mcpCommand" type="text" class="form-control form-control-sm font-monospace" placeholder="npx" />
+                </div>
+                <div id="mcpArgsWrap" class="col-md-7 d-none">
+                  <label for="mcpArgs" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_args">Arguments (JSON array)</label>
+                  <input id="mcpArgs" type="text" class="form-control form-control-sm font-monospace" placeholder='["-y", "@modelcontextprotocol/server"]' />
+                </div>
+              </div>
+              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div class="form-check form-switch mb-0">
+                  <input id="mcpEnabled" class="form-check-input" type="checkbox" role="switch" checked />
+                  <label for="mcpEnabled" class="form-check-label small fw-semibold" data-i18n="cfg_active">Active</label>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_mcp">Save MCP</button>
+              </div>
             </form>
           </div>
         </div>
       </div>
 
-      <!-- Custom MCP servers (full width bottom) -->
-      <div class="card shadow-sm">
-        <div class="card-header">
-          <h2 class="h6 fw-bold mb-0" data-i18n="mcp_title">MCP Servers</h2>
-          <p class="small text-body-secondary mb-0" data-i18n="mcp_subtitle">Connect external apps &amp; data sources (e.g. Google Calendar, Gmail, NocoDB, n8n) so the assistant can read data and run actions.</p>
-        </div>
-        <div class="card-body">
-          <div class="table-responsive mb-3">
-            <table class="table table-sm table-hover align-middle small mb-0">
-              <thead>
-                <tr>
-                  <th data-i18n="th_name">Name</th>
-                  <th data-i18n="th_scope">Area</th>
-                  <th data-i18n="th_target">Target</th>
-                  <th data-i18n="th_action">Action</th>
-                </tr>
-              </thead>
-              <tbody id="mcpBody"></tbody>
-            </table>
+      <!-- 4c. AUTOMATION & BACKUP -->
+      <div class="settings-pane d-none" data-settings-pane="automation">
+        <!-- Automation & Scheduler (3 columns full width) -->
+        <div class="card shadow-sm mb-3">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <h2 class="h6 fw-bold mb-0" data-i18n="cfg_scheduler_title">Automation &amp; Scheduler</h2>
+              <p class="small text-body-secondary mb-0" data-i18n="cfg_scheduler_subtitle">Background checks, morning briefing, and nightly memory cleanup.</p>
+            </div>
+            <button type="submit" form="settingsForm" class="btn btn-primary btn-sm text-nowrap" data-i18n="btn_save_settings">Save settings</button>
           </div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <div id="hbTile" class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2 automation-tile">
+                  <div class="d-flex align-items-center justify-content-between gap-2">
+                    <div class="form-check form-switch mb-0">
+                      <input id="cfgHbEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
+                      <label for="cfgHbEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_hb_enabled">Heartbeat enabled</label>
+                    </div>
+                    <input id="cfgHbInterval" form="settingsForm" type="number" class="form-control form-control-sm flex-shrink-0" min="1" value="60" style="width:90px;" title="Interval in minutes" data-i18n-title="cfg_hb_interval_title" />
+                  </div>
+                  <div class="form-text mt-0" data-i18n="help_heartbeat">Periodic silent background check (watches deadlines &amp; messages per HEARTBEAT.md; notifies you only when something is urgent).</div>
+                </div>
+              </div>
 
-          <hr class="my-3" />
+              <div class="col-lg-4">
+                <div id="briefTile" class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2 automation-tile">
+                  <div class="d-flex align-items-center justify-content-between gap-2">
+                    <div class="form-check form-switch mb-0">
+                      <input id="cfgBriefEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
+                      <label for="cfgBriefEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_brief_enabled">Morning briefing</label>
+                    </div>
+                    <input id="cfgBriefCron" form="settingsForm" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="0 8 * * *" style="width:120px;" data-i18n-title="th_schedule" />
+                  </div>
+                  <div class="form-text mt-0" data-i18n="help_briefing">Daily morning summary of your schedule, priorities, and open tasks (cron format, e.g. 0 8 * * * = daily at 8:00).</div>
+                </div>
+              </div>
 
-          <form id="mcpForm">
-            <div class="row g-2 mb-3">
-              <div class="col-md-4">
-                <label for="mcpName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_name">Name</label>
-                <input id="mcpName" type="text" class="form-control form-control-sm" required placeholder="e.g. google" data-i18n-placeholder="placeholder_mcp_name" />
-              </div>
-              <div class="col-md-4">
-                <label for="mcpScope" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_scope">Area</label>
-                <select id="mcpScope" class="form-select form-select-sm">
-                  <option value="all" data-i18n="scope_all_chats">All chats</option>
-                  <option value="pracovni" data-i18n="scope_work">Work</option>
-                  <option value="osobni" data-i18n="scope_personal">Personal</option>
-                </select>
-              </div>
-              <div class="col-md-4">
-                <label for="mcpTransport" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_transport">Type</label>
-                <select id="mcpTransport" class="form-select form-select-sm">
-                  <option value="http">HTTP</option>
-                  <option value="stdio">stdio</option>
-                </select>
+              <div class="col-lg-4">
+                <div id="nightlyTile" class="p-3 rounded border bg-body-tertiary h-100 d-flex flex-column gap-2 automation-tile">
+                  <div class="d-flex align-items-center justify-content-between gap-2">
+                    <div class="form-check form-switch mb-0">
+                      <input id="cfgNightlyEnabled" form="settingsForm" class="form-check-input" type="checkbox" role="switch" checked />
+                      <label for="cfgNightlyEnabled" class="form-check-label fw-semibold small" data-i18n="cfg_nightly_enabled">Nightly memory cleanup &amp; reset</label>
+                    </div>
+                    <input id="cfgNightlyCron" form="settingsForm" type="text" class="form-control form-control-sm font-monospace flex-shrink-0" placeholder="15 0 * * *" style="width:120px;" data-i18n-title="th_schedule" />
+                  </div>
+                  <div class="form-text mt-0" data-i18n="help_nightly">Saves important facts from today's chats into long-term memory at night and clears old context (saves tokens and keeps replies sharp).</div>
+                </div>
               </div>
             </div>
-            <div class="row g-2 mb-3">
-              <div id="mcpUrlWrap" class="col-md-7">
-                <label for="mcpUrl" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_url">MCP URL</label>
-                <input id="mcpUrl" type="text" class="form-control form-control-sm" placeholder="https://…" />
+          </div>
+        </div>
+
+        <!-- GitHub Agent Backup -->
+        <div class="card shadow-sm mb-3">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <h2 class="h6 fw-bold mb-0" data-i18n="gh_backup_title">Daily GitHub Agent Backup</h2>
+              <p class="small text-body-secondary mb-0" data-i18n="gh_backup_subtitle">Automatically pushes a sanitized snapshot of workspace memory, custom skills, scheduled tasks, and plugin/MCP configuration to GitHub.</p>
+            </div>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <span id="ghBackupBadge" class="badge rounded-pill text-bg-secondary" data-i18n="gh_backup_status_off">Disabled</span>
+              <button id="runGhBackupBtn" type="button" class="btn btn-outline-primary btn-sm" data-i18n="btn_run_gh_backup">Back up now</button>
+              <button id="toggleGhBackupBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_collapse">Collapse</button>
+            </div>
+          </div>
+          <div id="ghBackupBody" class="card-body">
+            <form id="githubBackupForm">
+              <div class="row g-2 align-items-center mb-3">
+                <div class="col-md-5">
+                  <div class="form-check form-switch mb-0">
+                    <input id="cfgGhBackupEnabled" class="form-check-input" type="checkbox" role="switch" />
+                    <label for="cfgGhBackupEnabled" class="form-check-label fw-semibold small" data-i18n="gh_backup_enabled">Daily GitHub backup enabled</label>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <input id="cfgGhBackupCron" type="text" class="form-control form-control-sm font-monospace" placeholder="30 2 * * *" data-i18n-title="gh_backup_cron_title" title="Backup schedule (cron, e.g. 30 2 * * * = daily at 2:30)" />
+                </div>
+                <div class="col-md-4 text-md-end">
+                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_gh_backup">Save backup settings</button>
+                </div>
               </div>
-              <div id="mcpTokenWrap" class="col-md-5">
-                <label for="mcpToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_token">Bearer Token (optional)</label>
-                <input id="mcpToken" type="password" class="form-control form-control-sm" placeholder="secret token" data-i18n-placeholder="placeholder_mcp_token" />
+
+              <div class="row g-2 mb-3">
+                <div class="col-md-8">
+                  <label for="cfgGhBackupRepo" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_repo">GitHub repository</label>
+                  <input id="cfgGhBackupRepo" type="text" class="form-control form-control-sm font-monospace" placeholder="owner/private-backup-repo or https://github.com/owner/repo" data-i18n-placeholder="placeholder_gh_backup_repo" />
+                </div>
+                <div class="col-md-4">
+                  <label for="cfgGhBackupBranch" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_branch">Branch</label>
+                  <input id="cfgGhBackupBranch" type="text" class="form-control form-control-sm font-monospace" placeholder="main" />
+                </div>
               </div>
-              <div id="mcpCmdWrap" class="col-md-5 d-none">
-                <label for="mcpCommand" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_cmd">Command (stdio)</label>
-                <input id="mcpCommand" type="text" class="form-control form-control-sm font-monospace" placeholder="npx" />
+
+              <div class="mb-2">
+                <label for="cfgGhBackupToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_token">GitHub Personal Access Token (PAT)</label>
+                <div class="d-flex align-items-center gap-2">
+                  <input id="cfgGhBackupToken" type="password" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="github_pat_… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gh_backup_token" />
+                  <button id="clearGhBackupTokenBtn" type="button" class="btn btn-outline-danger btn-sm d-none text-nowrap" data-i18n="btn_clear_gh_token">Clear token</button>
+                </div>
               </div>
-              <div id="mcpArgsWrap" class="col-md-7 d-none">
-                <label for="mcpArgs" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_args">Arguments (JSON array)</label>
-                <input id="mcpArgs" type="text" class="form-control form-control-sm font-monospace" placeholder='["-y", "@modelcontextprotocol/server"]' />
+
+              <div class="form-text mb-2" data-i18n="gh_backup_help">Use a private repository and a Fine-grained PAT with Contents: Read and write permission. Passwords, API keys, and OAuth tokens are never included in backups.</div>
+              <div id="ghBackupLastInfo" class="small text-body-secondary"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4d. ACCOUNT & SECURITY -->
+      <div class="settings-pane d-none" data-settings-pane="security">
+        <div class="row justify-content-center">
+          <div class="col-lg-8">
+            <div class="card shadow-sm">
+              <div class="card-header d-flex align-items-start justify-content-between gap-2">
+                <div class="min-w-0">
+                  <h2 class="h6 fw-bold mb-0" data-i18n="sec_title">Account Security &amp; 2FA (TOTP)</h2>
+                  <p class="small text-body-secondary mb-0" data-i18n="sec_subtitle">Password for Web UI access and two-factor authentication (Google Authenticator, Authy, 1Password).</p>
+                </div>
+                <span id="totpBadge" class="badge rounded-pill text-bg-secondary text-nowrap flex-shrink-0 mt-1" data-i18n="totp_off">2FA disabled</span>
+              </div>
+              <div class="card-body">
+                <form id="accountEmailForm" class="mb-3">
+                  <label for="accEmail" class="form-label small fw-semibold text-body-secondary" data-i18n="label_account_email">Account email</label>
+                  <div class="d-flex align-items-center gap-2">
+                    <input id="accEmail" type="email" class="form-control form-control-sm flex-grow-1" required placeholder="you@example.com" data-i18n-placeholder="placeholder_email" />
+                    <button type="submit" class="btn btn-outline-secondary btn-sm text-nowrap" data-i18n="btn_save_email">Save email</button>
+                  </div>
+                </form>
+                <form id="accountPasswordForm">
+                  <div id="pwdCurrentWrap" class="mb-3 d-none">
+                    <label for="accCurrentPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_current_password">Current password</label>
+                    <input id="accCurrentPassword" type="password" class="form-control form-control-sm" autocomplete="current-password" />
+                  </div>
+                  <div class="row g-2 mb-3">
+                    <div class="col-sm-6">
+                      <label for="accNewPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_new_password">New password (min. 8 chars)</label>
+                      <input id="accNewPassword" type="password" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" />
+                    </div>
+                    <div class="col-sm-6">
+                      <label for="accConfirmPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_password_confirm">Confirm password</label>
+                      <input id="accConfirmPassword" type="password" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" />
+                    </div>
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_password">Save password</button>
+                </form>
+
+                <hr class="my-3" />
+
+                <div id="totpDisabledBox">
+                  <button id="start2faBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_setup_2fa">Set up 2FA (QR code)</button>
+                  <div id="totpSetupArea" class="d-none mt-3">
+                    <div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
+                      <div id="totpQrBox" class="qr-box flex-shrink-0"></div>
+                      <div class="flex-grow-1">
+                        <div class="small text-body-secondary mb-1" data-i18n="totp_secret_label">Secret key (Base32):</div>
+                        <code id="totpSecretCode" class="font-monospace d-block p-2 bg-body border rounded text-break mb-2"></code>
+                        <button id="copy2faSecretBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_copy_key">Copy key</button>
+                      </div>
+                    </div>
+                    <form id="enable2faForm" class="d-flex align-items-center gap-2">
+                      <input id="enable2faCode" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="6-digit code from app" data-i18n-placeholder="placeholder_2fa_code" />
+                      <button type="submit" class="btn btn-success btn-sm text-nowrap" data-i18n="btn_enable_2fa">Verify and enable</button>
+                    </form>
+                  </div>
+                </div>
+
+                <div id="recoveryCodesBox" class="alert alert-warning d-none mt-3">
+                  <strong data-i18n="recovery_codes_title">Save your recovery codes (shown only once):</strong>
+                  <div id="recoveryCodesList" class="recovery-grid font-monospace"></div>
+                  <button id="copyRecoveryBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_copy_codes">Copy codes</button>
+                </div>
+
+                <div id="totpEnabledBox" class="d-none">
+                  <p class="small text-body-secondary mb-2" data-i18n="totp_active_desc">2FA is active. A TOTP or recovery code is required to sign in.</p>
+                  <form id="disable2faForm" class="d-flex align-items-center flex-wrap gap-2">
+                    <input id="disable2faPwd" type="password" class="form-control form-control-sm d-none" style="max-width:170px;" placeholder="Password" data-i18n-placeholder="label_password" />
+                    <input id="disable2faCode" type="text" class="form-control form-control-sm font-monospace" style="max-width:160px;" required placeholder="2FA code" data-i18n-placeholder="placeholder_2fa_short" />
+                    <button type="submit" class="btn btn-danger btn-sm" data-i18n="btn_disable_2fa">Disable 2FA</button>
+                  </form>
+                </div>
               </div>
             </div>
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-              <div class="form-check form-switch mb-0">
-                <input id="mcpEnabled" class="form-check-input" type="checkbox" role="switch" checked />
-                <label for="mcpEnabled" class="form-check-label small fw-semibold" data-i18n="cfg_active">Active</label>
-              </div>
-              <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_mcp">Save MCP</button>
-            </div>
-          </form>
+          </div>
         </div>
       </div>
     </section>

@@ -15,6 +15,8 @@ from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from apscheduler.triggers.cron import CronTrigger
+
 from app.db import AssistantDB, OwnerConfig
 from app.memory import WorkspaceMemory
 from app.plugins import (
@@ -111,6 +113,163 @@ def _safe_zone(tz_name: str) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+def build_scheduler_backup_payload(db: AssistantDB, owner: OwnerConfig) -> dict[str, Any]:
+    """Poskládá kompletní zálohu plánovače (systémové plány + všechny vlastní úlohy)."""
+    return {
+        "version": 1,
+        "system": {
+            "tz": owner.tz,
+            "heartbeat_enabled": bool(owner.heartbeat_enabled),
+            "heartbeat_interval_minutes": int(owner.heartbeat_interval_minutes),
+            "morning_briefing_enabled": bool(owner.morning_briefing_enabled),
+            "morning_briefing_cron": owner.morning_briefing_cron,
+            "nightly_reset_enabled": bool(owner.nightly_reset_enabled),
+            "nightly_reset_cron": owner.nightly_reset_cron,
+        },
+        "tasks": [
+            {
+                "name": task.name,
+                "prompt": task.prompt,
+                "schedule_type": task.schedule_type,
+                "cron_expr": task.cron_expr,
+                "run_at": task.run_at,
+                "action_type": task.action_type,
+                "enabled": bool(task.enabled),
+            }
+            for task in db.list_scheduled_tasks()
+        ],
+    }
+
+
+def restore_scheduler_backup_payload(
+    db: AssistantDB,
+    payload: Any,
+    *,
+    mode: str = "merge",
+) -> dict[str, Any]:
+    """Validuje a obnoví nastavení plánovače i vlastní úlohy ze zálohy."""
+    if isinstance(payload, list):
+        raw_system: dict[str, Any] | None = None
+        has_tasks_key = True
+        raw_tasks: Any = payload
+    elif isinstance(payload, dict):
+        raw_system_obj = payload.get("system")
+        if raw_system_obj is not None and not isinstance(raw_system_obj, dict):
+            raise ValueError("Neplatná sekce 'system' v záloze plánovače.")
+        raw_system = raw_system_obj
+        has_tasks_key = "tasks" in payload
+        raw_tasks = payload.get("tasks") if has_tasks_key else []
+        if has_tasks_key and payload.get("tasks") is not None and not isinstance(raw_tasks, list):
+            raise ValueError("Neplatná sekce 'tasks' v záloze plánovače.")
+        if raw_tasks is None:
+            raw_tasks = []
+    else:
+        raise ValueError("Neplatný formát souboru scheduler.json v archivu.")
+
+    owner_updates: dict[str, Any] = {}
+    if raw_system is not None:
+        if "tz" in raw_system and raw_system["tz"] is not None:
+            tz_val = str(raw_system["tz"]).strip()
+            if not tz_val:
+                raise ValueError("Časové pásmo plánovače nesmí být prázdné.")
+            try:
+                ZoneInfo(tz_val)
+            except Exception as exc:
+                raise ValueError(f"Neplatné časové pásmo plánovače: {tz_val!r}") from exc
+            owner_updates["tz"] = tz_val
+
+        for bool_field in (
+            "heartbeat_enabled",
+            "morning_briefing_enabled",
+            "nightly_reset_enabled",
+        ):
+            if bool_field in raw_system and raw_system[bool_field] is not None:
+                owner_updates[bool_field] = bool(raw_system[bool_field])
+
+        if (
+            "heartbeat_interval_minutes" in raw_system
+            and raw_system["heartbeat_interval_minutes"] is not None
+        ):
+            try:
+                hb_int = int(raw_system["heartbeat_interval_minutes"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Neplatný interval Heartbeatu v záloze plánovače.") from exc
+            if hb_int < 1 or hb_int > 10080:
+                raise ValueError("Interval Heartbeatu musí být mezi 1 a 10080 minutami.")
+            owner_updates["heartbeat_interval_minutes"] = hb_int
+
+        for cron_field in ("morning_briefing_cron", "nightly_reset_cron"):
+            if cron_field in raw_system and raw_system[cron_field] is not None:
+                cron_val = str(raw_system[cron_field]).strip()
+                if not cron_val:
+                    raise ValueError(f"Cron výraz pro {cron_field} nesmí být prázdný.")
+                try:
+                    CronTrigger.from_crontab(cron_val)
+                except ValueError as exc:
+                    raise ValueError(f"Neplatný cron výraz pro {cron_field}: {exc}") from exc
+                owner_updates[cron_field] = cron_val
+
+    validated_tasks: list[dict[str, Any]] = []
+    for item in raw_tasks:
+        if not isinstance(item, dict):
+            raise ValueError("Každá úloha plánovače v záloze musí být JSON objekt.")
+        name = str(item.get("name") or "").strip()
+        prompt = str(item.get("prompt") or "").strip()
+        if not name or len(name) > 120:
+            raise ValueError(f"Neplatný název naplánované úlohy: {name!r}")
+        if not prompt or len(prompt) > 4000:
+            raise ValueError(f"Neplatný text/prompt úlohy {name!r}.")
+
+        schedule_type = str(item.get("schedule_type") or "cron").strip()
+        if schedule_type not in ("cron", "once"):
+            raise ValueError(f"Neplatný schedule_type u úlohy {name!r}: {schedule_type!r}")
+
+        action_type = str(item.get("action_type") or "message").strip()
+        if action_type not in ("message", "agent"):
+            raise ValueError(f"Neplatný action_type u úlohy {name!r}: {action_type!r}")
+
+        cron_expr = str(item.get("cron_expr") or "").strip()
+        run_at = str(item.get("run_at") or "").strip()
+        if schedule_type == "cron":
+            if not cron_expr or len(cron_expr) > 120:
+                raise ValueError(f"Úloha {name!r} nemá platný cron výraz.")
+            try:
+                CronTrigger.from_crontab(cron_expr)
+            except ValueError as exc:
+                raise ValueError(f"Neplatný cron výraz u úlohy {name!r}: {exc}") from exc
+        else:
+            if not run_at or len(run_at) > 64:
+                raise ValueError(f"Jednorázová úloha {name!r} nemá platný čas spuštění.")
+            try:
+                datetime.fromisoformat(run_at)
+            except ValueError as exc:
+                raise ValueError(f"Neplatné datum spuštění u úlohy {name!r}: {exc}") from exc
+
+        validated_tasks.append(
+            {
+                "name": name,
+                "prompt": prompt,
+                "schedule_type": schedule_type,
+                "cron_expr": cron_expr,
+                "run_at": run_at,
+                "action_type": action_type,
+                "enabled": bool(item.get("enabled", True)),
+            }
+        )
+
+    if owner_updates:
+        db.update_owner(**owner_updates)
+    if mode == "replace" and has_tasks_key:
+        db.delete_all_scheduled_tasks()
+    for task_data in validated_tasks:
+        db.upsert_scheduled_task(**task_data)
+
+    return {
+        "restored_system": bool(owner_updates),
+        "imported_tasks_count": len(validated_tasks),
+    }
+
+
 def collect_agent_backup_files(
     settings: Any,
     db: AssistantDB,
@@ -151,19 +310,11 @@ def collect_agent_backup_files(
     }
     files["config/agent_config.json"] = json.dumps(agent_cfg, indent=2, ensure_ascii=False) + "\n"
 
-    tasks_out = [
-        {
-            "name": task.name,
-            "prompt": task.prompt,
-            "schedule_type": task.schedule_type,
-            "cron_expr": task.cron_expr,
-            "run_at": task.run_at,
-            "action_type": task.action_type,
-            "enabled": task.enabled,
-        }
-        for task in db.list_scheduled_tasks()
-    ]
-    files["config/scheduled_tasks.json"] = json.dumps(tasks_out, indent=2, ensure_ascii=False) + "\n"
+    scheduler_payload = build_scheduler_backup_payload(db, owner)
+    files["config/scheduler.json"] = json.dumps(scheduler_payload, indent=2, ensure_ascii=False) + "\n"
+    files["config/scheduled_tasks.json"] = (
+        json.dumps(scheduler_payload["tasks"], indent=2, ensure_ascii=False) + "\n"
+    )
 
     mcp_out: list[dict[str, Any]] = []
     for srv in db.list_mcp_servers():
@@ -232,7 +383,7 @@ def collect_agent_backup_files(
         f"# Záloha AI asistenta ({owner.assistant_name})\n\n"
         "Tento repozitář obsahuje automatickou sanitizovanou zálohu vlastního AI asistenta:\n"
         "- `workspace/` – kompletní paměť (`AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`, `HEARTBEAT.md`, `memory/`) a vlastní skilly (`.agents/skills/`)\n"
-        "- `config/` – nastavení asistenta, plánované úlohy, definice MCP serverů a oprávnění pluginů\n"
+        "- `config/` – nastavení asistenta, kompletní plánovač (`config/scheduler.json` + `config/scheduled_tasks.json`), definice MCP serverů a oprávnění pluginů\n"
         "- `backup_manifest.json` – metadata poslední zálohy\n\n"
         "> **Bezpečnostní upozornění:** Hesla, 2FA klíče, Gemini API klíč, Telegram Bot Token, "
         "MCP Bearer tokeny, GitHub PAT ani OAuth tokeny se do zálohy z bezpečnostních důvodů nikdy neukládají.\n"

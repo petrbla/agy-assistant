@@ -122,11 +122,19 @@ def test_collect_agent_backup_files_includes_data_and_redacts_secrets(tmp_path: 
     assert "workspace/memory/2026-11-22.md" in files
     assert "workspace/.agents/skills/custom-skill/SKILL.md" in files
     assert "config/agent_config.json" in files
+    assert "config/scheduler.json" in files
     assert "config/scheduled_tasks.json" in files
     assert "config/mcp_servers.json" in files
     assert "config/plugins.json" in files
     assert "backup_manifest.json" in files
     assert "README.md" in files
+
+    scheduler_cfg = json.loads(files["config/scheduler.json"])
+    assert scheduler_cfg["version"] == 1
+    assert scheduler_cfg["system"]["heartbeat_interval_minutes"] == owner.heartbeat_interval_minutes
+    assert len(scheduler_cfg["tasks"]) == 1
+    assert scheduler_cfg["tasks"][0]["name"] == "Ranní kontrola"
+    assert scheduler_cfg["tasks"][0]["cron_expr"] == "0 9 * * *"
 
     agent_cfg = json.loads(files["config/agent_config.json"])
     assert agent_cfg["github_backup_repo"] == "alice/agent-backup"
@@ -289,11 +297,79 @@ def test_plugin_cards_layout_and_connection_state_styles() -> None:
     root = Path(__file__).resolve().parent.parent
     styles = (root / "app" / "static" / "styles.css").read_text(encoding="utf-8")
     app_js = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    index_html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
 
+    assert ".min-w-0" in styles
+    assert "backdrop-filter" in styles
     assert "align-items: start;" in styles
-    assert ".plugin-card-connected" in styles
-    assert ".plugin-card-unconnected" in styles
+    assert ".plugin-card.plugin-card-connected" in styles
+    assert ".plugin-card.plugin-card-unconnected" in styles
     assert "plugin-card-connected" in app_js
     assert "plugin-card-unconnected" in app_js
     assert "plugin_status_needs_connect" in app_js
+    assert "switchSettingsTab" in app_js
     assert "mb-auto" not in app_js
+    assert "settingsSubnav" in index_html
+    assert "tgAdvancedBox" in index_html
+    assert "toggleGhBackupBtn" in index_html
+    assert "toggleMcpCardBtn" in index_html
+
+
+def test_scheduler_backup_restore_and_zip_validation(tmp_path: Path) -> None:
+    import io
+    import zipfile
+
+    from app.github_backup import build_scheduler_backup_payload, restore_scheduler_backup_payload
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data")
+    db = AssistantDB(settings.db_path)
+    owner = db.ensure_owner(settings)
+    db.upsert_scheduled_task(
+        name="Úloha A",
+        prompt="Text A",
+        schedule_type="cron",
+        cron_expr="15 8 * * *",
+    )
+    payload = build_scheduler_backup_payload(db, owner)
+    assert payload["version"] == 1
+    assert len(payload["tasks"]) == 1
+
+    # Neplatný cron výraz musí selhat ještě před úpravou DB
+    bad_payload = {
+        "system": {"heartbeat_interval_minutes": 30},
+        "tasks": [
+            {
+                "name": "Špatná úloha",
+                "prompt": "Test",
+                "schedule_type": "cron",
+                "cron_expr": "neplatny cron",
+            }
+        ],
+    }
+    with pytest.raises(ValueError):
+        restore_scheduler_backup_payload(db, bad_payload, mode="replace")
+    assert len(db.list_scheduled_tasks()) == 1
+    assert db.get_owner().heartbeat_interval_minutes == owner.heartbeat_interval_minutes
+
+    # ZIP s config/scheduler.json (např. ze zálohy GitHub) i neplatný traversal ../scheduler.json
+    mem = WorkspaceMemory(ws)
+    ok_buf = io.BytesIO()
+    with zipfile.ZipFile(ok_buf, "w") as zf:
+        zf.writestr("config/scheduler.json", json.dumps(payload))
+    imp_res = mem.import_memory_zip(ok_buf.getvalue(), mode="merge")
+    assert imp_res["imported_count"] == 0
+    assert imp_res["scheduler_data"] == payload
+
+    bad_zip = io.BytesIO()
+    with zipfile.ZipFile(bad_zip, "w") as zf:
+        zf.writestr("../scheduler.json", "{}")
+    with pytest.raises(ValueError):
+        mem.import_memory_zip(bad_zip.getvalue(), mode="merge")
+
+    bad_json_zip = io.BytesIO()
+    with zipfile.ZipFile(bad_json_zip, "w") as zf:
+        zf.writestr("scheduler.json", "{neplatny-json")
+    with pytest.raises(ValueError):
+        mem.import_memory_zip(bad_json_zip.getvalue(), mode="merge")

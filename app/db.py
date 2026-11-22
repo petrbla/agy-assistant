@@ -1472,6 +1472,11 @@ class AssistantDB:
             )
             return cur.rowcount > 0
 
+    def delete_all_scheduled_tasks(self) -> int:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM scheduled_tasks")
+            return cur.rowcount
+
     def cleanup_expired_once_tasks(self, *, tz_name: str = "Europe/Prague") -> int:
         """Smaže proběhlé nebo prošlé jednorázové (`once`) úlohy."""
         try:

@@ -465,7 +465,9 @@ def test_pty_websockets_auth_and_streaming(tmp_path: Path) -> None:
 
 def test_memory_export_and_import_api_endpoints(tmp_path: Path) -> None:
     import io
+    import json
     import zipfile
+    from app.scheduler import AssistantScheduler
 
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -476,10 +478,20 @@ def test_memory_export_and_import_api_endpoints(tmp_path: Path) -> None:
 
     settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data", web_auth_token="mem-secret")
     db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    db.update_owner(morning_briefing_cron="30 7 * * *", heartbeat_interval_minutes=45)
+    db.upsert_scheduled_task(
+        name="Ranní test",
+        prompt="Připomeň vodu",
+        schedule_type="cron",
+        cron_expr="0 10 * * *",
+    )
+
     memory = WorkspaceMemory(ws)
     runner = AsyncMock()
     runner.close_all = AsyncMock()
-    app = create_app(settings, db, memory, runner)
+    scheduler = AssistantScheduler(settings, runner, db=db)
+    app = create_app(settings, db, memory, runner, scheduler=scheduler)
     client = TestClient(app)
 
     assert client.get("/api/memory/export").status_code == 401
@@ -489,13 +501,26 @@ def test_memory_export_and_import_api_endpoints(tmp_path: Path) -> None:
     exp_res = client.get("/api/memory/export", headers=headers)
     assert exp_res.status_code == 200
     assert exp_res.headers["content-type"].startswith("application/zip")
+    assert exp_res.headers.get("x-exported-tasks") == "1"
     with zipfile.ZipFile(io.BytesIO(exp_res.content), "r") as zf:
         assert "SOUL.md" in zf.namelist()
         assert "memory/2026-11-20.md" in zf.namelist()
+        assert "scheduler.json" in zf.namelist()
+        sched_json = json.loads(zf.read("scheduler.json").decode("utf-8"))
+        assert sched_json["system"]["morning_briefing_cron"] == "30 7 * * *"
+        assert sched_json["system"]["heartbeat_interval_minutes"] == 45
+        assert [t_item["name"] for t_item in sched_json["tasks"]] == ["Ranní test"]
 
-    # Přidání dočasného souboru a obnova v režimu replace
+    # Přidání dočasných souborů/úloh a změna nastavení plánovače před čistou obnovou
     (ws / "memory" / "docasny.md").write_text("smazat", encoding="utf-8")
     (ws / "SOUL.md").write_text("# Změněná duše", encoding="utf-8")
+    db.update_owner(morning_briefing_cron="0 11 * * *", heartbeat_interval_minutes=15)
+    db.upsert_scheduled_task(
+        name="Dočasná úloha",
+        prompt="Smazat při replace",
+        schedule_type="cron",
+        cron_expr="0 12 * * *",
+    )
 
     imp_res = client.post(
         "/api/memory/import?mode=replace",
@@ -507,8 +532,20 @@ def test_memory_export_and_import_api_endpoints(tmp_path: Path) -> None:
     assert payload["status"] == "ok"
     assert payload["mode"] == "replace"
     assert payload["imported_count"] == 3
+    assert payload["scheduler_restored"] is True
+    assert payload["restored_system_schedule"] is True
+    assert payload["imported_tasks_count"] == 1
     assert (ws / "SOUL.md").read_text(encoding="utf-8") == "# Původní duše"
     assert not (ws / "memory" / "docasny.md").exists()
+
+    restored_owner = db.get_owner()
+    assert restored_owner is not None
+    assert restored_owner.morning_briefing_cron == "30 7 * * *"
+    assert restored_owner.heartbeat_interval_minutes == 45
+    assert [t_item.name for t_item in db.list_scheduled_tasks()] == ["Ranní test"]
+    job_names = {j.name for j in scheduler.list_jobs()}
+    assert "Ranní test" in job_names
+    assert "Dočasná úloha" not in job_names
 
     bad_imp = client.post(
         "/api/memory/import",

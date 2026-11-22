@@ -172,8 +172,8 @@ class WorkspaceMemory:
 
         return [files_by_rel[rel] for rel in sorted(files_by_rel)]
 
-    def _validate_import_rel_path(self, raw_name: str) -> str | None:
-        """Ověří cestu ze ZIP archivu; vrátí normalizovanou cestu, None pro ignorované položky nebo vyhodí ValueError."""
+    def _normalize_archive_rel_path(self, raw_name: str) -> str | None:
+        """Ověří bezpečnost relativní cesty z ZIP archivu (nevrací soubory mimo workspace ani traversal)."""
         norm = (raw_name or "").replace("\\", "/").strip()
         if not norm or norm.endswith("/"):
             return None
@@ -188,12 +188,20 @@ class WorkspaceMemory:
         if any(part in {"", ".", ".."} for part in parts):
             raise ValueError(f"Nepovolená cesta v archivu (path traversal): {raw_name!r}")
 
-        top = parts[0]
-        if top == "__MACOSX" or parts[-1] in {".DS_Store", "Thumbs.db"}:
+        if parts[0] == "__MACOSX" or parts[-1] in {".DS_Store", "Thumbs.db"}:
+            return None
+        return norm
+
+    def _validate_import_rel_path(self, raw_name: str) -> str | None:
+        """Ověří cestu ze ZIP archivu; vrátí normalizovanou cestu, None pro ignorované položky nebo vyhodí ValueError."""
+        norm = self._normalize_archive_rel_path(raw_name)
+        if norm is None:
             return None
         if norm == "manifest.json":
             return None
 
+        parts = norm.split("/")
+        top = parts[0]
         target = (self.workspace_dir / norm).resolve()
         if not target.is_relative_to(self.workspace_dir):
             raise ValueError(f"Nepovolená cesta mimo workspace: {raw_name!r}")
@@ -217,20 +225,34 @@ class WorkspaceMemory:
 
         return norm
 
-    def export_memory_zip(self, *, app_version: str = "") -> tuple[bytes, int]:
-        """Zabalí kompletní paměť a vlastní skilly do ZIP archivu v paměti."""
+    def export_memory_zip(
+        self,
+        *,
+        app_version: str = "",
+        scheduler_data: dict[str, Any] | None = None,
+    ) -> tuple[bytes, int]:
+        """Zabalí kompletní paměť, vlastní skilly a případně zálohu plánovače do ZIP archivu v paměti."""
         export_files = self.list_all_exportable_files()
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             for path in export_files:
                 rel = path.relative_to(self.workspace_dir).as_posix()
                 zf.write(path, arcname=rel)
-            manifest = {
+            if scheduler_data is not None:
+                zf.writestr(
+                    "scheduler.json",
+                    json.dumps(scheduler_data, indent=2, ensure_ascii=False) + "\n",
+                )
+            manifest: dict[str, Any] = {
                 "format": "agy-assistant-memory-v1",
                 "exported_at": datetime.now(tz=self.tz).isoformat(),
                 "app_version": app_version,
                 "file_count": len(export_files),
+                "includes_scheduler": scheduler_data is not None,
             }
+            if scheduler_data is not None:
+                tasks = scheduler_data.get("tasks")
+                manifest["scheduled_tasks_count"] = len(tasks) if isinstance(tasks, list) else 0
             zf.writestr(
                 "manifest.json",
                 json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -265,6 +287,7 @@ class WorkspaceMemory:
             raise ValueError("Neplatný režim importu (povoleno: merge, replace).")
 
         validated_entries: list[tuple[str, str]] = []
+        parsed_scheduler_files: dict[str, Any] = {}
         seen_paths: set[str] = set()
         total_uncompressed = 0
 
@@ -280,12 +303,20 @@ class WorkspaceMemory:
                         raise ValueError(
                             f"Archiv nesmí obsahovat symbolické odkazy: {info.filename!r}"
                         )
-                    rel = self._validate_import_rel_path(info.filename)
-                    if rel is None:
+                    raw_norm = self._normalize_archive_rel_path(info.filename)
+                    if raw_norm is None:
                         continue
-                    if rel in seen_paths:
+                    is_scheduler_meta = raw_norm in {
+                        "scheduler.json",
+                        "config/scheduler.json",
+                        "config/scheduled_tasks.json",
+                    }
+                    rel = None if is_scheduler_meta else self._validate_import_rel_path(raw_norm)
+                    if not is_scheduler_meta and rel is None:
                         continue
-                    if len(validated_entries) >= MAX_IMPORT_FILES:
+                    if not is_scheduler_meta and rel in seen_paths:
+                        continue
+                    if not is_scheduler_meta and len(validated_entries) >= MAX_IMPORT_FILES:
                         raise ValueError(
                             f"Archiv překračuje limit {MAX_IMPORT_FILES} souborů."
                         )
@@ -302,18 +333,34 @@ class WorkspaceMemory:
                     try:
                         text = raw_bytes.decode("utf-8")
                     except UnicodeDecodeError as exc:
+                        err_name = raw_norm if is_scheduler_meta else rel
                         raise ValueError(
-                            f"Soubor {rel!r} není platný text v kódování UTF-8."
+                            f"Soubor {err_name!r} není platný text v kódování UTF-8."
                         ) from exc
+                    if is_scheduler_meta:
+                        try:
+                            parsed_scheduler_files[raw_norm] = json.loads(text)
+                        except json.JSONDecodeError as exc:
+                            raise ValueError(
+                                f"Soubor {raw_norm!r} v archivu neobsahuje platný JSON."
+                            ) from exc
+                        continue
+                    assert rel is not None
                     seen_paths.add(rel)
                     validated_entries.append((rel, text))
         except zipfile.BadZipFile as exc:
             raise ValueError("Nahraný soubor není platný ZIP archiv.") from exc
 
-        if not validated_entries:
+        scheduler_data: Any = None
+        for key in ("scheduler.json", "config/scheduler.json", "config/scheduled_tasks.json"):
+            if key in parsed_scheduler_files:
+                scheduler_data = parsed_scheduler_files[key]
+                break
+
+        if not validated_entries and scheduler_data is None:
             raise ValueError("Archiv neobsahuje žádné platné soubory paměti.")
 
-        if mode == "replace":
+        if mode == "replace" and validated_entries:
             self._clear_directory_contents(self.workspace_dir / "memory")
             self._clear_directory_contents(self.workspace_dir / ".agents" / "skills")
 
@@ -327,4 +374,5 @@ class WorkspaceMemory:
             "mode": mode,
             "imported_count": len(imported_paths),
             "files": imported_paths,
+            "scheduler_data": scheduler_data,
         }

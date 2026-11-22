@@ -22,7 +22,9 @@ from app.auth_session import AgyAuthManager
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
 from app.github_backup import (
+    build_scheduler_backup_payload,
     normalize_github_repo_url,
+    restore_scheduler_backup_payload,
     run_github_backup,
     validate_github_branch,
 )
@@ -1399,14 +1401,20 @@ def create_app(
     @app.get("/api/memory/export")
     async def export_memory_archive(owner: OwnerConfig = Depends(require_auth)) -> Response:
         mem = get_memory(settings, owner)
-        zip_bytes, count = mem.export_memory_zip(app_version=__version__)
+        scheduler_payload = build_scheduler_backup_payload(db, owner)
+        zip_bytes, count = mem.export_memory_zip(
+            app_version=__version__,
+            scheduler_data=scheduler_payload,
+        )
         ts = datetime.now(tz=mem.tz).strftime("%Y%m%d-%H%M%S")
+        tasks_count = len(scheduler_payload.get("tasks") or [])
         return Response(
             content=zip_bytes,
             media_type="application/zip",
             headers={
                 "Content-Disposition": f'attachment; filename="assistant-memory-{ts}.zip"',
                 "X-Exported-Files": str(count),
+                "X-Exported-Tasks": str(tasks_count),
             },
         )
 
@@ -1424,10 +1432,26 @@ def create_app(
             res = mem.import_memory_zip(raw_zip, mode=mode)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        scheduler_data = res.pop("scheduler_data", None)
+        sched_res: dict[str, Any] = {"restored_system": False, "imported_tasks_count": 0}
+        if scheduler_data is not None:
+            try:
+                sched_res = restore_scheduler_backup_payload(db, scheduler_data, mode=mode)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if scheduler is not None:
+                scheduler.sync_jobs()
+            await _notify_settings_updated()
         db.reset_all_sessions()
         if isinstance(runner, AgyRunner):
             await runner.close_all()
-        return {**res, "files_list": [asdict(f) for f in mem.list_files()]}
+        return {
+            **res,
+            "scheduler_restored": bool(scheduler_data is not None),
+            "restored_system_schedule": bool(sched_res.get("restored_system")),
+            "imported_tasks_count": int(sched_res.get("imported_tasks_count") or 0),
+            "files_list": [asdict(f) for f in mem.list_files()],
+        }
 
     @app.get("/api/files")
     async def list_files(owner: OwnerConfig = Depends(require_auth)) -> list[dict[str, object]]:

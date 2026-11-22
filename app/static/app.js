@@ -90,6 +90,9 @@
   let pluginConnectTimer = null;
   let lastPluginConnectState = null;
   let activeConnectPlugin = null;
+  let activeSettingsSubtab = sessionStorage.getItem("agy_settings_subtab") || "general";
+  let ghBackupCollapsedInit = false;
+  let mcpCollapsedInit = false;
   const chatLogs = { auto: [], pracovni: [], osobni: [] };
 
   function t(key, vars = {}) {
@@ -283,6 +286,7 @@
     if (settingsOauthTerm) settingsOauthTerm.refreshStatusLabel();
     if (onboardOauthTerm) onboardOauthTerm.refreshStatusLabel();
     if (pluginConnectTerm) pluginConnectTerm.refreshStatusLabel();
+    refreshCollapsibleLabels();
   }
 
   async function loadLocaleBundle(lang) {
@@ -522,6 +526,81 @@
     else if (validTab === "ops") loadOps();
     else if (validTab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
   }
+
+  function switchSettingsTab(pane) {
+    const valid = ["general", "integrations", "automation", "security"].includes(pane) ? pane : "general";
+    activeSettingsSubtab = valid;
+    sessionStorage.setItem("agy_settings_subtab", valid);
+    document.querySelectorAll("#settingsSubnav [data-settings-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.settingsTab === valid);
+    });
+    document.querySelectorAll("#tab-settings .settings-pane").forEach((el) => {
+      el.classList.toggle("d-none", el.dataset.settingsPane !== valid);
+    });
+  }
+
+  document.querySelectorAll("#settingsSubnav [data-settings-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => switchSettingsTab(btn.dataset.settingsTab));
+  });
+  switchSettingsTab(activeSettingsSubtab);
+
+  function setCollapsibleCard(bodyId, btnId, expanded) {
+    const body = $(bodyId);
+    const btn = $(btnId);
+    if (!body) return;
+    body.classList.toggle("d-none", !expanded);
+    if (btn) {
+      btn.textContent = t(expanded ? "btn_collapse" : "btn_expand");
+      btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    }
+  }
+
+  function refreshCollapsibleLabels() {
+    [
+      ["ghBackupBody", "toggleGhBackupBtn"],
+      ["mcpCardBody", "toggleMcpCardBtn"],
+    ].forEach(([bodyId, btnId]) => {
+      const body = $(bodyId);
+      const btn = $(btnId);
+      if (body && btn) {
+        const expanded = !body.classList.contains("d-none");
+        btn.textContent = t(expanded ? "btn_collapse" : "btn_expand");
+        btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+    });
+  }
+
+  if ($("toggleGhBackupBtn") && $("ghBackupBody")) {
+    $("toggleGhBackupBtn").onclick = () => {
+      const expanded = $("ghBackupBody").classList.contains("d-none");
+      setCollapsibleCard("ghBackupBody", "toggleGhBackupBtn", expanded);
+    };
+  }
+  if ($("toggleMcpCardBtn") && $("mcpCardBody")) {
+    $("toggleMcpCardBtn").onclick = () => {
+      const expanded = $("mcpCardBody").classList.contains("d-none");
+      setCollapsibleCard("mcpCardBody", "toggleMcpCardBtn", expanded);
+    };
+  }
+
+  function syncAutomationTiles() {
+    [
+      ["cfgHbEnabled", "hbTile", "cfgHbInterval"],
+      ["cfgBriefEnabled", "briefTile", "cfgBriefCron"],
+      ["cfgNightlyEnabled", "nightlyTile", "cfgNightlyCron"],
+    ].forEach(([chkId, tileId, inpId]) => {
+      const chk = $(chkId);
+      const tile = $(tileId);
+      const inp = $(inpId);
+      if (!chk) return;
+      const active = Boolean(chk.checked);
+      if (tile) tile.classList.toggle("is-inactive", !active);
+      if (inp) inp.disabled = !active;
+    });
+  }
+  ["cfgHbEnabled", "cfgBriefEnabled", "cfgNightlyEnabled"].forEach((chkId) => {
+    if ($(chkId)) $(chkId).addEventListener("change", syncAutomationTiles);
+  });
 
   document.querySelectorAll(".nav-tab").forEach((b) => {
     b.addEventListener("click", (e) => {
@@ -1558,7 +1637,18 @@
         $("saveFileBtn").disabled = true;
         syncMemoryModeUi();
         await loadFiles();
-        toast(t("toast_memory_imported", { count: data.imported_count || 0 }));
+        if (data.scheduler_restored) {
+          toast(
+            t("toast_memory_imported_with_scheduler", {
+              count: data.imported_count || 0,
+              tasks: data.imported_tasks_count || 0,
+            })
+          );
+          await loadSettings();
+          if (activeTab === "ops") loadOps();
+        } else {
+          toast(t("toast_memory_imported", { count: data.imported_count || 0 }));
+        }
       } catch (err) {
         toast(err.message, "err");
       } finally {
@@ -1818,12 +1908,16 @@
       $("cfgModel").value = s.agy_model || "";
       $("cfgTgUsers").value = s.telegram_allowed_users || "";
       $("cfgTgNotify").value = s.telegram_notify_chat_id || "";
+      if ($("tgAdvancedBox") && (s.telegram_notify_chat_id || "").trim()) {
+        $("tgAdvancedBox").open = true;
+      }
       $("cfgHbEnabled").checked = Boolean(s.heartbeat_enabled);
       $("cfgHbInterval").value = s.heartbeat_interval_minutes || 60;
       $("cfgBriefEnabled").checked = Boolean(s.morning_briefing_enabled);
       $("cfgBriefCron").value = s.morning_briefing_cron || "0 8 * * *";
       $("cfgNightlyEnabled").checked = s.nightly_reset_enabled !== false;
       $("cfgNightlyCron").value = s.nightly_reset_cron || "15 0 * * *";
+      syncAutomationTiles();
       renderGithubBackupUi(s);
       updateAgyBadges(s);
       updateSecurityUi(s);
@@ -1870,6 +1964,11 @@
       } else {
         lastInfo.textContent = t("gh_backup_last_never");
       }
+    }
+    if (!ghBackupCollapsedInit) {
+      ghBackupCollapsedInit = true;
+      const activeOrConfigured = Boolean(s.github_backup_enabled || (s.github_backup_repo || "").trim());
+      setCollapsibleCard("ghBackupBody", "toggleGhBackupBtn", activeOrConfigured);
     }
   }
 
@@ -2495,6 +2594,11 @@
   async function loadMcp() {
     try {
       const items = await api("/api/mcp");
+      if ($("mcpCountBadge")) $("mcpCountBadge").textContent = String(items.length);
+      if (!mcpCollapsedInit) {
+        mcpCollapsedInit = true;
+        setCollapsibleCard("mcpCardBody", "toggleMcpCardBtn", items.length > 0);
+      }
       const tb = $("mcpBody");
       tb.innerHTML = "";
       const labels = {
@@ -2678,7 +2782,7 @@
       head.className = "d-flex align-items-start justify-content-between gap-2";
 
       const titleWrap = document.createElement("div");
-      titleWrap.className = "d-flex align-items-center gap-2 min-w-0";
+      titleWrap.className = "d-flex align-items-center gap-2 min-w-0 flex-grow-1";
       const iconEl = document.createElement("span");
       iconEl.className = "plugin-icon";
       if (p.logo_url) {
@@ -2699,7 +2803,7 @@
       }
 
       const textBox = document.createElement("div");
-      textBox.className = "min-w-0";
+      textBox.className = "min-w-0 flex-grow-1";
       const acctPart = p.installed && connectedCount === 1 && p.account_label ? ` · ${p.account_label}` : "";
       const metaText = (p.version ? `v${p.version} · ${p.marketplace}` : p.marketplace) + acctPart;
       textBox.innerHTML = `<div class="fw-bold small lh-sm">${escapeHtml(p.display_name || p.name)}</div><div class="small text-body-secondary font-monospace text-truncate" style="font-size:0.72rem;" title="${escapeHtml(metaText)}">${escapeHtml(metaText)}</div>`;
@@ -3802,6 +3906,7 @@
     el.addEventListener("click", (e) => {
       if (isModifiedClick(e)) return;
       e.preventDefault();
+      switchSettingsTab("integrations");
       navigateTo("/settings");
     });
   });
@@ -3885,6 +3990,7 @@
       toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
       await loadPlugins();
       await loadMcp();
+      switchSettingsTab("integrations");
       navigateTo("/settings");
     } catch (err) {
       toast(err.message, "err");
