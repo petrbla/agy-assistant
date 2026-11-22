@@ -305,6 +305,9 @@ class TelegramAssistantBot:
         key = (chat_id, msg_id)
         if key in self._seen_messages:
             return True
+        if not self.db.claim_telegram_message(chat_id, msg_id):
+            self._seen_messages.append(key)
+            return True
         self._seen_messages.append(key)
         return False
 
@@ -348,6 +351,13 @@ class TelegramAssistantBot:
 
     async def _guard(self, message: Message) -> bool:
         if self._is_authorized(message):
+            if self._is_duplicate_message(message):
+                logger.info(
+                    "Ignoruji duplicitní Telegram zprávu (chat_id=%s, message_id=%s).",
+                    getattr(getattr(message, "chat", None), "id", None),
+                    getattr(message, "message_id", None),
+                )
+                return False
             return True
         lang = self._lang()
         uid = message.from_user.id if message.from_user else t("backend.tg_unknown_user", lang)
@@ -833,13 +843,13 @@ class TelegramAssistantBot:
 
         @self.dp.message(F.photo | F.document | F.voice | F.audio)
         async def handle_attachment(message: Message) -> None:
-            if not await self._guard(message) or self._is_duplicate_message(message):
+            if not await self._guard(message):
                 return
             await self._download_and_handle_attachment(message)
 
         @self.dp.message(F.text)
         async def handle_text(message: Message) -> None:
-            if not await self._guard(message) or self._is_duplicate_message(message):
+            if not await self._guard(message):
                 return
             prompt = (message.text or "").strip()
             if not prompt:
@@ -956,6 +966,8 @@ class TelegramAssistantBot:
 
     async def stop(self) -> None:
         self._stopping = True
+        with contextlib.suppress(Exception):
+            await self.dp.stop_polling()
         if self._polling_task and not self._polling_task.done():
             self._polling_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -981,6 +993,7 @@ class TelegramBotController:
         self._watchdog_interval = max(5.0, float(watchdog_interval_seconds))
         self._bot: TelegramAssistantBot | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
+        self._reload_lock = asyncio.Lock()
         self._stopping = False
 
     async def _watchdog_loop(self) -> None:
@@ -1004,30 +1017,46 @@ class TelegramBotController:
             self._watchdog_task = asyncio.create_task(self._watchdog_loop())
 
     async def reload(self) -> None:
-        if self._bot is not None:
-            await self._bot.stop()
-            self._bot = None
+        async with self._reload_lock:
+            if self._stopping:
+                return
+            owner = self.db.get_owner()
+            token = (
+                owner.telegram_bot_token if owner is not None else self.settings.telegram_bot_token
+            ).strip()
+            if not token:
+                if self._bot is not None:
+                    await self._bot.stop()
+                    self._bot = None
+                return
 
-        owner = self.db.get_owner()
-        token = (
-            owner.telegram_bot_token if owner is not None else self.settings.telegram_bot_token
-        ).strip()
-        if not token:
-            return
+            if (
+                self._bot is not None
+                and self._bot.is_alive()
+                and self._bot.token == token
+            ):
+                ensure_workspace(self.settings, owner)
+                self._bot.memory = get_memory(self.settings, owner)
+                self._ensure_watchdog()
+                return
 
-        ensure_workspace(self.settings, owner)
-        memory = get_memory(self.settings, owner)
-        bot = TelegramAssistantBot(
-            self.settings,
-            self.db,
-            memory,
-            self.runner,
-            scheduler=self.scheduler,
-            token=token,
-        )
-        await bot.start()
-        self._bot = bot
-        self._ensure_watchdog()
+            if self._bot is not None:
+                await self._bot.stop()
+                self._bot = None
+
+            ensure_workspace(self.settings, owner)
+            memory = get_memory(self.settings, owner)
+            bot = TelegramAssistantBot(
+                self.settings,
+                self.db,
+                memory,
+                self.runner,
+                scheduler=self.scheduler,
+                token=token,
+            )
+            await bot.start()
+            self._bot = bot
+            self._ensure_watchdog()
 
     async def send_notification(self, text: str) -> None:
         if self._bot is None:
@@ -1041,6 +1070,7 @@ class TelegramBotController:
             self._watchdog_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._watchdog_task
-        if self._bot is not None:
-            await self._bot.stop()
-            self._bot = None
+        async with self._reload_lock:
+            if self._bot is not None:
+                await self._bot.stop()
+                self._bot = None

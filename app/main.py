@@ -6,7 +6,7 @@ import logging
 import uvicorn
 
 from app.agy_runner import AgyRunner
-from app.auth_session import AgyAuthManager
+from app.auth_session import AgyAuthManager, AgyTerminalManager
 from app.config import Settings
 from app.db import AssistantDB
 from app.i18n import t  # noqa: F401 - zachování importní konzistence
@@ -50,6 +50,7 @@ async def serve() -> None:
     memory = WorkspaceMemory(settings.workspace_dir, timezone_name=owner.tz)
     runner = AgyRunner(settings, db)
     auth_manager = AgyAuthManager(settings)
+    terminal_manager = AgyTerminalManager(settings)
     plugin_manager = PluginManager(settings, db)
     scheduler = AssistantScheduler(settings, runner, db=db)
     runner.on_schedule_updated = scheduler.sync_jobs
@@ -67,6 +68,7 @@ async def serve() -> None:
         runner,
         scheduler=scheduler,
         auth_manager=auth_manager,
+        terminal_manager=terminal_manager,
         plugin_manager=plugin_manager,
         on_settings_updated=on_settings_updated,
     )
@@ -86,6 +88,7 @@ async def serve() -> None:
     finally:
         await runner.close_all()
         await auth_manager.stop()
+        await terminal_manager.stop()
         await plugin_manager.stop_connect()
         scheduler.shutdown()
         await bot_controller.stop()

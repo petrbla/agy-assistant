@@ -91,7 +91,12 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert client.get("/static/styles.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
 
-    for spa_path in ("/chat", "/memory", "/ops", "/settings", "/settings/plugins/gmail"):
+    assert "tab-terminal" in home_res.text
+    assert "agyTerminalHost" in home_res.text
+    assert "termChannelSeg" in home_res.text
+    assert "startAgyTermBtn" in home_res.text
+
+    for spa_path in ("/chat", "/terminal", "/memory", "/ops", "/settings", "/settings/plugins/gmail"):
         spa_res = client.get(spa_path)
         assert spa_res.status_code == 200
         assert "tab-plugin-perms" in spa_res.text
@@ -672,6 +677,96 @@ def test_idle_reset_and_daily_retention_settings_api(tmp_path: Path) -> None:
     assert bad_idle.status_code == 422
     bad_ret = client.post("/api/settings", json={"daily_memory_retention_days": -1})
     assert bad_ret.status_code == 422
+
+
+def test_terminal_endpoints_and_ws_auth(tmp_path: Path, monkeypatch) -> None:
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    from app.auth_session import AgyTerminalManager, TerminalSessionState
+
+    settings = Settings(workspace_dir=tmp_path, data_dir=tmp_path / "data", web_auth_token="tajne123")
+    (tmp_path / "MEMORY.md").write_text("# Paměť", encoding="utf-8")
+    db = AssistantDB(settings.db_path)
+    memory = WorkspaceMemory(tmp_path)
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.2.0")
+    term_mgr = AgyTerminalManager(settings)
+    started_calls: list[dict[str, object]] = []
+
+    async def fake_start(**kwargs):
+        started_calls.append(kwargs)
+        term_mgr._state = TerminalSessionState(
+            running=True,
+            context_mode=str(kwargs.get("context_mode") or "auto"),
+            command="agy",
+            output="",
+        )
+        return term_mgr.get_state()
+
+    async def fake_stop():
+        term_mgr._state.running = False
+        term_mgr._broadcast(None)
+
+    monkeypatch.setattr(term_mgr, "start", fake_start)
+    monkeypatch.setattr(term_mgr, "stop", fake_stop)
+
+    app = create_app(
+        settings,
+        db,
+        memory,
+        runner,
+        scheduler=None,
+        terminal_manager=term_mgr,
+    )
+    client = TestClient(app)
+
+    assert client.get("/api/terminal/status").status_code == 401
+    assert client.post("/api/terminal/start", json={"context_mode": "auto"}).status_code == 401
+    assert client.post("/api/terminal/stop").status_code == 401
+
+    headers = {"Authorization": "Bearer tajne123"}
+    st0 = client.get("/api/terminal/status", headers=headers)
+    assert st0.status_code == 200
+    assert st0.json()["running"] is False
+
+    st1 = client.post(
+        "/api/terminal/start",
+        headers=headers,
+        json={"context_mode": "pracovni", "cols": 110, "rows": 30},
+    )
+    assert st1.status_code == 200
+    assert st1.json()["running"] is True
+    assert st1.json()["context_mode"] == "pracovni"
+    assert len(started_calls) == 1
+    assert started_calls[0]["context_mode"] == "pracovni"
+    assert started_calls[0]["cols"] == 110
+    assert started_calls[0]["rows"] == 30
+
+    with pytest.raises(WebSocketDisconnect) as bad_ws_exc:
+        with client.websocket_connect("/ws/pty/terminal") as ws:
+            ws.send_json({"type": "auth", "token": "spatny"})
+            ws.receive_json()
+    assert bad_ws_exc.value.code == 4401
+
+    written: list[str] = []
+    resized: list[tuple[int, int]] = []
+    monkeypatch.setattr(term_mgr, "write_raw", lambda d: written.append(d))
+    monkeypatch.setattr(term_mgr, "resize", lambda c, r: resized.append((c, r)))
+
+    with client.websocket_connect("/ws/pty/terminal") as ws:
+        ws.send_json({"type": "auth", "token": "tajne123"})
+        ready = ws.receive_json()
+        assert ready == {"type": "ready", "running": True}
+        ws.send_json({"type": "input", "data": "ls\r"})
+        ws.send_json({"type": "resize", "cols": 120, "rows": 35})
+
+    assert written == ["ls\r"]
+    assert resized == [(120, 35)]
+
+    stop_res = client.post("/api/terminal/stop", headers=headers)
+    assert stop_res.status_code == 200
+    assert client.get("/api/terminal/status", headers=headers).json()["running"] is False
 
 
 

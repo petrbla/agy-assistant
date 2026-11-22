@@ -9,6 +9,7 @@
     "doc_title": "Asistent Antigravity",
     "brand_default": "Asistent Antigravity",
     "nav_chat": "Chat",
+    "nav_terminal": "Terminál",
     "nav_memory": "Pamäť",
     "nav_ops": "Plánovač & História",
     "nav_settings": "Nastavenia",
@@ -560,7 +561,13 @@
     "gh_guide_step4_desc": "Do poľa GitHub repozitár zadajte vase-meno/asistent-zaloha (alebo celú HTTPS adresu), vložte token, zapnite prepínač, kliknite na „Uložiť zálohovanie“ a potom na „Zálohovať teraz“.",
     "help_account_login_ident": "Prihlásiť sa môžete týmto e-mailem aj týmto používateľským menom.",
     "btn_save_account": "Uložiť údaje",
-    "toast_account_saved": "Prihlasovacie údaje uložené."
+    "toast_account_saved": "Prihlasovacie údaje uložené.",
+    "btn_start_terminal": "Spustiť terminál agy",
+    "btn_restart_terminal": "Reštartovať agy",
+    "btn_stop_terminal": "Ukončiť",
+    "term_agy_ready": "Vyberte oblasť (Auto / Pracovný / Osobný) a kliknite na „Spustiť terminál agy“ na otvorenie interaktívneho agy.",
+    "term_agy_hint": "Spúšťa interaktívne agy priamo vo workspace. Po 30 minútach nečinnosti sa automaticky ukončí.",
+    "toast_terminal_stopped": "Terminál agy ukončený."
   },
   "backend": {
     "channel_auto": "Auto",

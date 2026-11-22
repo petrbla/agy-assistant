@@ -29,6 +29,11 @@
           </a>
         </li>
         <li class="nav-item" role="presentation">
+          <a href="/terminal" class="nav-link nav-tab" data-tab="terminal">
+            <i class="bi bi-terminal me-1" aria-hidden="true"></i><span data-i18n="nav_terminal">Terminal</span>
+          </a>
+        </li>
+        <li class="nav-item" role="presentation">
           <a href="/memory" class="nav-link nav-tab" data-tab="memory">
             <i class="bi bi-journal-text me-1" aria-hidden="true"></i><span data-i18n="nav_memory">Memory</span>
           </a>
@@ -240,7 +245,34 @@
       </div>
     </section>
 
-    <!-- 2. MEMORY -->
+    <!-- 2. TERMINAL (INTERACTIVE AGY) -->
+    <section id="tab-terminal" class="d-none">
+      <div class="card shadow-sm terminal-shell">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 py-2 px-3">
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <div class="btn-group btn-group-sm" id="termChannelSeg" role="group">
+              <button type="button" data-term-channel="auto" class="btn btn-outline-secondary active" data-i18n="channel_auto" data-i18n-title="tooltip_channel_auto">Auto</button>
+              <button type="button" data-term-channel="pracovni" class="btn btn-outline-secondary" data-i18n="channel_work" data-i18n-title="tooltip_channel_work">Work</button>
+              <button type="button" data-term-channel="osobni" class="btn btn-outline-secondary" data-i18n="channel_personal" data-i18n-title="tooltip_channel_personal">Personal</button>
+            </div>
+            <span id="agyTermStatus" class="badge rounded-pill text-bg-secondary" data-i18n="term_status_offline">Disconnected</span>
+          </div>
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <button id="startAgyTermBtn" type="button" class="btn btn-primary btn-sm">
+              <i class="bi bi-play-fill me-1" aria-hidden="true"></i><span data-i18n="btn_start_terminal">Start agy terminal</span>
+            </button>
+            <button id="stopAgyTermBtn" type="button" class="btn btn-outline-danger btn-sm d-none" data-i18n="btn_stop_terminal">Stop</button>
+          </div>
+        </div>
+        <div class="terminal-stage">
+          <div id="agyTerminalHost" class="xterm-host xterm-host-full d-none"></div>
+          <pre id="agyTerminalFallback" class="term terminal-fallback border-0 rounded-0" data-i18n="term_agy_ready">Select a context area (Auto / Work / Personal) and click “Start agy terminal” to launch interactive agy.</pre>
+        </div>
+        <div class="live-term-foot small text-body-secondary" data-i18n="term_agy_hint">Runs interactive agy directly inside workspace. Auto-closes after 30 minutes of inactivity.</div>
+      </div>
+    </section>
+
+    <!-- 3. MEMORY -->
     <section id="tab-memory" class="d-none">
       <div class="row g-3">
         <div class="col-lg-4 col-xl-3">

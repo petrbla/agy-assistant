@@ -379,6 +379,13 @@ class AssistantDB:
                     updated_at TEXT NOT NULL,
                     tool_permissions_json TEXT NOT NULL DEFAULT '{}'
                 );
+
+                CREATE TABLE IF NOT EXISTS telegram_processed_messages (
+                    chat_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    processed_at TEXT NOT NULL,
+                    PRIMARY KEY (chat_id, message_id)
+                );
                 """
             )
             self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
@@ -1792,3 +1799,25 @@ class AssistantDB:
                 total_duration_ms=int(row["total_duration_ms"]),
                 last_active_at=row["last_active_at"],
             )
+
+    def claim_telegram_message(
+        self, chat_id: int, message_id: int, *, retention_days: int = 7
+    ) -> bool:
+        """Atomicky zaregistruje `(chat_id, message_id)`; vrátí `False`, pokud už zpráva proběhla."""
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=max(1, int(retention_days)))).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO telegram_processed_messages (chat_id, message_id, processed_at)
+                VALUES (?, ?, ?)
+                """,
+                (int(chat_id), int(message_id), now.isoformat()),
+            )
+            claimed = cur.rowcount > 0
+            if claimed:
+                conn.execute(
+                    "DELETE FROM telegram_processed_messages WHERE processed_at < ?",
+                    (cutoff,),
+                )
+        return claimed

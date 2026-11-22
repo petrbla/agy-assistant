@@ -9,6 +9,7 @@
     "doc_title": "Asistente Antigravity",
     "brand_default": "Asistente Antigravity",
     "nav_chat": "Chat",
+    "nav_terminal": "Terminal",
     "nav_memory": "Memoria",
     "nav_ops": "Planificador e Historial",
     "nav_settings": "Configuración",
@@ -560,7 +561,13 @@
     "gh_guide_step4_desc": "Introduce tu-usuario/assistant-backup (o URL HTTPS) en Repositorio de GitHub, pega el token, activa el interruptor, pulsa “Guardar copia” y luego “Hacer copia ahora”.",
     "help_account_login_ident": "Puedes iniciar sesión tanto con este correo como con este nombre de usuario.",
     "btn_save_account": "Guardar datos",
-    "toast_account_saved": "Datos de acceso guardados."
+    "toast_account_saved": "Datos de acceso guardados.",
+    "btn_start_terminal": "Iniciar terminal agy",
+    "btn_restart_terminal": "Reiniciar agy",
+    "btn_stop_terminal": "Detener",
+    "term_agy_ready": "Elige un área (Auto / Trabajo / Personal) y pulsa «Iniciar terminal agy» para abrir agy interactivo.",
+    "term_agy_hint": "Ejecuta agy interactivo directamente en el workspace. Se cierra automáticamente tras 30 minutos de inactividad.",
+    "toast_terminal_stopped": "Terminal agy detenido."
   },
   "backend": {
     "channel_auto": "Auto",

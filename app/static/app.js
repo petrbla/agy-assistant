@@ -68,7 +68,10 @@
   let authPollTimer = null;
   let settingsOauthTerm = null;
   let onboardOauthTerm = null;
+  let agyLiveTerm = null;
   let pluginConnectTerm = null;
+  let terminalContext = "auto";
+  let terminalIsRunning = false;
   const FEATURED_PLUGINS = ["gmail", "gcalendar", "gdrive"];
   const BS_ICONS = {
     sun: "bi-sun",
@@ -312,7 +315,9 @@
     if (typeof syncMemoryModeUi === "function") syncMemoryModeUi();
     if (settingsOauthTerm) settingsOauthTerm.refreshStatusLabel();
     if (onboardOauthTerm) onboardOauthTerm.refreshStatusLabel();
+    if (agyLiveTerm) agyLiveTerm.refreshStatusLabel();
     if (pluginConnectTerm) pluginConnectTerm.refreshStatusLabel();
+    if (typeof updateAgyTerminalControls === "function") updateAgyTerminalControls(terminalIsRunning);
     refreshCollapsibleLabels();
   }
 
@@ -508,6 +513,7 @@
         mcpMode: params.get("mode") === "mcp",
       };
     }
+    if (path === "/terminal") return { tab: "terminal" };
     if (path === "/memory") return { tab: "memory" };
     if (path === "/ops") return { tab: "ops" };
     if (path === "/settings") return { tab: "settings" };
@@ -520,7 +526,7 @@
     document.querySelectorAll(".nav-tab").forEach((b) => {
       b.classList.toggle("active", b.dataset.tab === navActive);
     });
-    ["chat", "memory", "ops", "settings", "plugin-perms"].forEach((tabId) => {
+    ["chat", "terminal", "memory", "ops", "settings", "plugin-perms"].forEach((tabId) => {
       const sec = $(`tab-${tabId}`);
       if (sec) sec.classList.toggle("d-none", tabId !== tab);
     });
@@ -540,6 +546,7 @@
     permsModalState = null;
     activateTabDom(route.tab);
     if (route.tab === "chat") renderChat();
+    else if (route.tab === "terminal") loadTerminalTab();
     else if (route.tab === "memory") loadFiles();
     else if (route.tab === "ops") loadOps();
     else if (route.tab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
@@ -557,7 +564,7 @@
   }
 
   function switchTab(tab, { pushHistory = true } = {}) {
-    const validTab = ["chat", "memory", "ops", "settings"].includes(tab) ? tab : "chat";
+    const validTab = ["chat", "terminal", "memory", "ops", "settings"].includes(tab) ? tab : "chat";
     if (pushHistory) {
       navigateTo(`/${validTab}`);
       return;
@@ -565,6 +572,7 @@
     permsModalState = null;
     activateTabDom(validTab);
     if (validTab === "chat") renderChat();
+    else if (validTab === "terminal") loadTerminalTab();
     else if (validTab === "memory") loadFiles();
     else if (validTab === "ops") loadOps();
     else if (validTab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
@@ -868,6 +876,8 @@
   $("logoutBtn").onclick = async () => {
     if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; }
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
+    if (agyLiveTerm) agyLiveTerm.disconnect({ keepContent: false });
+    terminalIsRunning = false;
     inAgyOnboarding = false;
     try { await fetch("/api/logout", { method: "POST", headers: getHeaders() }); } catch (_) {}
     localStorage.removeItem("agy_web_token");
@@ -2447,6 +2457,119 @@
     statusBadgeId: "onboardTermStatus",
     wsPath: "/ws/pty/auth",
   });
+  agyLiveTerm = new LivePtyTerminal({
+    containerId: "agyTerminalHost",
+    fallbackPreId: "agyTerminalFallback",
+    statusBadgeId: "agyTermStatus",
+    wsPath: "/ws/pty/terminal",
+    onExit: () => updateAgyTerminalControls(false),
+  });
+
+  function syncTerminalChannelButtons() {
+    document.querySelectorAll("#termChannelSeg [data-term-channel]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.termChannel === terminalContext);
+    });
+  }
+
+  function updateAgyTerminalControls(running) {
+    terminalIsRunning = Boolean(running);
+    const startBtn = $("startAgyTermBtn");
+    const stopBtn = $("stopAgyTermBtn");
+    if (startBtn) {
+      const lbl = startBtn.querySelector("span");
+      const iconEl = startBtn.querySelector("i");
+      if (iconEl) iconEl.className = `bi ${BS_ICONS[terminalIsRunning ? "refresh" : "play"]} me-1`;
+      if (lbl) lbl.textContent = t(terminalIsRunning ? "btn_restart_terminal" : "btn_start_terminal");
+    }
+    if (stopBtn) stopBtn.classList.toggle("d-none", !terminalIsRunning);
+  }
+
+  async function loadTerminalTab() {
+    syncTerminalChannelButtons();
+    try {
+      const st = await api("/api/terminal/status");
+      if (st.context_mode && ["auto", "pracovni", "osobni"].includes(st.context_mode)) {
+        terminalContext = st.context_mode;
+        syncTerminalChannelButtons();
+      }
+      updateAgyTerminalControls(Boolean(st.running));
+      if (st.running) {
+        if (!agyLiveTerm.isOpen()) {
+          agyLiveTerm.connect({ reset: true });
+        } else {
+          agyLiveTerm.fit();
+          agyLiveTerm.focus();
+        }
+      } else {
+        const fb = $("agyTerminalFallback");
+        if (fb && !agyLiveTerm.term) {
+          if (st.error) fb.textContent = t("chat_error_prefix", { msg: st.error });
+          else if (st.output) fb.textContent = st.output;
+          else fb.textContent = t("term_agy_ready");
+        }
+        if (st.error && agyLiveTerm.term) {
+          agyLiveTerm.writeNotice(st.error);
+        }
+      }
+    } catch (_) {}
+  }
+
+  document.querySelectorAll("#termChannelSeg [data-term-channel]").forEach((btn) => {
+    btn.onclick = () => {
+      terminalContext = btn.dataset.termChannel || "auto";
+      syncTerminalChannelButtons();
+    };
+  });
+
+  if ($("startAgyTermBtn")) {
+    $("startAgyTermBtn").onclick = async () => {
+      const startBtn = $("startAgyTermBtn");
+      startBtn.disabled = true;
+      try {
+        agyLiveTerm.ensureInit();
+        const dims = agyLiveTerm.fit();
+        const st = await api("/api/terminal/start", {
+          method: "POST",
+          body: JSON.stringify({
+            context_mode: terminalContext,
+            cols: dims.cols,
+            rows: dims.rows,
+          }),
+        });
+        updateAgyTerminalControls(Boolean(st.running));
+        if (st.running) {
+          agyLiveTerm.connect({ reset: true });
+          agyLiveTerm.focus();
+        } else if (st.error) {
+          const fb = $("agyTerminalFallback");
+          if (fb && !agyLiveTerm.term) fb.textContent = t("chat_error_prefix", { msg: st.error });
+          agyLiveTerm.writeNotice(st.error);
+          toast(st.error, "err");
+        }
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        startBtn.disabled = false;
+      }
+    };
+  }
+
+  if ($("stopAgyTermBtn")) {
+    $("stopAgyTermBtn").onclick = async () => {
+      const stopBtn = $("stopAgyTermBtn");
+      stopBtn.disabled = true;
+      try {
+        await api("/api/terminal/stop", { method: "POST" });
+        agyLiveTerm.disconnect({ keepContent: true });
+        updateAgyTerminalControls(false);
+        toast(t("toast_terminal_stopped"));
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        stopBtn.disabled = false;
+      }
+    };
+  }
 
   function activeOauthTerminal() {
     return inAgyOnboarding ? onboardOauthTerm : settingsOauthTerm;

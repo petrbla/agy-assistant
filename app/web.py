@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app import __version__
 from app.agy_runner import AgyRunner, is_version_up_to_date
-from app.auth_session import AgyAuthManager
+from app.auth_session import AgyAuthManager, AgyTerminalManager
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
 from app.github_backup import (
@@ -136,6 +136,12 @@ class AuthStartRequest(BaseModel):
     mode: Literal["auth_login", "interactive"] = "interactive"
     cols: int = Field(default=100, ge=40, le=300)
     rows: int = Field(default=26, ge=12, le=100)
+
+
+class TerminalStartRequest(BaseModel):
+    context_mode: ContextMode = "auto"
+    cols: int = Field(default=120, ge=40, le=300)
+    rows: int = Field(default=32, ge=12, le=100)
 
 
 class AuthInputRequest(BaseModel):
@@ -334,6 +340,7 @@ def create_app(
     runner: AgyRunner,
     scheduler: AssistantScheduler | None = None,
     auth_manager: AgyAuthManager | None = None,
+    terminal_manager: AgyTerminalManager | None = None,
     plugin_manager: PluginManager | None = None,
     app_version_checker: AppVersionChecker | None = None,
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
@@ -343,6 +350,8 @@ def create_app(
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     db.ensure_owner(settings)
+    if terminal_manager is None:
+        terminal_manager = AgyTerminalManager(settings)
     if plugin_manager is None:
         plugin_manager = PluginManager(settings, db)
     if app_version_checker is None:
@@ -429,6 +438,7 @@ def create_app(
 
     @app.get("/", response_model=None)
     @app.get("/chat", response_model=None)
+    @app.get("/terminal", response_model=None)
     @app.get("/memory", response_model=None)
     @app.get("/ops", response_model=None)
     @app.get("/settings", response_model=None)
@@ -1198,6 +1208,7 @@ def create_app(
     async def auth_logout(_: OwnerConfig = Depends(require_auth)) -> dict[str, object]:
         if auth_manager is not None:
             await auth_manager.stop()
+        await terminal_manager.stop()
         clear_agy_oauth(settings)
         save_runtime_overrides(settings, {"gemini_api_key": ""})
         db.update_owner(gemini_api_key="")
@@ -1321,6 +1332,48 @@ def create_app(
             unsubscribe=auth_manager.unsubscribe,
             write_raw=auth_manager.write_raw,
             resize=auth_manager.resize,
+        )
+
+    @app.get("/api/terminal/status")
+    async def terminal_status(
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        return asdict(terminal_manager.get_state())
+
+    @app.post("/api/terminal/start")
+    async def terminal_start(
+        payload: TerminalStartRequest = Body(default_factory=TerminalStartRequest),
+        owner: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        ensure_workspace(settings, owner)
+        target_home = prepare_agy_home(settings, db, context_mode=payload.context_mode)
+        if isinstance(runner, AgyRunner):
+            runner.invalidate_models_cache()
+        state = await terminal_manager.start(
+            context_mode=payload.context_mode,
+            home_dir=target_home,
+            model=owner.agy_model,
+            gemini_api_key=owner.gemini_api_key,
+            cols=payload.cols,
+            rows=payload.rows,
+        )
+        return asdict(state)
+
+    @app.post("/api/terminal/stop")
+    async def terminal_stop(_: OwnerConfig = Depends(require_auth)) -> dict[str, str]:
+        await terminal_manager.stop()
+        return {"status": "ok"}
+
+    @app.websocket("/ws/pty/terminal")
+    async def ws_pty_terminal(websocket: WebSocket) -> None:
+        await _serve_pty_websocket(
+            websocket,
+            is_running=lambda: bool(terminal_manager.get_state().running),
+            get_exit_code=lambda: terminal_manager.get_state().exit_code,
+            subscribe=terminal_manager.subscribe,
+            unsubscribe=terminal_manager.unsubscribe,
+            write_raw=terminal_manager.write_raw,
+            resize=terminal_manager.resize,
         )
 
     @app.get("/api/app/version")

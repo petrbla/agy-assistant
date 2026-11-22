@@ -9,6 +9,7 @@
     "doc_title": "Antigravity Assistent",
     "brand_default": "Antigravity Assistent",
     "nav_chat": "Chat",
+    "nav_terminal": "Terminal",
     "nav_memory": "Gedächtnis",
     "nav_ops": "Planer & Verlauf",
     "nav_settings": "Einstellungen",
@@ -560,7 +561,13 @@
     "gh_guide_step4_desc": "Trage dein-benutzer/assistant-backup (oder HTTPS-URL) ein, füge den Token hinzu, aktiviere den Schalter, klicke auf „Backup speichern“ und dann auf „Jetzt sichern“.",
     "help_account_login_ident": "Du kannst dich sowohl mit dieser E-Mail als auch mit diesem Benutzernamen anmelden.",
     "btn_save_account": "Daten speichern",
-    "toast_account_saved": "Anmeldedaten gespeichert."
+    "toast_account_saved": "Anmeldedaten gespeichert.",
+    "btn_start_terminal": "agy-Terminal starten",
+    "btn_restart_terminal": "agy neu starten",
+    "btn_stop_terminal": "Beenden",
+    "term_agy_ready": "Wähle einen Bereich (Auto / Arbeit / Privat) und klicke auf „agy-Terminal starten“, um agy interaktiv zu öffnen.",
+    "term_agy_hint": "Startet interaktives agy direkt im Workspace. Beendet sich nach 30 Minuten Inaktivität automatisch.",
+    "toast_terminal_stopped": "agy-Terminal beendet."
   },
   "backend": {
     "channel_auto": "Auto",

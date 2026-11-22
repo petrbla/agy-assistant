@@ -505,9 +505,16 @@ def has_schedule_instructions(workspace_dir: Path | None) -> bool:
 class _WarmSessionFallbackError(Exception):
     """Signalizuje, že teplý `stream-json` proces nelze použít a má proběhnout one-shot fallback."""
 
-    def __init__(self, message: str, *, disable_stream: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        disable_stream: bool = False,
+        already_started: bool = False,
+    ) -> None:
         super().__init__(message)
         self.disable_stream = disable_stream
+        self.already_started = already_started
 
 
 class _WarmAgyProcess:
@@ -569,6 +576,7 @@ class _WarmAgyProcess:
         deadline = time.monotonic() + max(1, timeout)
         deltas: list[str] = []
         conv_id: str | None = self.conversation_id
+        turn_started = False
 
         while True:
             remaining = deadline - time.monotonic()
@@ -589,6 +597,7 @@ class _WarmAgyProcess:
                 raise _WarmSessionFallbackError(
                     stderr_hint or "Teplý proces agy ukončil proud před výsledkem.",
                     disable_stream=disable,
+                    already_started=turn_started,
                 )
 
             line = raw_line.decode("utf-8", errors="replace").strip()
@@ -614,7 +623,21 @@ class _WarmAgyProcess:
                     self.conversation_id = found_cid
                 continue
 
+            if ev == "error":
+                err_block = obj.get("error")
+                err_msg = (
+                    err_block
+                    if isinstance(err_block, str)
+                    else _extract_first_str(
+                        err_block if isinstance(err_block, dict) else obj,
+                        ("message", "error", "detail"),
+                    )
+                    or "Neznámá chyba stream-json."
+                )
+                raise _WarmSessionFallbackError(err_msg, already_started=turn_started)
+
             if ev == "step_update":
+                turn_started = True
                 step_block = (
                     obj.get("step_update") if isinstance(obj.get("step_update"), dict) else obj
                 )
@@ -645,7 +668,10 @@ class _WarmAgyProcess:
                     err_detail = (
                         _extract_first_str(res_block, ("error", "message", "detail")) or status_str
                     )
-                    raise _WarmSessionFallbackError(f"stream-json result status={err_detail}")
+                    raise _WarmSessionFallbackError(
+                        f"stream-json result status={err_detail}",
+                        already_started=turn_started,
+                    )
 
                 usage = extract_token_usage(res_block) or extract_token_usage(obj)
                 denied = _extract_denied_actions(res_block) or _extract_denied_actions(obj)
@@ -654,18 +680,8 @@ class _WarmAgyProcess:
                     text = f"{text}\n\n{warn}" if text else warn
                 return text, conv_id, usage
 
-            if ev == "error":
-                err_block = obj.get("error")
-                err_msg = (
-                    err_block
-                    if isinstance(err_block, str)
-                    else _extract_first_str(
-                        err_block if isinstance(err_block, dict) else obj,
-                        ("message", "error", "detail"),
-                    )
-                    or "Neznámá chyba stream-json."
-                )
-                raise _WarmSessionFallbackError(err_msg)
+            if ev:
+                turn_started = True
 
 
 class AgyRunner:
@@ -1205,6 +1221,21 @@ class AgyRunner:
                     )
                 except _WarmSessionFallbackError as exc:
                     await self.close_session(session_key)
+                    if exc.already_started:
+                        logger.warning(
+                            "Teplý proces agy selhal až po zahájení tahu (%s) – neopakuji jednorázové volání.",
+                            exc,
+                        )
+                        return self._record_error(
+                            source=source,
+                            session_key=session_key,
+                            context_mode=effective_ctx,
+                            prompt=prompt,
+                            conversation_id=conv_id,
+                            started=started,
+                            err_msg=str(exc),
+                            user_prefix="Chyba Antigravity CLI: ",
+                        )
                     if exc.disable_stream:
                         self._stream_json_supported = False
                     logger.warning(

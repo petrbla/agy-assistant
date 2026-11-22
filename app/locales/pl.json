@@ -9,6 +9,7 @@
     "doc_title": "Asystent Antigravity",
     "brand_default": "Asystent Antigravity",
     "nav_chat": "Czat",
+    "nav_terminal": "Terminal",
     "nav_memory": "Pamięć",
     "nav_ops": "Harmonogram i Historia",
     "nav_settings": "Ustawienia",
@@ -560,7 +561,13 @@
     "gh_guide_step4_desc": "Wpisz twoj-login/assistant-backup (lub pełny URL HTTPS), wklej token, włącz przełącznik, kliknij „Zapisz kopię”, a następnie „Zrób kopię teraz”.",
     "help_account_login_ident": "Możesz logować się zarówno tym e-mailem, jak i tą nazwą użytkownika.",
     "btn_save_account": "Zapisz dane",
-    "toast_account_saved": "Dane logowania zapisane."
+    "toast_account_saved": "Dane logowania zapisane.",
+    "btn_start_terminal": "Uruchom terminal agy",
+    "btn_restart_terminal": "Restartuj agy",
+    "btn_stop_terminal": "Zakończ",
+    "term_agy_ready": "Wybierz obszar (Auto / Praca / Prywatne) i kliknij „Uruchom terminal agy”, aby uruchomić interaktywne agy.",
+    "term_agy_hint": "Uruchamia interaktywne agy bezpośrednio w workspace. Zamyka się automatycznie po 30 minutach bezczynności.",
+    "toast_terminal_stopped": "Terminal agy zatrzymany."
   },
   "backend": {
     "channel_auto": "Auto",

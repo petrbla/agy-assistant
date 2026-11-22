@@ -556,6 +556,28 @@ pre.term {
 .xterm-host.xterm-host-lg {
   height: 360px;
 }
+.terminal-shell {
+  height: calc(100vh - 116px);
+  min-height: 540px;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0b1220;
+}
+.xterm-host.xterm-host-full {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 320px;
+}
+pre.term.terminal-fallback {
+  max-height: none;
+  flex: 1 1 auto;
+}
 .xterm-host .xterm {
   height: 100%;
 }

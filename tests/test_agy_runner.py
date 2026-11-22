@@ -466,4 +466,64 @@ async def test_soul_name_syncs_to_owner_after_chat_turn(tmp_path: Path) -> None:
     assert extract_assistant_name_from_soul(ws) == "Viktor"
 
 
+async def test_warm_session_does_not_rerun_oneshot_after_turn_started(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace_dir=tmp_path / "ws",
+        data_dir=tmp_path / "data",
+        agy_persistent_session=True,
+    )
+    settings.workspace_dir.mkdir(parents=True)
+    db = AssistantDB(settings.db_path)
+    runner = AgyRunner(settings, db)
+
+    stdout_queue: list[bytes] = [
+        json.dumps({"event": "init", "init": {"conversation_id": "warm-mid"}}).encode() + b"\n",
+        json.dumps({"event": "step_update", "step_update": {"text_delta": "Spoustim ukol..."}}).encode()
+        + b"\n",
+    ]
+
+    class _FakeStdin:
+        def write(self, _data: bytes) -> None:
+            return None
+
+        async def drain(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class _FakeStdout:
+        async def readline(self) -> bytes:
+            return stdout_queue.pop(0) if stdout_queue else b""
+
+    class _FakeStderr:
+        async def read(self) -> bytes:
+            return b"connection dropped mid-turn"
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+            self.stdin = _FakeStdin()
+            self.stdout = _FakeStdout()
+            self.stderr = _FakeStderr()
+
+        async def wait(self) -> int:
+            self.returncode = 1
+            return 1
+
+        def terminate(self) -> None:
+            self.returncode = 1
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    spawn_mock = AsyncMock(return_value=_FakeProc())
+    with patch("asyncio.create_subprocess_exec", side_effect=spawn_mock):
+        res = await runner.run("Spust akci", session_key="tg:1:auto", source="telegram")
+
+    assert spawn_mock.await_count == 1
+    assert res.success is False
+    assert "connection dropped mid-turn" in (res.error or "")
+
+
 
