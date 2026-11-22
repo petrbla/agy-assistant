@@ -549,7 +549,10 @@
     "gh_guide_step3_title": "Nadaj uprawnienie Contents: Read and write",
     "gh_guide_step3_desc": "Rozwiń Permissions → Repository permissions, przy Contents wybierz Read and write (Metadata włączy się automatycznie). Kliknij Generate token i skopiuj klucz github_pat_….",
     "gh_guide_step4_title": "Wypełnij formularz powyżej, zapisz i przetestuj",
-    "gh_guide_step4_desc": "Wpisz twoj-login/assistant-backup (lub pełny URL HTTPS), wklej token, włącz przełącznik, kliknij „Zapisz kopię”, a następnie „Zrób kopię teraz”."
+    "gh_guide_step4_desc": "Wpisz twoj-login/assistant-backup (lub pełny URL HTTPS), wklej token, włącz przełącznik, kliknij „Zapisz kopię”, a następnie „Zrób kopię teraz”.",
+    "help_account_login_ident": "Możesz logować się zarówno tym e-mailem, jak i tą nazwą użytkownika.",
+    "btn_save_account": "Zapisz dane",
+    "toast_account_saved": "Dane logowania zapisane."
   },
   "backend": {
     "channel_auto": "Auto",

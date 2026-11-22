@@ -549,7 +549,10 @@
     "gh_guide_step3_title": "Nastavte oprávnění Contents: Read and write",
     "gh_guide_step3_desc": "Rozbalte Permissions → Repository permissions, u položky Contents vyberte Read and write (Metadata se zapnou automaticky). Poté klikněte na Generate token a vygenerovaný klíč (github_pat_…) si zkopírujte.",
     "gh_guide_step4_title": "Vyplňte formulář výše, uložte a otestujte",
-    "gh_guide_step4_desc": "Do pole GitHub repozitář zadejte vase-jmeno/asistent-zaloha (nebo celou HTTPS adresu), vložte zkopírovaný token, zapněte přepínač, klikněte na „Uložit zálohování“ a následně na „Zálohovat teď“."
+    "gh_guide_step4_desc": "Do pole GitHub repozitář zadejte vase-jmeno/asistent-zaloha (nebo celou HTTPS adresu), vložte zkopírovaný token, zapněte přepínač, klikněte na „Uložit zálohování“ a následně na „Zálohovat teď“.",
+    "help_account_login_ident": "Přihlásit se můžete jak tímto e-mailem, tak tímto uživatelským jménem.",
+    "btn_save_account": "Uložit údaje",
+    "toast_account_saved": "Přihlašovací údaje uloženy."
   },
   "backend": {
     "channel_auto": "Auto",

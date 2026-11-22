@@ -360,6 +360,19 @@
     toastTimer = setTimeout(() => el.classList.remove("show"), 3600);
   }
 
+  function showInlineFeedback(elId, msg, kind = "ok") {
+    const el = $(elId);
+    if (!el) return;
+    if (!msg) {
+      el.textContent = "";
+      el.className = "small d-none";
+      return;
+    }
+    const prefix = kind === "err" ? "✕ " : "✓ ";
+    el.textContent = `${prefix}${msg}`;
+    el.className = `small fw-semibold ${kind === "err" ? "text-danger" : "text-success"}`;
+  }
+
   function getHeaders() {
     const h = { "Content-Type": "application/json" };
     const tok = (localStorage.getItem("agy_web_token") || "").trim();
@@ -4158,6 +4171,7 @@
   // Security (Password & 2FA)
   function updateSecurityUi(s) {
     if ($("accEmail")) $("accEmail").value = s.email || "";
+    if ($("accUsername")) $("accUsername").value = s.username || "";
     $("pwdCurrentWrap").classList.toggle("d-none", !s.has_password);
     $("disable2faPwd").classList.toggle("d-none", !s.has_password);
     $("totpBadge").textContent = s.totp_enabled ? t("totp_on") : t("totp_off");
@@ -4168,17 +4182,35 @@
 
   $("accountEmailForm").onsubmit = async (e) => {
     e.preventDefault();
+    showInlineFeedback("accountProfileFeedback", "");
+    const btn = $("saveAccountBtn");
+    if (btn) btn.disabled = true;
     try {
-      const r = await api("/api/account/email", { method: "POST", body: JSON.stringify({ email: $("accEmail").value.trim() }) });
+      const payload = { email: $("accEmail").value.trim() };
+      const uname = ($("accUsername")?.value || "").trim();
+      if (uname) payload.username = uname;
+      const r = await api("/api/account/email", { method: "POST", body: JSON.stringify(payload) });
       updateSecurityUi(r.owner);
-      toast(t("toast_email_saved"));
-    } catch (err) { toast(err.message, "err"); }
+      showInlineFeedback("accountProfileFeedback", t("toast_account_saved"), "ok");
+      toast(t("toast_account_saved"));
+    } catch (err) {
+      showInlineFeedback("accountProfileFeedback", err.message, "err");
+      toast(err.message, "err");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   };
 
   $("accountPasswordForm").onsubmit = async (e) => {
     e.preventDefault();
+    showInlineFeedback("accountPwdFeedback", "");
     const pw = $("accNewPassword").value;
-    if (pw !== $("accConfirmPassword").value) return toast(t("err_passwords_mismatch"), "err");
+    if (pw !== $("accConfirmPassword").value) {
+      showInlineFeedback("accountPwdFeedback", t("err_passwords_mismatch"), "err");
+      return toast(t("err_passwords_mismatch"), "err");
+    }
+    const btn = $("savePasswordBtn");
+    if (btn) btn.disabled = true;
     try {
       const r = await api("/api/account/password", {
         method: "POST",
@@ -4187,8 +4219,14 @@
       if (r.session_token) localStorage.setItem("agy_web_token", r.session_token);
       $("accCurrentPassword").value = ""; $("accNewPassword").value = ""; $("accConfirmPassword").value = "";
       updateSecurityUi(r.owner);
+      showInlineFeedback("accountPwdFeedback", t("toast_password_saved"), "ok");
       toast(t("toast_password_saved"));
-    } catch (err) { toast(err.message, "err"); }
+    } catch (err) {
+      showInlineFeedback("accountPwdFeedback", err.message, "err");
+      toast(err.message, "err");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   };
 
   $("start2faBtn").onclick = async () => {

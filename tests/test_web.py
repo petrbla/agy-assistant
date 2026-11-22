@@ -271,6 +271,30 @@ def test_password_change_revokes_previous_sessions_and_template_json_valid(tmp_p
     assert client.get("/api/status", headers={"Authorization": f"Bearer {tok2}"}).status_code == 401
     assert client.get("/api/status", headers={"Authorization": f"Bearer {new_tok}"}).status_code == 200
 
+    # Úprava e-mailu i uživatelského jména a ověření přihlášení oběma identifikátory
+    acct_res = client.post(
+        "/api/account/email",
+        headers={"Authorization": f"Bearer {new_tok}"},
+        json={"email": "novy@example.com", "username": "NovyLogin"},
+    )
+    assert acct_res.status_code == 200
+    assert acct_res.json()["owner"]["email"] == "novy@example.com"
+    assert acct_res.json()["owner"]["username"] == "novylogin"
+    assert (
+        client.post(
+            "/api/login",
+            json={"identifier": "novylogin", "password": "noveheslo12345"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/login",
+            json={"identifier": "novy@example.com", "password": "noveheslo12345"},
+        ).status_code
+        == 200
+    )
+
 
 async def test_app_version_checker_and_api(tmp_path: Path) -> None:
     from app.version_check import _with_cache_buster

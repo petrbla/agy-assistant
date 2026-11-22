@@ -549,7 +549,10 @@
     "gh_guide_step3_title": "Grant Contents: Read and write permission",
     "gh_guide_step3_desc": "Expand Permissions → Repository permissions, find Contents, and set it to Read and write (Metadata is enabled automatically). Click Generate token and copy the github_pat_… token right away.",
     "gh_guide_step4_title": "Fill in the form above, save, and test",
-    "gh_guide_step4_desc": "Enter your-user/assistant-backup (or full HTTPS URL) into GitHub repository, paste the token, turn the switch on, click “Save backup settings”, and then “Back up now”."
+    "gh_guide_step4_desc": "Enter your-user/assistant-backup (or full HTTPS URL) into GitHub repository, paste the token, turn the switch on, click “Save backup settings”, and then “Back up now”.",
+    "help_account_login_ident": "You can sign in with either this email or this username.",
+    "btn_save_account": "Save account",
+    "toast_account_saved": "Account login details saved."
   },
   "backend": {
     "channel_auto": "Auto",

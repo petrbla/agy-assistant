@@ -232,6 +232,9 @@ class InitialSetupRequest(BaseModel):
 
 class AccountEmailRequest(BaseModel):
     email: str = Field(min_length=5, max_length=200)
+    username: str | None = Field(
+        default=None, min_length=2, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$"
+    )
 
 
 class Login2FARequest(BaseModel):
@@ -591,7 +594,10 @@ def create_app(
     ) -> dict[str, object]:
         if not is_valid_email(payload.email):
             raise HTTPException(status_code=400, detail="Zadejte platnou e-mailovou adresu.")
-        updated = db.update_owner(email=normalize_email(payload.email))
+        updates: dict[str, Any] = {"email": normalize_email(payload.email)}
+        if payload.username is not None and payload.username.strip():
+            updates["username"] = payload.username.strip().lower()
+        updated = db.update_owner(**updates)
         return {"status": "ok", "owner": _owner_public_dict(updated, settings)}
 
     @app.post("/api/account/password")

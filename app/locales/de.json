@@ -549,7 +549,10 @@
     "gh_guide_step3_title": "Berechtigung Contents: Read and write setzen",
     "gh_guide_step3_desc": "Öffne Permissions → Repository permissions und stelle bei Contents „Read and write“ ein (Metadata wird automatisch aktiviert). Klicke auf Generate token und kopiere den github_pat_…-Schlüssel.",
     "gh_guide_step4_title": "Formular oben ausfüllen, speichern und testen",
-    "gh_guide_step4_desc": "Trage dein-benutzer/assistant-backup (oder HTTPS-URL) ein, füge den Token hinzu, aktiviere den Schalter, klicke auf „Backup speichern“ und dann auf „Jetzt sichern“."
+    "gh_guide_step4_desc": "Trage dein-benutzer/assistant-backup (oder HTTPS-URL) ein, füge den Token hinzu, aktiviere den Schalter, klicke auf „Backup speichern“ und dann auf „Jetzt sichern“.",
+    "help_account_login_ident": "Du kannst dich sowohl mit dieser E-Mail als auch mit diesem Benutzernamen anmelden.",
+    "btn_save_account": "Daten speichern",
+    "toast_account_saved": "Anmeldedaten gespeichert."
   },
   "backend": {
     "channel_auto": "Auto",

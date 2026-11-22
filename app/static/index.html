@@ -110,7 +110,7 @@
         <form id="loginStep1Form">
           <div class="mb-3">
             <label for="loginIdent" class="form-label small fw-semibold text-body-secondary" data-i18n="label_login_ident">Email or username</label>
-            <input id="loginIdent" type="text" class="form-control" required autocomplete="username" placeholder="admin" />
+            <input id="loginIdent" type="text" class="form-control" required autocomplete="username" placeholder="you@example.com" data-i18n-placeholder="placeholder_email" />
           </div>
           <div class="mb-3">
             <label for="loginPassword" class="form-label small fw-semibold text-body-secondary" data-i18n="label_password">Password</label>
@@ -892,9 +892,7 @@
 
       <!-- 4d. ACCOUNT & SECURITY -->
       <div class="settings-pane d-none" data-settings-pane="security">
-        <div class="row justify-content-center">
-          <div class="col-lg-8">
-            <div class="card shadow-sm">
+        <div class="card shadow-sm">
               <div class="card-header d-flex align-items-start justify-content-between gap-2">
                 <div class="min-w-0">
                   <h2 class="h6 fw-bold mb-0" data-i18n="sec_title">Account Security &amp; 2FA (TOTP)</h2>
@@ -904,10 +902,20 @@
               </div>
               <div class="card-body">
                 <form id="accountEmailForm" class="mb-3">
-                  <label for="accEmail" class="form-label small fw-semibold text-body-secondary" data-i18n="label_account_email">Account email</label>
-                  <div class="d-flex align-items-center gap-2">
-                    <input id="accEmail" type="email" class="form-control form-control-sm flex-grow-1" required placeholder="you@example.com" data-i18n-placeholder="placeholder_email" />
-                    <button type="submit" class="btn btn-outline-secondary btn-sm text-nowrap" data-i18n="btn_save_email">Save email</button>
+                  <div class="row g-2 mb-2">
+                    <div class="col-sm-6">
+                      <label for="accEmail" class="form-label small fw-semibold text-body-secondary" data-i18n="label_account_email">Account email</label>
+                      <input id="accEmail" type="email" class="form-control form-control-sm" required placeholder="you@example.com" data-i18n-placeholder="placeholder_email" />
+                    </div>
+                    <div class="col-sm-6">
+                      <label for="accUsername" class="form-label small fw-semibold text-body-secondary" data-i18n="label_username">Username</label>
+                      <input id="accUsername" type="text" class="form-control form-control-sm" required minlength="2" maxlength="50" pattern="^[a-zA-Z0-9_.-]+$" />
+                    </div>
+                  </div>
+                  <div class="form-text mb-2" data-i18n="help_account_login_ident">You can sign in with either this email or this username.</div>
+                  <div class="d-flex align-items-center flex-wrap gap-2">
+                    <button id="saveAccountBtn" type="submit" class="btn btn-outline-secondary btn-sm text-nowrap" data-i18n="btn_save_account">Save account</button>
+                    <span id="accountProfileFeedback" class="small d-none" role="status" aria-live="polite"></span>
                   </div>
                 </form>
                 <form id="accountPasswordForm">
@@ -925,7 +933,10 @@
                       <input id="accConfirmPassword" type="password" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" />
                     </div>
                   </div>
-                  <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_password">Save password</button>
+                  <div class="d-flex align-items-center flex-wrap gap-2">
+                    <button id="savePasswordBtn" type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_password">Save password</button>
+                    <span id="accountPwdFeedback" class="small d-none" role="status" aria-live="polite"></span>
+                  </div>
                 </form>
 
                 <hr class="my-3" />
@@ -964,8 +975,6 @@
                 </div>
               </div>
             </div>
-          </div>
-        </div>
       </div>
     </section>
 
