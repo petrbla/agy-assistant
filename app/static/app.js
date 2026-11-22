@@ -42,6 +42,10 @@
   let settingsOauthTerm = null;
   let onboardOauthTerm = null;
   let pluginConnectTerm = null;
+  let embeddedBrowserWs = null;
+  let embeddedBrowserOpen = false;
+  let embeddedBrowserDims = { width: 1024, height: 720 };
+  let embeddedBrowserCompleting = false;
   const FEATURED_PLUGINS = ["gmail", "gcalendar", "gdrive"];
   const BS_ICONS = {
     sun: "bi-sun",
@@ -3139,10 +3143,20 @@
         a.href = st.auth_url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.className = "btn btn-primary";
+        a.className = "btn btn-primary btn-sm";
         const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || st.plugin_name || "Google";
-        a.textContent = t("plugin_connect_open_google", { name: disp });
+        a.innerHTML = `<i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span>${escapeHtml(t("plugin_connect_open_google", { name: disp }))}</span>`;
         urlWrap.appendChild(a);
+
+        const ebBtn = document.createElement("button");
+        ebBtn.type = "button";
+        ebBtn.className = "btn btn-outline-primary btn-sm";
+        const ebAvail = st.browser_available !== false;
+        ebBtn.disabled = !ebAvail;
+        if (!ebAvail) ebBtn.title = t("plugin_browser_unavailable");
+        ebBtn.innerHTML = `<i class="bi bi-window me-1" aria-hidden="true"></i><span>${escapeHtml(t("plugin_connect_open_embedded"))}</span>`;
+        ebBtn.onclick = () => openEmbeddedBrowser();
+        urlWrap.appendChild(ebBtn);
       } else {
         const hint = document.createElement("span");
         hint.className = "text-body-secondary small";
@@ -3158,7 +3172,12 @@
     if ($("pluginConnectStep1")) {
       $("pluginConnectStep1").classList.toggle("d-none", Boolean(st.connected) || isInteractiveCfg);
     }
-    if (cbForm) cbForm.classList.toggle("d-none", st.flow_type !== "localhost_callback" || Boolean(st.connected));
+    if (cbForm) {
+      cbForm.classList.toggle(
+        "d-none",
+        st.flow_type !== "localhost_callback" || Boolean(st.connected) || embeddedBrowserOpen
+      );
+    }
     if (codeForm) codeForm.classList.toggle("d-none", st.flow_type !== "code_paste" || Boolean(st.connected));
 
     if (pluginConnectTerm && pluginConnectTerm.term) {
@@ -3269,9 +3288,118 @@
     }
   }
 
+  async function closeEmbeddedBrowser({ stopBackend = true } = {}) {
+    embeddedBrowserOpen = false;
+    embeddedBrowserCompleting = false;
+    if (embeddedBrowserWs) {
+      try { embeddedBrowserWs.close(); } catch (_) {}
+      embeddedBrowserWs = null;
+    }
+    const box = $("pluginEmbeddedBrowserBox");
+    if (box) box.classList.add("d-none");
+    const img = $("pluginBrowserImg");
+    if (img) img.removeAttribute("src");
+    const overlay = $("pluginBrowserOverlay");
+    if (overlay) overlay.classList.remove("d-none");
+    if ($("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = "about:blank";
+    if (stopBackend) {
+      try { await api("/api/plugins/connect/browser/stop", { method: "POST" }); } catch (_) {}
+    }
+    if (lastPluginConnectState) renderPluginConnectState(lastPluginConnectState);
+  }
+
+  async function completeEmbeddedBrowserOAuth() {
+    if (embeddedBrowserCompleting) return;
+    embeddedBrowserCompleting = true;
+    try {
+      const res = await api("/api/plugins/connect/browser/complete", { method: "POST" });
+      const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin";
+      toast(t("toast_plugin_connected", { name: disp }));
+      await closePluginConnectModal();
+      await loadPlugins();
+    } catch (err) {
+      embeddedBrowserCompleting = false;
+      toast(err.message, "err");
+    }
+  }
+
+  async function openEmbeddedBrowser() {
+    const box = $("pluginEmbeddedBrowserBox");
+    const overlay = $("pluginBrowserOverlay");
+    const img = $("pluginBrowserImg");
+    const viewport = $("pluginBrowserViewport");
+    if (!box) return;
+
+    embeddedBrowserOpen = true;
+    embeddedBrowserCompleting = false;
+    box.classList.remove("d-none");
+    if (overlay) overlay.classList.remove("d-none");
+    if (img) img.removeAttribute("src");
+    if (lastPluginConnectState) renderPluginConnectState(lastPluginConnectState);
+
+    try {
+      const st = await api("/api/plugins/connect/browser/start", { method: "POST" });
+      if (!st.running) {
+        toast(st.error || t("plugin_browser_unavailable"), "err");
+        await closeEmbeddedBrowser({ stopBackend: false });
+        return;
+      }
+      if ($("pluginBrowserUrl") && st.current_url) {
+        $("pluginBrowserUrl").textContent = st.current_url;
+      }
+
+      if (embeddedBrowserWs) {
+        try { embeddedBrowserWs.close(); } catch (_) {}
+        embeddedBrowserWs = null;
+      }
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/ws/browser/plugin`);
+      embeddedBrowserWs = ws;
+
+      ws.onopen = () => {
+        const tok = localStorage.getItem("agy_web_token") || "";
+        ws.send(JSON.stringify({ type: "auth", token: tok }));
+      };
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch (_) { return; }
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "ready") {
+          if (msg.width && msg.height) {
+            embeddedBrowserDims = { width: Number(msg.width), height: Number(msg.height) };
+          }
+          if (msg.url && $("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = msg.url;
+          if (viewport) viewport.focus();
+        } else if (msg.type === "frame" && msg.data) {
+          if (img) img.src = `data:image/jpeg;base64,${msg.data}`;
+          if (overlay) overlay.classList.add("d-none");
+          if (msg.url && $("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = msg.url;
+        } else if (msg.type === "url" && msg.url) {
+          if ($("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = msg.url;
+        } else if (msg.type === "callback_reached") {
+          completeEmbeddedBrowserOAuth();
+        } else if (msg.type === "closed") {
+          if (!embeddedBrowserCompleting && embeddedBrowserOpen) {
+            closeEmbeddedBrowser({ stopBackend: false });
+          }
+        }
+      };
+      ws.onerror = () => {
+        if (embeddedBrowserOpen && !embeddedBrowserCompleting) {
+          toast(t("plugin_browser_unavailable"), "err");
+          closeEmbeddedBrowser({ stopBackend: false });
+        }
+      };
+    } catch (err) {
+      toast(err.message, "err");
+      await closeEmbeddedBrowser({ stopBackend: false });
+    }
+  }
+
   async function closePluginConnectModal() {
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
     if (pluginConnectTerm) pluginConnectTerm.disconnect({ keepContent: false });
+    await closeEmbeddedBrowser({ stopBackend: false });
     const modal = $("pluginConnectModal");
     if (modal) modal.classList.add("d-none");
     activeConnectPlugin = null;
@@ -3664,21 +3792,150 @@
     }
   });
 
+  async function submitPluginCallbackUrl(urlVal) {
+    const cleaned = (urlVal || "").trim();
+    if (!cleaned) return;
+    try {
+      const res = await api("/api/plugins/connect/callback", {
+        method: "POST",
+        body: JSON.stringify({ callback_url: cleaned }),
+      });
+      const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin";
+      toast(t("toast_plugin_connected", { name: disp }));
+      await closePluginConnectModal();
+      await loadPlugins();
+    } catch (err) { toast(err.message, "err"); }
+  }
+
   if ($("pluginCallbackForm")) {
     $("pluginCallbackForm").onsubmit = async (e) => {
       e.preventDefault();
-      const urlVal = $("pluginCallbackInput").value.trim();
-      if (!urlVal) return;
+      await submitPluginCallbackUrl($("pluginCallbackInput").value);
+    };
+  }
+  if ($("pluginCallbackInput")) {
+    $("pluginCallbackInput").addEventListener("paste", () => {
+      setTimeout(() => {
+        const val = ($("pluginCallbackInput")?.value || "").trim();
+        if (/^https?:\/\/(127\.0\.0\.1|localhost):\d+/i.test(val) && val.includes("code=")) {
+          submitPluginCallbackUrl(val);
+        }
+      }, 0);
+    });
+  }
+  if ($("pluginPasteCallbackBtn")) {
+    $("pluginPasteCallbackBtn").onclick = async () => {
       try {
-        const res = await api("/api/plugins/connect/callback", {
-          method: "POST",
-          body: JSON.stringify({ callback_url: urlVal }),
+        const text = (await navigator.clipboard.readText()).trim();
+        if (!text) {
+          toast(t("plugin_connect_clipboard_empty"), "warn");
+          return;
+        }
+        if ($("pluginCallbackInput")) $("pluginCallbackInput").value = text;
+        await submitPluginCallbackUrl(text);
+      } catch (_) {
+        toast(t("plugin_connect_clipboard_empty"), "warn");
+      }
+    };
+  }
+
+  function sendBrowserWs(payload) {
+    if (embeddedBrowserWs && embeddedBrowserWs.readyState === WebSocket.OPEN) {
+      embeddedBrowserWs.send(JSON.stringify(payload));
+    }
+  }
+  function browserEventCoords(e) {
+    const vp = $("pluginBrowserViewport");
+    if (!vp) return { x: 0, y: 0 };
+    const rect = vp.getBoundingClientRect();
+    const rx = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
+    const ry = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+    return {
+      x: Math.max(0, Math.min(embeddedBrowserDims.width, Math.round(rx * embeddedBrowserDims.width))),
+      y: Math.max(0, Math.min(embeddedBrowserDims.height, Math.round(ry * embeddedBrowserDims.height))),
+    };
+  }
+  if ($("pluginBrowserViewport")) {
+    const vp = $("pluginBrowserViewport");
+    let lastMoveTs = 0;
+    vp.addEventListener("mousedown", (e) => {
+      vp.focus();
+      const { x, y } = browserEventCoords(e);
+      const btnMap = { 0: "left", 1: "middle", 2: "right" };
+      sendBrowserWs({ type: "mouse", action: "mousePressed", x, y, button: btnMap[e.button] || "left", clickCount: 1 });
+    });
+    vp.addEventListener("mouseup", (e) => {
+      const { x, y } = browserEventCoords(e);
+      const btnMap = { 0: "left", 1: "middle", 2: "right" };
+      sendBrowserWs({ type: "mouse", action: "mouseReleased", x, y, button: btnMap[e.button] || "left", clickCount: 1 });
+    });
+    vp.addEventListener("mousemove", (e) => {
+      const now = Date.now();
+      if (now - lastMoveTs < 45) return;
+      lastMoveTs = now;
+      const { x, y } = browserEventCoords(e);
+      sendBrowserWs({ type: "mouse", action: "mouseMoved", x, y });
+    });
+    vp.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const { x, y } = browserEventCoords(e);
+      sendBrowserWs({ type: "mouse", action: "mouseWheel", x, y, deltaX: Math.round(e.deltaX), deltaY: Math.round(e.deltaY) });
+    }, { passive: false });
+    vp.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
+      e.preventDefault();
+      const modifiers = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        sendBrowserWs({ type: "text", text: e.key });
+      } else {
+        sendBrowserWs({
+          type: "key",
+          action: "keyDown",
+          key: e.key,
+          code: e.code,
+          windowsVirtualKeyCode: e.keyCode || 0,
+          modifiers,
         });
-        const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin";
-        toast(t("toast_plugin_connected", { name: disp }));
-        await closePluginConnectModal();
-        await loadPlugins();
-      } catch (err) { toast(err.message, "err"); }
+      }
+    });
+    vp.addEventListener("keyup", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
+      e.preventDefault();
+      const modifiers = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+      sendBrowserWs({
+        type: "key",
+        action: "keyUp",
+        key: e.key,
+        code: e.code,
+        windowsVirtualKeyCode: e.keyCode || 0,
+        modifiers,
+      });
+    });
+    vp.addEventListener("paste", (e) => {
+      const txt = e.clipboardData ? e.clipboardData.getData("text") : "";
+      if (txt) {
+        e.preventDefault();
+        sendBrowserWs({ type: "text", text: txt });
+      }
+    });
+  }
+  if ($("pluginBrowserBackBtn")) $("pluginBrowserBackBtn").onclick = () => sendBrowserWs({ type: "back" });
+  if ($("pluginBrowserReloadBtn")) $("pluginBrowserReloadBtn").onclick = () => sendBrowserWs({ type: "reload" });
+  if ($("pluginBrowserCloseBtn")) $("pluginBrowserCloseBtn").onclick = () => closeEmbeddedBrowser({ stopBackend: true });
+  if ($("pluginBrowserPasteBtn")) {
+    $("pluginBrowserPasteBtn").onclick = async () => {
+      try {
+        const txt = await navigator.clipboard.readText();
+        if (!txt) {
+          toast(t("plugin_connect_clipboard_empty"), "warn");
+          return;
+        }
+        sendBrowserWs({ type: "text", text: txt });
+        if ($("pluginBrowserViewport")) $("pluginBrowserViewport").focus();
+      } catch (_) {
+        toast(t("plugin_connect_clipboard_empty"), "warn");
+      }
     };
   }
 

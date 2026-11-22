@@ -21,6 +21,7 @@ from app.agy_runner import AgyRunner, is_version_up_to_date
 from app.auth_session import AgyAuthManager
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
+from app.embedded_browser import EmbeddedBrowserManager
 from app.i18n import get_ui_bundle, list_available_languages, t
 from app.memory import WorkspaceMemory
 from app.plugins import PluginManager
@@ -305,6 +306,7 @@ def create_app(
     scheduler: AssistantScheduler | None = None,
     auth_manager: AgyAuthManager | None = None,
     plugin_manager: PluginManager | None = None,
+    browser_manager: EmbeddedBrowserManager | None = None,
     app_version_checker: AppVersionChecker | None = None,
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
@@ -315,6 +317,8 @@ def create_app(
     db.ensure_owner(settings)
     if plugin_manager is None:
         plugin_manager = PluginManager(settings, db)
+    if browser_manager is None:
+        browser_manager = EmbeddedBrowserManager()
     if app_version_checker is None:
         app_version_checker = AppVersionChecker(settings)
     signing_key = load_or_create_signing_key(settings.data_dir)
@@ -836,13 +840,17 @@ def create_app(
 
     @app.get("/api/plugins/connect/status")
     async def plugin_connect_status(_: OwnerConfig = Depends(require_auth)) -> dict[str, Any]:
-        return asdict(plugin_manager.get_connect_state())
+        return {
+            **asdict(plugin_manager.get_connect_state()),
+            "browser_available": browser_manager.is_available(),
+        }
 
     @app.post("/api/plugins/connect/callback")
     async def plugin_connect_callback(
         payload: PluginConnectCallbackRequest,
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, Any]:
+        await browser_manager.stop()
         try:
             res = await plugin_manager.submit_callback_url(payload.callback_url)
         except ValueError as exc:
@@ -870,7 +878,59 @@ def create_app(
 
     @app.post("/api/plugins/connect/stop")
     async def plugin_connect_stop(_: OwnerConfig = Depends(require_auth)) -> dict[str, str]:
+        await browser_manager.stop()
         await plugin_manager.stop_connect()
+        return {"status": "ok"}
+
+    @app.get("/api/plugins/connect/browser/status")
+    async def plugin_connect_browser_status(
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        return asdict(browser_manager.get_state())
+
+    @app.post("/api/plugins/connect/browser/start")
+    async def plugin_connect_browser_start(
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        conn_state = plugin_manager.get_connect_state()
+        if not conn_state.running or not conn_state.auth_url:
+            raise HTTPException(
+                status_code=400,
+                detail="Aktuálně nečeká žádný OAuth přihlašovací odkaz.",
+            )
+        try:
+            b_state = await browser_manager.start(
+                conn_state.auth_url,
+                callback_port=conn_state.callback_port,
+                callback_path=conn_state.callback_path or "/callback",
+                expected_state=conn_state.expected_state,
+            )
+            return asdict(b_state)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/plugins/connect/browser/complete")
+    async def plugin_connect_browser_complete(
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, Any]:
+        b_state = browser_manager.get_state()
+        if not b_state.callback_reached:
+            raise HTTPException(
+                status_code=400,
+                detail="Prohlížeč zatím nedosáhl OAuth callbacku.",
+            )
+        await browser_manager.stop()
+        res = await plugin_manager.finalize_browser_oauth()
+        _sync_all_plugin_contexts()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return res
+
+    @app.post("/api/plugins/connect/browser/stop")
+    async def plugin_connect_browser_stop(
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, str]:
+        await browser_manager.stop()
         return {"status": "ok"}
 
     @app.post("/api/plugins/{plugin_name}/toggle")
@@ -1226,6 +1286,71 @@ def create_app(
             write_raw=plugin_manager.write_connect_raw,
             resize=plugin_manager.resize_connect,
         )
+
+    @app.websocket("/ws/browser/plugin")
+    async def ws_browser_plugin(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            auth_msg = json.loads(raw_auth)
+            if not isinstance(auth_msg, dict) or auth_msg.get("type") != "auth":
+                raise ValueError("Missing auth frame")
+            _authenticate_token(str(auth_msg.get("token") or "").strip())
+        except Exception:
+            with contextlib.suppress(Exception):
+                await websocket.close(code=4401, reason="Unauthorized")
+            return
+
+        queue = browser_manager.subscribe()
+        sender_task: asyncio.Task[None] | None = None
+        try:
+            st = browser_manager.get_state()
+            await websocket.send_json(
+                {
+                    "type": "ready",
+                    "running": bool(st.running),
+                    "url": st.current_url,
+                    "width": browser_manager.VIEWPORT_WIDTH,
+                    "height": browser_manager.VIEWPORT_HEIGHT,
+                }
+            )
+            last_frame = browser_manager.get_last_frame()
+            if last_frame:
+                await websocket.send_json(
+                    {
+                        "type": "frame",
+                        "data": last_frame,
+                        "url": st.current_url,
+                    }
+                )
+
+            async def _pump_browser() -> None:
+                while True:
+                    event = await queue.get()
+                    if event is None:
+                        await websocket.send_json({"type": "closed"})
+                        break
+                    await websocket.send_json(event)
+
+            sender_task = asyncio.create_task(_pump_browser())
+            while True:
+                raw_msg = await websocket.receive_text()
+                try:
+                    msg = json.loads(raw_msg)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(msg, dict):
+                    await browser_manager.handle_client_event(msg)
+        except WebSocketDisconnect:
+            return
+        except Exception:
+            return
+        finally:
+            if sender_task is not None:
+                sender_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await sender_task
+            browser_manager.unsubscribe(queue)
 
     @app.websocket("/ws/pty/auth")
     async def ws_pty_auth(websocket: WebSocket) -> None:

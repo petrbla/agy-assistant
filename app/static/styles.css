@@ -644,3 +644,62 @@ pre.term {
 .app-toast.ok { background: var(--bs-success); color: #fff; }
 .app-toast.err { background: var(--bs-danger); color: #fff; }
 .app-toast.warn { background: var(--bs-warning); color: #111827; }
+
+/* Embedded OAuth Browser */
+.embedded-browser-box {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--bs-tertiary-bg);
+}
+.embedded-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+}
+.embedded-browser-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.76rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.35rem;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.embedded-browser-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1024 / 720;
+  background: #0f172a;
+  overflow: hidden;
+  outline: none;
+  cursor: default;
+  user-select: none;
+}
+.embedded-browser-viewport:focus {
+  box-shadow: inset 0 0 0 2px rgba(var(--bs-primary-rgb), 0.75);
+}
+.embedded-browser-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+.embedded-browser-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}

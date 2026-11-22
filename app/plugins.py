@@ -3664,7 +3664,17 @@ class PluginManager:
             )
 
         # Dej agy krátký čas na výměnu kódu za token a zapsání na disk
-        await asyncio.sleep(1.5)
+        res = await self.finalize_browser_oauth()
+        return {
+            **res,
+            "http_status": http_status,
+            "location": location,
+        }
+
+    async def finalize_browser_oauth(self, wait_seconds: float = 1.5) -> dict[str, Any]:
+        """Dokončí OAuth relaci po přijetí callbacku v prohlížeči a uloží stav účtu."""
+        state = self.get_connect_state()
+        await asyncio.sleep(wait_seconds)
         plugin_name = state.plugin_name
         if plugin_name:
             self._persist_account_connected(
@@ -3679,8 +3689,6 @@ class PluginManager:
             "status": "ok",
             "plugin": plugin_name,
             "connected": True,
-            "http_status": http_status,
-            "location": location,
         }
 
     def _close_fd(self) -> None:

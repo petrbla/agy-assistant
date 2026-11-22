@@ -953,10 +953,32 @@
             <div id="pluginConnectUrlWrap" class="d-flex align-items-center flex-wrap gap-2"></div>
           </div>
 
+          <div id="pluginEmbeddedBrowserBox" class="embedded-browser-box mb-3 d-none">
+            <div class="embedded-browser-bar">
+              <button id="pluginBrowserBackBtn" type="button" class="btn btn-outline-secondary btn-sm" title="Back" data-i18n-title="btn_back">
+                <i class="bi bi-arrow-left" aria-hidden="true"></i>
+              </button>
+              <button id="pluginBrowserReloadBtn" type="button" class="btn btn-outline-secondary btn-sm" title="Refresh" data-i18n-title="btn_refresh">
+                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+              </button>
+              <div id="pluginBrowserUrl" class="embedded-browser-url font-monospace">about:blank</div>
+              <button id="pluginBrowserPasteBtn" type="button" class="btn btn-outline-secondary btn-sm text-nowrap" data-i18n="plugin_browser_paste_btn">Paste text</button>
+              <button id="pluginBrowserCloseBtn" type="button" class="btn btn-outline-danger btn-sm text-nowrap" data-i18n="plugin_browser_close_btn">Close browser</button>
+            </div>
+            <div id="pluginBrowserViewport" class="embedded-browser-viewport" tabindex="0">
+              <img id="pluginBrowserImg" class="embedded-browser-img" alt="OAuth browser" />
+              <div id="pluginBrowserOverlay" class="embedded-browser-overlay">
+                <span data-i18n="plugin_browser_loading">Starting built-in browser…</span>
+              </div>
+            </div>
+            <div class="px-2 py-1 small text-body-secondary border-top bg-body-tertiary" data-i18n="plugin_browser_hint">Click inside the browser to sign in. Once approved, the connection completes automatically.</div>
+          </div>
+
           <form id="pluginCallbackForm" class="d-none">
             <div class="alert alert-info py-2 small my-2" data-i18n="plugin_connect_callback_hint">After approving access in Google, the browser shows a “127.0.0.1 refused to connect” page — that is expected! Copy the entire address from your browser's address bar (starting with http://127.0.0.1:…) and paste it below:</div>
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center flex-wrap gap-2">
               <input id="pluginCallbackInput" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="http://127.0.0.1:12345/callback?state=…&amp;code=…" />
+              <button id="pluginPasteCallbackBtn" type="button" class="btn btn-outline-primary btn-sm text-nowrap" data-i18n="plugin_connect_paste_btn">Paste from clipboard</button>
               <button type="submit" class="btn btn-primary btn-sm text-nowrap" data-i18n="plugin_connect_finish_btn">Complete connection</button>
             </div>
           </form>

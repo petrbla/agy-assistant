@@ -7,11 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=Europe/Prague \
     HOME=/home/asistent
 
-# Systémové závislosti pro Antigravity CLI, MCP (Node/npx), Git a zpracování PDF
+# Systémové závislosti pro Antigravity CLI, MCP (Node/npx), Git, PDF a vestavěný OAuth prohlížeč
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
+    chromium \
     curl \
+    fonts-dejavu-core \
     git \
     gosu \
     nodejs \
