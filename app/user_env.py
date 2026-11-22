@@ -46,6 +46,11 @@ _SKIP_GEMINI_DIRS = frozenset(
 )
 _NON_AUTH_FILES = frozenset({"settings.json", "mcp_config.json", "installation_id", "cli.log"})
 _NON_AUTH_SUFFIXES = frozenset({".log", ".db", ".db-shm", ".db-wal", ".lock", ".tmp"})
+_ISOLATED_PROFILE_SKIP_NAMES = frozenset({"mcp_oauth_tokens.json", "mcp_config.json"})
+_ISOLATED_PROFILE_SKIP_DIRS = frozenset({"plugins", "plugin_auth", "plugin_accounts"})
+_PROFILE_CLI_STATE_FILES = frozenset(
+    {"settings.json", "installation_id", "state.json", "onboarding.json", "config.json"}
+)
 _JETSKI_AUTH_RE = re.compile(
     r'(?i)\b(?:refresh_token|access_token|oauth_token|id_token|api_key)\s*:\s*"[^"\s]{8,}"'
     r'|\b(?:user_)?email\s*:\s*"[^"\s@]+@[^"\s@]+\.[^"\s@]+"'
@@ -408,6 +413,16 @@ def clear_agy_oauth(settings: Settings) -> None:
             jetski.unlink()
 
 
+def _is_plugin_token_file(path: Path) -> bool:
+    """Rozpozná tokeny jednotlivých pluginových účtů, které se do izolovaných profilů nesmí kopírovat."""
+    name = path.name.lower()
+    if name in _ISOLATED_PROFILE_SKIP_NAMES:
+        return True
+    if any(tok in name for tok in ("mcp_oauth", "plugin_oauth", "plugin_token")):
+        return True
+    return any(part.lower() in _ISOLATED_PROFILE_SKIP_DIRS for part in path.parts)
+
+
 def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
     """Připraví izolovaný HOME adresář profilu (sdílí nainstalované pluginy a hlavní OAuth `agy`)."""
     main_home = settings.effective_home_dir
@@ -430,20 +445,62 @@ def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
         with contextlib.suppress(OSError):
             os.symlink(main_plugins, prof_plugins, target_is_directory=True)
 
-    # Zkopíruj hlavní OAuth soubory pro běh agy modelu (bez mcp_oauth_tokens.json), pokud profil ještě žádné nemá
-    main_gemini = main_home / ".gemini"
-    prof_gemini = prof_home / ".gemini"
-    if not _iter_oauth_paths(prof_gemini):
-        for src_file in _iter_oauth_paths(main_gemini):
-            if src_file.name.lower() == "mcp_oauth_tokens.json":
+    # Zkopíruj hlavní OAuth soubory a onboarding/TOS stav agy napříč známými CLI složkami
+    # (bez tokenů pluginů v mcp_oauth_tokens.json, aby měl každý účet izolované OAuth)
+    seed_roots = (
+        Path(".gemini"),
+        Path(".config") / "antigravity-cli",
+        Path(".local") / "share" / "antigravity-cli",
+    )
+    for rel_root in seed_roots:
+        src_root = main_home / rel_root
+        dst_root = prof_home / rel_root
+        if not src_root.is_dir():
+            continue
+
+        for src_file in _iter_oauth_paths(src_root):
+            if _is_plugin_token_file(src_file):
                 continue
-            rel = src_file.relative_to(main_gemini)
-            dst_file = prof_gemini / rel
-            if dst_file.exists():
+            rel = src_file.relative_to(src_root)
+            dst_file = dst_root / rel
+            if dst_file.exists() and _is_oauth_credential_file(dst_file):
                 continue
             dst_file.parent.mkdir(parents=True, exist_ok=True)
             with contextlib.suppress(OSError):
                 shutil.copy2(src_file, dst_file)
+
+        state_dirs = [src_root]
+        cli_subdir = src_root / "antigravity-cli"
+        if cli_subdir.is_dir() and not cli_subdir.is_symlink():
+            state_dirs.append(cli_subdir)
+        for state_dir in state_dirs:
+            try:
+                items = sorted(state_dir.iterdir(), key=lambda p: p.name)
+            except OSError:
+                continue
+            for item in items:
+                if item.is_symlink() or not item.is_file() or _is_plugin_token_file(item):
+                    continue
+                lname = item.name.lower()
+                is_small_cfg_ext = any(
+                    lname.endswith(ext) for ext in (".json", ".pbtxt", ".toml", ".yaml", ".yml")
+                )
+                is_state_name = (
+                    lname in _PROFILE_CLI_STATE_FILES
+                    or any(tok in lname for tok in ("onboard", "terms", "tos"))
+                    or is_small_cfg_ext
+                )
+                if not is_state_name or any(lname.endswith(sfx) for sfx in _NON_AUTH_SUFFIXES):
+                    continue
+                with contextlib.suppress(OSError):
+                    if item.stat().st_size > 1_048_576:
+                        continue
+                dst_file = dst_root / item.relative_to(src_root)
+                if dst_file.exists():
+                    continue
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                with contextlib.suppress(OSError):
+                    shutil.copy2(item, dst_file)
 
     return prof_home
 

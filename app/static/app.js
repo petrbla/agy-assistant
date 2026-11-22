@@ -35,8 +35,13 @@
   let allFiles = [];
   let currentFile = null;
   let fileDirty = false;
+  let memoryMode = localStorage.getItem("agy_mem_mode") || (window.innerWidth >= 992 ? "split" : "edit");
+  if (!["edit", "split", "preview"].includes(memoryMode)) memoryMode = "split";
   let isSending = false;
   let authPollTimer = null;
+  let settingsOauthTerm = null;
+  let onboardOauthTerm = null;
+  let pluginConnectTerm = null;
   const FEATURED_PLUGINS = ["gmail", "gcalendar", "gdrive"];
   const BS_ICONS = {
     sun: "bi-sun",
@@ -268,6 +273,10 @@
     if (lastPluginConnectState && $("pluginConnectModal") && !$("pluginConnectModal").classList.contains("d-none")) {
       renderPluginConnectState(lastPluginConnectState);
     }
+    if (typeof syncMemoryModeUi === "function") syncMemoryModeUi();
+    if (settingsOauthTerm) settingsOauthTerm.refreshStatusLabel();
+    if (onboardOauthTerm) onboardOauthTerm.refreshStatusLabel();
+    if (pluginConnectTerm) pluginConnectTerm.refreshStatusLabel();
   }
 
   async function loadLocaleBundle(lang) {
@@ -309,6 +318,9 @@
       }
       if (isAuthenticated && activeTab === "ops") loadOps();
       if (isAuthenticated && activeTab === "settings") { loadMcp(); loadPlugins(); }
+      if (isAuthenticated && activeTab === "plugin-perms") {
+        await syncRouteFromLocation({ reloadPlugins: true });
+      }
     } catch (err) {
       toast(err.message, "err");
     }
@@ -408,21 +420,119 @@
     }
   }
 
-  // Navigation
-  function switchTab(tab) {
-    activeTab = tab;
-    document.querySelectorAll(".nav-tab").forEach((b) => {
-      b.classList.toggle("active", b.dataset.tab === tab);
-    });
-    ["chat", "memory", "ops", "settings"].forEach((tabId) => {
-      $(`tab-${tabId}`).classList.toggle("d-none", tabId !== tab);
-    });
-    if (tab === "memory") loadFiles();
-    if (tab === "ops") loadOps();
-    if (tab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
+  // Navigation & URL routing
+  function isModifiedClick(e) {
+    return Boolean(e && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0));
   }
+
+  function pluginPermsUrl(pluginName, { accountId = null, mcpMode = false } = {}) {
+    const base = `/settings/plugins/${encodeURIComponent(pluginName)}`;
+    const qs = new URLSearchParams();
+    if (mcpMode) {
+      qs.set("mode", "mcp");
+    } else if (accountId != null && String(accountId).trim() !== "") {
+      qs.set("account", String(accountId));
+    }
+    const q = qs.toString();
+    return q ? `${base}?${q}` : base;
+  }
+
+  function parseCurrentRoute() {
+    const path = (window.location.pathname || "/").replace(/\/+$/, "") || "/";
+    const params = new URLSearchParams(window.location.search || "");
+    const pluginMatch = path.match(/^\/settings\/plugins\/([^/]+)$/);
+    if (pluginMatch) {
+      let pluginName = pluginMatch[1];
+      try {
+        pluginName = decodeURIComponent(pluginName);
+      } catch (_) {}
+      const rawAcct = params.get("account");
+      const parsedAcct = rawAcct && /^\d+$/.test(rawAcct) ? Number(rawAcct) : null;
+      return {
+        tab: "plugin-perms",
+        pluginName,
+        accountId: parsedAcct,
+        mcpMode: params.get("mode") === "mcp",
+      };
+    }
+    if (path === "/memory") return { tab: "memory" };
+    if (path === "/ops") return { tab: "ops" };
+    if (path === "/settings") return { tab: "settings" };
+    return { tab: "chat" };
+  }
+
+  function activateTabDom(tab) {
+    activeTab = tab;
+    const navActive = tab === "plugin-perms" ? "settings" : tab;
+    document.querySelectorAll(".nav-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.tab === navActive);
+    });
+    ["chat", "memory", "ops", "settings", "plugin-perms"].forEach((tabId) => {
+      const sec = $(`tab-${tabId}`);
+      if (sec) sec.classList.toggle("d-none", tabId !== tab);
+    });
+  }
+
+  async function syncRouteFromLocation({ reloadPlugins = false } = {}) {
+    const route = parseCurrentRoute();
+    if (route.tab === "plugin-perms") {
+      await openPluginPermsPage({
+        pluginName: route.pluginName,
+        accountId: route.accountId,
+        mcpMode: route.mcpMode,
+        reloadPlugins,
+      });
+      return;
+    }
+    permsModalState = null;
+    activateTabDom(route.tab);
+    if (route.tab === "chat") renderChat();
+    else if (route.tab === "memory") loadFiles();
+    else if (route.tab === "ops") loadOps();
+    else if (route.tab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
+  }
+
+  function navigateTo(url, { replace = false } = {}) {
+    const target = url || "/chat";
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current !== target) {
+      history[replace ? "replaceState" : "pushState"](null, "", target);
+    }
+    if (isAuthenticated && !inAgyOnboarding) {
+      syncRouteFromLocation();
+    }
+  }
+
+  function switchTab(tab, { pushHistory = true } = {}) {
+    const validTab = ["chat", "memory", "ops", "settings"].includes(tab) ? tab : "chat";
+    if (pushHistory) {
+      navigateTo(`/${validTab}`);
+      return;
+    }
+    permsModalState = null;
+    activateTabDom(validTab);
+    if (validTab === "chat") renderChat();
+    else if (validTab === "memory") loadFiles();
+    else if (validTab === "ops") loadOps();
+    else if (validTab === "settings") { loadSettings(); loadMcp(); loadPlugins(); }
+  }
+
   document.querySelectorAll(".nav-tab").forEach((b) => {
-    b.onclick = () => switchTab(b.dataset.tab);
+    b.addEventListener("click", (e) => {
+      if (b.classList.contains("disabled") || !isAuthenticated || inAgyOnboarding) {
+        e.preventDefault();
+        return;
+      }
+      if (isModifiedClick(e)) return;
+      e.preventDefault();
+      switchTab(b.dataset.tab);
+    });
+  });
+
+  window.addEventListener("popstate", () => {
+    if (isAuthenticated && !inAgyOnboarding) {
+      syncRouteFromLocation();
+    }
   });
 
   function showAuthScreen(mode) {
@@ -432,7 +542,11 @@
     $("authScreen").classList.toggle("wide", inAgyOnboarding);
     $("appMain").classList.add("d-none");
     $("logoutBtn").classList.toggle("d-none", !inAgyOnboarding || !localStorage.getItem("agy_web_token"));
-    document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = true; });
+    document.querySelectorAll(".nav-tab").forEach((b) => {
+      b.classList.add("disabled");
+      b.setAttribute("aria-disabled", "true");
+      b.setAttribute("tabindex", "-1");
+    });
     $("initialSetupCard").classList.toggle("d-none", mode !== "initial");
     $("loginCard").classList.toggle("d-none", mode !== "login");
     if ($("agyOnboardingCard")) $("agyOnboardingCard").classList.toggle("d-none", !inAgyOnboarding);
@@ -445,7 +559,11 @@
     $("authScreen").classList.add("d-none");
     $("authScreen").classList.remove("wide");
     $("appMain").classList.remove("d-none");
-    document.querySelectorAll(".nav-tab").forEach((b) => { b.disabled = false; });
+    document.querySelectorAll(".nav-tab").forEach((b) => {
+      b.classList.remove("disabled");
+      b.setAttribute("aria-disabled", "false");
+      b.removeAttribute("tabindex");
+    });
     $("logoutBtn").classList.toggle("d-none", !localStorage.getItem("agy_web_token"));
   }
 
@@ -490,7 +608,10 @@
       showAppMain();
       applyStatus(statusData);
       await loadModels(false);
-      renderChat();
+      if (window.location.pathname === "/" || window.location.pathname === "") {
+        history.replaceState(null, "", "/chat");
+      }
+      await syncRouteFromLocation();
     } catch (_) {
       isAuthenticated = false;
       inAgyOnboarding = false;
@@ -919,11 +1040,310 @@
     }
   };
 
-  // Memory
+  // Memory & Markdown editor
+  function isMarkdownFile(path) {
+    return Boolean(path && /\.(md|markdown)$/i.test(String(path).trim()));
+  }
+
+  function escapeAttr(str) {
+    return escapeHtml(str).replace(/"/g, "&quot;");
+  }
+
+  function renderInlineMd(raw) {
+    const stash = [];
+    let s = String(raw || "").replace(/`([^`\n]+)`/g, (_, code) => {
+      const idx = stash.push(`<code>${escapeHtml(code)}</code>`) - 1;
+      return `\x00IC${idx}\x00`;
+    });
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+      const idx = stash.push(
+        `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
+      ) - 1;
+      return `\x00IC${idx}\x00`;
+    });
+    s = escapeHtml(s)
+      .replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/~~([^~\n]+?)~~/g, "<del>$1</del>")
+      .replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "<em>$1</em>");
+    stash.forEach((html, i) => {
+      s = s.replaceAll(`\x00IC${i}\x00`, html);
+    });
+    return s;
+  }
+
+  function renderRichMarkdown(src) {
+    const lines = String(src || "").replace(/\r\n?/g, "\n").split("\n");
+    const out = [];
+    let i = 0;
+    let taskCounter = 0;
+
+    const isTableSep = (line) => /^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$/.test(line);
+    const splitTableRow = (line) => {
+      let trimmed = line.trim();
+      if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+      if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+      return trimmed.split("|").map((c) => c.trim());
+    };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (!line.trim()) {
+        i += 1;
+        continue;
+      }
+
+      // Fenced code block
+      const fenceMatch = line.match(/^```([a-zA-Z0-9_+-]*)\s*$/);
+      if (fenceMatch) {
+        i += 1;
+        const codeLines = [];
+        while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+          codeLines.push(lines[i]);
+          i += 1;
+        }
+        if (i < lines.length) i += 1;
+        out.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        continue;
+      }
+
+      // Heading h1..h4
+      const headMatch = line.match(/^(#{1,4})\s+(.+?)\s*#*\s*$/);
+      if (headMatch) {
+        const lvl = headMatch[1].length;
+        out.push(`<h${lvl}>${renderInlineMd(headMatch[2])}</h${lvl}>`);
+        i += 1;
+        continue;
+      }
+
+      // Horizontal rule
+      if (/^(?:---|\*\*\*|___)\s*$/.test(line.trim())) {
+        out.push("<hr />");
+        i += 1;
+        continue;
+      }
+
+      // GFM Table
+      if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        const headers = splitTableRow(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+          rows.push(splitTableRow(lines[i]));
+          i += 1;
+        }
+        const ths = headers.map((h) => `<th>${renderInlineMd(h)}</th>`).join("");
+        const trs = rows.map(
+          (r) => `<tr>${headers.map((_, ci) => `<td>${renderInlineMd(r[ci] || "")}</td>`).join("")}</tr>`
+        ).join("");
+        out.push(
+          `<div class="table-responsive my-2"><table class="table table-sm table-bordered mb-0"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`
+        );
+        continue;
+      }
+
+      // Blockquote
+      if (/^\s*>\s?/.test(line)) {
+        const qLines = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+          qLines.push(lines[i].replace(/^\s*>\s?/, ""));
+          i += 1;
+        }
+        out.push(`<blockquote>${qLines.map((ql) => renderInlineMd(ql)).join("<br />")}</blockquote>`);
+        continue;
+      }
+
+      // Unordered / checklist
+      if (/^\s*[-*+]\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+          const cur = lines[i];
+          const taskMatch = cur.match(/^\s*[-*+]\s+\[( |x|X)\]\s+(.*)$/);
+          if (taskMatch) {
+            const checked = taskMatch[1].toLowerCase() === "x";
+            const idx = taskCounter++;
+            items.push(
+              `<li class="md-task-item"><label class="d-inline-flex align-items-start gap-2"><input type="checkbox" class="form-check-input md-task-cb mt-1" data-task-index="${idx}" ${checked ? "checked" : ""} /><span>${renderInlineMd(taskMatch[2])}</span></label></li>`
+            );
+          } else {
+            const txt = cur.replace(/^\s*[-*+]\s+/, "");
+            items.push(`<li>${renderInlineMd(txt)}</li>`);
+          }
+          i += 1;
+        }
+        out.push(`<ul>${items.join("")}</ul>`);
+        continue;
+      }
+
+      // Ordered list
+      if (/^\s*\d+\.\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          items.push(`<li>${renderInlineMd(lines[i].replace(/^\s*\d+\.\s+/, ""))}</li>`);
+          i += 1;
+        }
+        out.push(`<ol>${items.join("")}</ol>`);
+        continue;
+      }
+
+      // Paragraph
+      const pLines = [];
+      while (
+        i < lines.length
+        && lines[i].trim()
+        && !/^```/.test(lines[i])
+        && !/^#{1,4}\s+/.test(lines[i])
+        && !/^(?:---|\*\*\*|___)\s*$/.test(lines[i].trim())
+        && !/^\s*>\s?/.test(lines[i])
+        && !/^\s*[-*+]\s+/.test(lines[i])
+        && !/^\s*\d+\.\s+/.test(lines[i])
+        && !(lines[i].includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1]))
+      ) {
+        pLines.push(lines[i]);
+        i += 1;
+      }
+      out.push(`<p>${pLines.map((pl) => renderInlineMd(pl)).join("<br />")}</p>`);
+    }
+
+    return out.join("");
+  }
+
+  function renderMemoryPreview() {
+    const prevEl = $("memoryPreview");
+    const ed = $("fileEditor");
+    if (!prevEl || !ed) return;
+    if (!currentFile) {
+      prevEl.innerHTML = `<div class="text-body-secondary small">${escapeHtml(t("mem_preview_empty"))}</div>`;
+      return;
+    }
+    prevEl.innerHTML = renderRichMarkdown(ed.value);
+    prevEl.querySelectorAll(".md-task-cb").forEach((cb) => {
+      cb.onchange = () => {
+        const targetIdx = Number(cb.dataset.taskIndex);
+        let seen = 0;
+        const updated = ed.value.replace(/^(\s*[-*+]\s+\[)( |x|X)(\])/gm, (full, pre, _mark, post) => {
+          if (seen++ === targetIdx) {
+            return `${pre}${cb.checked ? "x" : " "}${post}`;
+          }
+          return full;
+        });
+        if (updated !== ed.value) {
+          ed.value = updated;
+          fileDirty = true;
+          $("fileDirtyHint").textContent = t("file_hint_dirty");
+          renderMemoryPreview();
+        }
+      };
+    });
+  }
+
+  function syncMemoryModeUi() {
+    const ws = $("memoryWorkspace");
+    const tb = $("memoryToolbar");
+    const seg = $("memoryModeSeg");
+    const hasFile = Boolean(currentFile);
+    const isMd = hasFile && isMarkdownFile(currentFile);
+    const effMode = isMd ? memoryMode : "edit";
+
+    if (ws) ws.className = `memory-workspace mode-${effMode}`;
+    if (tb) tb.classList.toggle("d-none", !(isMd && effMode !== "preview"));
+    if (seg) {
+      seg.querySelectorAll("[data-mem-mode]").forEach((btn) => {
+        const m = btn.dataset.memMode;
+        btn.classList.toggle("active", m === effMode);
+        btn.disabled = !hasFile || (!isMd && m !== "edit");
+      });
+    }
+    renderMemoryPreview();
+  }
+
+  function setMemoryMode(mode, { persist = true } = {}) {
+    if (!["edit", "split", "preview"].includes(mode)) return;
+    memoryMode = mode;
+    if (persist) localStorage.setItem("agy_mem_mode", mode);
+    syncMemoryModeUi();
+    if (mode !== "preview" && $("fileEditor") && !$("fileEditor").disabled) {
+      $("fileEditor").focus();
+    }
+  }
+
+  document.querySelectorAll("#memoryModeSeg [data-mem-mode]").forEach((btn) => {
+    btn.onclick = () => setMemoryMode(btn.dataset.memMode);
+  });
+
+  function applyMarkdownAction(action) {
+    const ed = $("fileEditor");
+    if (!ed || ed.disabled) return;
+    const val = ed.value;
+    const start = ed.selectionStart || 0;
+    const end = ed.selectionEnd || 0;
+    const selected = val.slice(start, end);
+
+    const wrapSelection = (before, after, placeholder) => {
+      const inner = selected || placeholder;
+      const inserted = `${before}${inner}${after}`;
+      ed.value = val.slice(0, start) + inserted + val.slice(end);
+      ed.selectionStart = start + before.length;
+      ed.selectionEnd = start + before.length + inner.length;
+    };
+
+    const toggleLinePrefix = (prefix, { replaceHeading = false } = {}) => {
+      const lineStart = val.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+      const lineEndIdx = val.indexOf("\n", end);
+      const lineEnd = lineEndIdx === -1 ? val.length : lineEndIdx;
+      let block = val.slice(lineStart, lineEnd);
+      if (replaceHeading) {
+        block = block.split("\n").map((ln) => prefix + ln.replace(/^#{1,6}\s+/, "")).join("\n");
+      } else {
+        block = block.split("\n").map((ln) => (ln.startsWith(prefix) ? ln.slice(prefix.length) : prefix + ln)).join("\n");
+      }
+      ed.value = val.slice(0, lineStart) + block + val.slice(lineEnd);
+      ed.selectionStart = lineStart;
+      ed.selectionEnd = lineStart + block.length;
+    };
+
+    if (action === "h1") toggleLinePrefix("# ", { replaceHeading: true });
+    else if (action === "h2") toggleLinePrefix("## ", { replaceHeading: true });
+    else if (action === "bold") wrapSelection("**", "**", "text");
+    else if (action === "italic") wrapSelection("*", "*", "text");
+    else if (action === "ul") toggleLinePrefix("- ");
+    else if (action === "ol") toggleLinePrefix("1. ");
+    else if (action === "task") toggleLinePrefix("- [ ] ");
+    else if (action === "quote") toggleLinePrefix("> ");
+    else if (action === "code") {
+      if (selected.includes("\n")) {
+        wrapSelection("```\n", "\n```", "code");
+      } else {
+        wrapSelection("`", "`", "code");
+      }
+    } else if (action === "link") {
+      const txt = selected || "text";
+      const inserted = `[${txt}](https://)`;
+      ed.value = val.slice(0, start) + inserted + val.slice(end);
+      ed.selectionStart = start + txt.length + 3;
+      ed.selectionEnd = start + inserted.length - 1;
+    }
+
+    fileDirty = true;
+    $("fileDirtyHint").textContent = t("file_hint_dirty");
+    renderMemoryPreview();
+    ed.focus();
+  }
+
+  document.querySelectorAll("#memoryToolbar .md-tb-btn").forEach((btn) => {
+    btn.onclick = () => applyMarkdownAction(btn.dataset.mdAction);
+  });
+
   async function loadFiles() {
     try {
       allFiles = await api("/api/files");
       renderFileList();
+      if (!currentFile && allFiles.length > 0) {
+        const pref = allFiles.find((f) => f.path.toLowerCase() === "memory.md") || allFiles[0];
+        if (pref) await openFile(pref.path);
+      } else {
+        syncMemoryModeUi();
+      }
     } catch (err) {
       toast(err.message, "err");
     }
@@ -958,6 +1378,7 @@
       $("fileEditor").value = data.content;
       $("saveFileBtn").disabled = false;
       renderFileList();
+      syncMemoryModeUi();
     } catch (err) {
       toast(err.message, "err");
     }
@@ -966,7 +1387,28 @@
   $("fileEditor").oninput = () => {
     fileDirty = true;
     $("fileDirtyHint").textContent = t("file_hint_dirty");
+    renderMemoryPreview();
   };
+
+  $("fileEditor").addEventListener("keydown", (e) => {
+    const ed = $("fileEditor");
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const s = ed.selectionStart || 0;
+      const end = ed.selectionEnd || 0;
+      ed.value = `${ed.value.slice(0, s)}  ${ed.value.slice(end)}`;
+      ed.selectionStart = ed.selectionEnd = s + 2;
+      fileDirty = true;
+      $("fileDirtyHint").textContent = t("file_hint_dirty");
+      renderMemoryPreview();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      e.preventDefault();
+      applyMarkdownAction("bold");
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+      e.preventDefault();
+      applyMarkdownAction("italic");
+    }
+  });
 
   async function saveCurrentFile() {
     if (!currentFile) return;
@@ -1001,6 +1443,7 @@
       $("fileEditor").value = "";
       $("fileEditor").disabled = true;
       $("saveFileBtn").disabled = true;
+      syncMemoryModeUi();
       await loadFiles();
       toast(t("toast_workspace_reset"));
     } catch (err) {
@@ -1326,11 +1769,229 @@
     try { applyStatus(await api("/api/status")); } catch (_) {}
   };
 
+  // Živý interaktivní terminál (xterm.js přes WebSocket -> PTY)
+  class LivePtyTerminal {
+    constructor({ containerId, fallbackPreId, statusBadgeId, wsPath, onExit = null }) {
+      this.containerId = containerId;
+      this.fallbackPreId = fallbackPreId;
+      this.statusBadgeId = statusBadgeId;
+      this.wsPath = wsPath;
+      this.onExit = onExit;
+      this.term = null;
+      this.fitAddon = null;
+      this.ws = null;
+      this.live = false;
+      this._resizeTimer = null;
+      this._resizeObserver = null;
+      this._lastErrorShown = "";
+    }
+
+    isXtermAvailable() {
+      return typeof window.Terminal === "function";
+    }
+
+    ensureInit() {
+      if (this.term || !this.isXtermAvailable()) return;
+      const container = $(this.containerId);
+      if (!container) return;
+
+      const fallback = $(this.fallbackPreId);
+      if (fallback) fallback.classList.add("d-none");
+      container.classList.remove("d-none");
+
+      const term = new window.Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        lineHeight: 1.2,
+        scrollback: 3000,
+        convertEol: false,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+        theme: {
+          background: "#0b1220",
+          foreground: "#e2e8f0",
+          cursor: "#38bdf8",
+          selectionBackground: "rgba(56, 189, 248, 0.35)",
+        },
+      });
+
+      const FitCtor = window.FitAddon && window.FitAddon.FitAddon;
+      if (typeof FitCtor === "function") {
+        this.fitAddon = new FitCtor();
+        term.loadAddon(this.fitAddon);
+      }
+      const WebLinksCtor = window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon;
+      if (typeof WebLinksCtor === "function") {
+        term.loadAddon(new WebLinksCtor());
+      }
+
+      term.attachCustomKeyEventHandler((e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && term.hasSelection()) {
+          navigator.clipboard?.writeText(term.getSelection()).catch(() => {});
+          term.clearSelection();
+          return false;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+          return false;
+        }
+        return true;
+      });
+
+      term.open(container);
+      term.onData((data) => this.sendInput(data));
+      term.onResize(({ cols, rows }) => this.sendResize(cols, rows));
+
+      if (typeof ResizeObserver === "function") {
+        this._resizeObserver = new ResizeObserver(() => {
+          clearTimeout(this._resizeTimer);
+          this._resizeTimer = setTimeout(() => { this.fit(); }, 80);
+        });
+        this._resizeObserver.observe(container);
+      }
+
+      this.term = term;
+      this.fit();
+    }
+
+    fit() {
+      const container = $(this.containerId);
+      if (this.fitAddon && container && container.offsetParent !== null && container.clientWidth > 0 && container.clientHeight > 0) {
+        try {
+          this.fitAddon.fit();
+        } catch (_) {}
+      }
+      return {
+        cols: (this.term && this.term.cols) ? this.term.cols : 100,
+        rows: (this.term && this.term.rows) ? this.term.rows : 26,
+      };
+    }
+
+    refreshStatusLabel() {
+      const el = $(this.statusBadgeId);
+      if (!el) return;
+      el.className = this.live ? badgeCls("ok") : badgeCls();
+      el.textContent = t(this.live ? "term_status_live" : "term_status_offline");
+    }
+
+    setLive(live) {
+      this.live = Boolean(live);
+      this.refreshStatusLabel();
+    }
+
+    connect({ reset = true } = {}) {
+      this.ensureInit();
+      this.disconnect({ keepContent: true });
+      if (!this.term) return false;
+      this._lastErrorShown = "";
+      if (reset) this.term.reset();
+
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${window.location.host}${this.wsPath}`);
+      this.ws = ws;
+
+      ws.onopen = () => {
+        if (this.ws !== ws) return;
+        const tok = (localStorage.getItem("agy_web_token") || "").trim();
+        ws.send(JSON.stringify({ type: "auth", token: tok }));
+      };
+
+      ws.onmessage = (evt) => {
+        if (this.ws !== ws) return;
+        let msg = null;
+        try { msg = JSON.parse(evt.data); } catch (_) { return; }
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "ready") {
+          this.setLive(Boolean(msg.running));
+          const dims = this.fit();
+          this.sendResize(dims.cols, dims.rows);
+          if (msg.running) this.term.focus();
+        } else if (msg.type === "output" && typeof msg.data === "string" && msg.data) {
+          this.term.write(msg.data);
+        } else if (msg.type === "exit") {
+          this.setLive(false);
+          if (typeof this.onExit === "function") this.onExit(msg.exit_code);
+        }
+      };
+
+      ws.onclose = () => {
+        if (this.ws === ws) {
+          this.ws = null;
+          this.setLive(false);
+        }
+      };
+
+      ws.onerror = () => {
+        if (this.ws === ws) this.setLive(false);
+      };
+      return true;
+    }
+
+    disconnect({ keepContent = true } = {}) {
+      const ws = this.ws;
+      this.ws = null;
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        try { ws.close(); } catch (_) {}
+      }
+      this.setLive(false);
+      if (!keepContent && this.term) {
+        this.term.reset();
+        this._lastErrorShown = "";
+      }
+    }
+
+    isOpen() {
+      return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
+    }
+
+    sendInput(data) {
+      if (!this.isOpen() || !data) return false;
+      this.ws.send(JSON.stringify({ type: "input", data }));
+      return true;
+    }
+
+    sendResize(cols, rows) {
+      if (!this.isOpen() || !cols || !rows) return;
+      this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    }
+
+    writeNotice(text) {
+      if (!text || this._lastErrorShown === text) return;
+      this._lastErrorShown = text;
+      if (this.term) {
+        this.term.write(`\r\n\x1b[33m${text}\x1b[0m\r\n`);
+      }
+    }
+
+    focus() {
+      if (this.term) this.term.focus();
+    }
+  }
+
+  settingsOauthTerm = new LivePtyTerminal({
+    containerId: "oauthTerminal",
+    fallbackPreId: "oauthOutput",
+    statusBadgeId: "oauthTermStatus",
+    wsPath: "/ws/pty/auth",
+  });
+  onboardOauthTerm = new LivePtyTerminal({
+    containerId: "onboardOauthTerminal",
+    fallbackPreId: "onboardOauthOutput",
+    statusBadgeId: "onboardTermStatus",
+    wsPath: "/ws/pty/auth",
+  });
+
+  function activeOauthTerminal() {
+    return inAgyOnboarding ? onboardOauthTerm : settingsOauthTerm;
+  }
+
   // OAuth PTY
-  function renderOauthBox(outputId, urlsId, st) {
+  function renderOauthBox(outputId, urlsId, term, st) {
     const outEl = $(outputId);
     const urlsEl = $(urlsId);
-    if (outEl) {
+    if (term && term.term) {
+      if (st.error && !term.isOpen()) {
+        term.writeNotice(t("chat_error_prefix", { msg: st.error }));
+      }
+    } else if (outEl) {
       outEl.textContent = st.error
         ? t("chat_error_prefix", { msg: st.error })
         : (st.output || (st.running ? t("oauth_starting") : t("oauth_idle")));
@@ -1352,8 +2013,8 @@
 
   function renderOauthState(st) {
     lastOauthState = st;
-    renderOauthBox("oauthOutput", "oauthUrls", st);
-    renderOauthBox("onboardOauthOutput", "onboardOauthUrls", st);
+    renderOauthBox("oauthOutput", "oauthUrls", settingsOauthTerm, st);
+    renderOauthBox("onboardOauthOutput", "onboardOauthUrls", onboardOauthTerm, st);
   }
 
   async function handleAgyAuthenticated() {
@@ -1361,6 +2022,8 @@
       clearInterval(authPollTimer);
       authPollTimer = null;
     }
+    if (settingsOauthTerm) settingsOauthTerm.disconnect();
+    if (onboardOauthTerm) onboardOauthTerm.disconnect();
     toast(t("toast_agy_auth_done"));
     if (inAgyOnboarding) {
       sessionStorage.removeItem("agy_onboarding_skipped");
@@ -1394,10 +2057,26 @@
 
   async function startOauthFlow() {
     const wasAuthenticated = Boolean(lastStatus && lastStatus.agy_authenticated);
+    const term = activeOauthTerminal();
+    let dims = { cols: 100, rows: 26 };
+    if (term) {
+      term.ensureInit();
+      dims = term.fit();
+    }
     let transitionDone = false;
     try {
-      const st = await api("/api/auth/start", { method: "POST", body: JSON.stringify({ mode: "interactive" }) });
+      const st = await api("/api/auth/start", {
+        method: "POST",
+        body: JSON.stringify({ mode: "interactive", cols: dims.cols, rows: dims.rows }),
+      });
       renderOauthState(st);
+      if (term) {
+        if (st.running) {
+          term.connect({ reset: true });
+        } else if (st.error) {
+          term.writeNotice(st.error);
+        }
+      }
       if (authPollTimer) clearInterval(authPollTimer);
       authPollTimer = setInterval(async () => {
         try {
@@ -1412,6 +2091,12 @@
   }
 
   async function sendOauthInputValue(value = "") {
+    const term = activeOauthTerminal();
+    const payload = value ? `${value.replace(/[\r\n]+$/, "")}\r` : "\r";
+    if (term && term.sendInput(payload)) {
+      term.focus();
+      return;
+    }
     const wasAuthenticated = Boolean(lastStatus && lastStatus.agy_authenticated);
     try {
       const st = await api("/api/auth/input", { method: "POST", body: JSON.stringify({ value }) });
@@ -1429,6 +2114,8 @@
       clearInterval(authPollTimer);
       authPollTimer = null;
     }
+    if (settingsOauthTerm) settingsOauthTerm.disconnect();
+    if (onboardOauthTerm) onboardOauthTerm.disconnect();
     try {
       await api("/api/auth/stop", { method: "POST" });
       renderOauthState(await api("/api/auth/status"));
@@ -1478,6 +2165,7 @@
     $("skipAgyOnboardBtn").onclick = async () => {
       sessionStorage.setItem("agy_onboarding_skipped", "1");
       if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; }
+      if (onboardOauthTerm) onboardOauthTerm.disconnect();
       await loadAuthAndBootstrap();
     };
   }
@@ -1968,14 +2656,19 @@
         const mcpTools = Array.isArray(p.custom_mcp.tools) ? p.custom_mcp.tools : [];
         const urlFoot = document.createElement("div");
         urlFoot.className = "d-flex align-items-center justify-content-between flex-wrap gap-2 mt-1";
-        const mcpPermsBtn = document.createElement("button");
-        mcpPermsBtn.type = "button";
+        const mcpPermsBtn = document.createElement("a");
+        const mcpHref = pluginPermsUrl(p.name, { mcpMode: true });
+        mcpPermsBtn.href = mcpHref;
         mcpPermsBtn.className = "btn btn-sm btn-outline-primary";
         const mcpPermsLbl = mcpTools.length
           ? t("plugin_btn_mcp_tools", { count: mcpTools.length })
           : t("plugin_btn_mcp_tools_empty");
         mcpPermsBtn.innerHTML = `${uiIcon("sliders", "me-1")}<span>${escapeHtml(mcpPermsLbl)}</span>`;
-        mcpPermsBtn.onclick = () => openPluginPermsModal(p, { mcpMode: true });
+        mcpPermsBtn.onclick = (e) => {
+          if (isModifiedClick(e)) return;
+          e.preventDefault();
+          navigateTo(mcpHref);
+        };
         urlFoot.appendChild(mcpPermsBtn);
         if (mcpTools.length) {
           const mcpSum = document.createElement("span");
@@ -2326,14 +3019,19 @@
           const footerRow = document.createElement("div");
           footerRow.className = "d-flex align-items-center justify-content-between flex-wrap gap-2 mt-1";
 
-          const detailBtn = document.createElement("button");
-          detailBtn.type = "button";
+          const detailBtn = document.createElement("a");
+          const detHref = pluginPermsUrl(p.name, { accountId: acct.id, mcpMode: false });
+          detailBtn.href = detHref;
           detailBtn.className = "btn btn-sm btn-outline-secondary";
           const detLabel = acctTools.length
             ? t("plugin_btn_detailed_perms", { count: acctTools.length })
             : t("plugin_detail_toggle");
           detailBtn.innerHTML = `${uiIcon("sliders", "me-1")}<span>${escapeHtml(detLabel)}</span>`;
-          detailBtn.onclick = () => openPluginPermsModal(p, { account: acct, mcpMode: false });
+          detailBtn.onclick = (e) => {
+            if (isModifiedClick(e)) return;
+            e.preventDefault();
+            navigateTo(detHref);
+          };
           footerRow.appendChild(detailBtn);
 
           if (acctTools.length) {
@@ -2405,6 +3103,13 @@
     };
   }
 
+  pluginConnectTerm = new LivePtyTerminal({
+    containerId: "pluginConnectTerminal",
+    fallbackPreId: "pluginConnectOutput",
+    statusBadgeId: "pluginTermStatus",
+    wsPath: "/ws/pty/plugin",
+  });
+
   function renderPluginConnectState(st) {
     lastPluginConnectState = st;
     const badge = $("pluginConnectBadge");
@@ -2455,13 +3160,14 @@
     if ($("pluginConnectStep1")) {
       $("pluginConnectStep1").classList.toggle("d-none", Boolean(st.connected) || isInteractiveCfg);
     }
-    if (isInteractiveCfg && $("pluginConnectTerminalDetails")) {
-      $("pluginConnectTerminalDetails").open = true;
-    }
     if (cbForm) cbForm.classList.toggle("d-none", st.flow_type !== "localhost_callback" || Boolean(st.connected));
     if (codeForm) codeForm.classList.toggle("d-none", st.flow_type !== "code_paste" || Boolean(st.connected));
 
-    if (outEl) {
+    if (pluginConnectTerm && pluginConnectTerm.term) {
+      if (st.error && !pluginConnectTerm.isOpen()) {
+        pluginConnectTerm.writeNotice(t("chat_error_prefix", { msg: st.error }));
+      }
+    } else if (outEl) {
       outEl.textContent = st.error
         ? t("chat_error_prefix", { msg: st.error })
         : (st.output || t("oauth_starting"));
@@ -2483,9 +3189,6 @@
     $("pluginCallbackInput").value = "";
     $("pluginCodeInput").value = "";
     $("pluginManualInput").value = "";
-    if ($("pluginConnectTerminalDetails")) {
-      $("pluginConnectTerminalDetails").open = Boolean(interactiveConfig);
-    }
     renderPluginConnectState({
       running: true,
       plugin_name: plugin.name,
@@ -2496,6 +3199,13 @@
       error: null,
     });
     modal.classList.remove("d-none");
+
+    let dims = { cols: 100, rows: 26 };
+    if (pluginConnectTerm) {
+      pluginConnectTerm.ensureInit();
+      dims = pluginConnectTerm.fit();
+      if (pluginConnectTerm.term) pluginConnectTerm.term.reset();
+    }
 
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
     let connectSuccessHandled = false;
@@ -2518,9 +3228,18 @@
           force_reconnect: Boolean(forceReconnect),
           account_id: accountId,
           interactive_config: Boolean(interactiveConfig),
+          cols: dims.cols,
+          rows: dims.rows,
         }),
       });
       renderPluginConnectState(st);
+      if (pluginConnectTerm) {
+        if (st.running) {
+          pluginConnectTerm.connect({ reset: true });
+        } else if (st.error) {
+          pluginConnectTerm.writeNotice(st.error);
+        }
+      }
       await loadPlugins();
       if (st.connected) {
         await handleConnected(st);
@@ -2554,6 +3273,7 @@
 
   async function closePluginConnectModal() {
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
+    if (pluginConnectTerm) pluginConnectTerm.disconnect({ keepContent: false });
     const modal = $("pluginConnectModal");
     if (modal) modal.classList.add("d-none");
     activeConnectPlugin = null;
@@ -2590,11 +3310,11 @@
         bulkSel.dataset.mode = mode;
       }
     });
-    if ($("permsFooterSummary")) {
-      $("permsFooterSummary").textContent = allTools.length
-        ? t("perms_summary_counts", countToolModes(allTools))
-        : "";
-    }
+    const sumText = allTools.length
+      ? t("perms_summary_counts", countToolModes(allTools))
+      : "";
+    if ($("permsFooterSummary")) $("permsFooterSummary").textContent = sumText;
+    if ($("permsHeaderSummary")) $("permsHeaderSummary").textContent = sumText;
   }
 
   function renderPermsModalTools() {
@@ -2714,17 +3434,35 @@
     }
   }
 
-  function openPluginPermsModal(plugin, { account = null, mcpMode = false } = {}) {
-    const modal = $("pluginPermsModal");
-    if (!modal) return;
-    const srcTools = mcpMode
+  async function openPluginPermsPage({ pluginName, accountId = null, mcpMode = false, reloadPlugins = false } = {}) {
+    if (!pluginsCatalog.length || reloadPlugins) {
+      await loadPlugins();
+    }
+    const targetName = String(pluginName || "").trim().toLowerCase();
+    const plugin = pluginsCatalog.find((item) => (item.name || "").toLowerCase() === targetName);
+    if (!plugin) {
+      navigateTo("/settings", { replace: true });
+      return;
+    }
+
+    const accounts = Array.isArray(plugin.accounts) ? plugin.accounts : [];
+    let useMcp = Boolean(mcpMode) || (!accounts.length && Boolean(plugin.custom_mcp));
+    let account = null;
+    if (!useMcp) {
+      account = (accountId != null ? accounts.find((a) => a.id === accountId) : null) || accounts[0] || null;
+      if (!account && plugin.custom_mcp) {
+        useMcp = true;
+      }
+    }
+
+    const srcTools = useMcp
       ? ((plugin.custom_mcp && Array.isArray(plugin.custom_mcp.tools)) ? plugin.custom_mcp.tools : [])
       : (account && Array.isArray(account.tools) ? account.tools : []);
 
     permsModalState = {
       plugin,
       account,
-      mcpMode: Boolean(mcpMode),
+      mcpMode: Boolean(useMcp),
       tools: srcTools.map((item) => ({ ...item })),
       collapsed: { readonly: false, write: false },
     };
@@ -2756,7 +3494,7 @@
       });
     }
     if ($("permsModalSubtitle")) {
-      $("permsModalSubtitle").textContent = mcpMode
+      $("permsModalSubtitle").textContent = useMcp
         ? ((plugin.custom_mcp && plugin.custom_mcp.url) || "")
         : [
             account ? (account.label || t("plugin_account_default_label")) : "",
@@ -2766,9 +3504,9 @@
     }
 
     if ($("permsSearchInput")) $("permsSearchInput").value = "";
-    if ($("permsDiscoverBtn")) $("permsDiscoverBtn").classList.toggle("d-none", !mcpMode);
+    if ($("permsDiscoverBtn")) $("permsDiscoverBtn").classList.toggle("d-none", !useMcp);
 
-    const showAccountSection = !mcpMode && Boolean(account);
+    const showAccountSection = !useMcp && Boolean(account);
     if ($("permsAccountSection")) $("permsAccountSection").classList.toggle("d-none", !showAccountSection);
     if (showAccountSection && account) {
       if ($("permsAccountLabel")) $("permsAccountLabel").value = account.label || "";
@@ -2779,29 +3517,26 @@
       if ($("permsAccountRules")) $("permsAccountRules").value = account.custom_rules || "";
     }
 
+    activateTabDom("plugin-perms");
+    window.scrollTo({ top: 0, behavior: "instant" });
     setPermsGroupCollapsed("readonly", false);
     setPermsGroupCollapsed("write", false);
     renderPermsModalTools();
-    modal.classList.remove("d-none");
 
-    if (mcpMode && permsModalState.tools.length === 0) {
+    if (useMcp && permsModalState.tools.length === 0) {
       discoverMcpToolsInModal({ quietEmpty: true });
     }
   }
 
-  function closePluginPermsModal() {
-    const modal = $("pluginPermsModal");
-    if (modal) modal.classList.add("d-none");
-    permsModalState = null;
-  }
-
-  if ($("closePluginPermsBtn")) $("closePluginPermsBtn").onclick = closePluginPermsModal;
-  if ($("cancelPluginPermsBtn")) $("cancelPluginPermsBtn").onclick = closePluginPermsModal;
-  if ($("pluginPermsModal")) {
-    $("pluginPermsModal").onclick = (e) => {
-      if (e.target === $("pluginPermsModal")) closePluginPermsModal();
-    };
-  }
+  ["permsBackLink", "cancelPluginPermsBtn"].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("click", (e) => {
+      if (isModifiedClick(e)) return;
+      e.preventDefault();
+      navigateTo("/settings");
+    });
+  });
   if ($("permsSearchInput")) $("permsSearchInput").oninput = renderPermsModalTools;
   if ($("permsDiscoverBtn")) $("permsDiscoverBtn").onclick = () => discoverMcpToolsInModal();
   if ($("permsDiscoverEmptyBtn")) $("permsDiscoverEmptyBtn").onclick = () => discoverMcpToolsInModal();
@@ -2861,48 +3596,49 @@
   if ($("permsPresetSafe")) $("permsPresetSafe").onclick = () => applyPermsPreset("safe");
   if ($("permsPresetBlockAll")) $("permsPresetBlockAll").onclick = () => applyPermsPreset("block_all");
 
-  if ($("savePluginPermsBtn")) {
-    $("savePluginPermsBtn").onclick = async () => {
-      if (!permsModalState) return;
-      const btn = $("savePluginPermsBtn");
-      const p = permsModalState.plugin;
-      const toolPerms = {};
-      permsModalState.tools.forEach((item) => {
-        toolPerms[item.key] = item.mode;
+  async function savePluginPerms() {
+    if (!permsModalState) return;
+    const saveBtns = [$("savePluginPermsBtn"), $("savePluginPermsTopBtn")].filter(Boolean);
+    const p = permsModalState.plugin;
+    const toolPerms = {};
+    permsModalState.tools.forEach((item) => {
+      toolPerms[item.key] = item.mode;
+    });
+    const payload = { tool_permissions: toolPerms };
+    if (!permsModalState.mcpMode && permsModalState.account) {
+      payload.account_id = permsModalState.account.id;
+      payload.label = ($("permsAccountLabel")?.value || "").trim();
+      payload.scope = $("permsAccountScope")?.value || "all";
+      payload.enabled = Boolean($("permsAccountEnabled")?.checked);
+      payload.custom_rules = ($("permsAccountRules")?.value || "").trim();
+    }
+    saveBtns.forEach((b) => { b.disabled = true; });
+    try {
+      await api(`/api/plugins/${encodeURIComponent(p.name)}/tool-permissions`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
       });
-      const payload = { tool_permissions: toolPerms };
-      if (!permsModalState.mcpMode && permsModalState.account) {
-        payload.account_id = permsModalState.account.id;
-        payload.label = ($("permsAccountLabel")?.value || "").trim();
-        payload.scope = $("permsAccountScope")?.value || "all";
-        payload.enabled = Boolean($("permsAccountEnabled")?.checked);
-        payload.custom_rules = ($("permsAccountRules")?.value || "").trim();
-      }
-      btn.disabled = true;
-      try {
-        await api(`/api/plugins/${encodeURIComponent(p.name)}/tool-permissions`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
-        closePluginPermsModal();
-        await loadPlugins();
-        await loadMcp();
-      } catch (err) {
-        toast(err.message, "err");
-      } finally {
-        btn.disabled = false;
-      }
-    };
+      toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
+      await loadPlugins();
+      await loadMcp();
+      navigateTo("/settings");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      saveBtns.forEach((b) => { b.disabled = false; });
+    }
   }
+  if ($("savePluginPermsBtn")) $("savePluginPermsBtn").onclick = savePluginPerms;
+  if ($("savePluginPermsTopBtn")) $("savePluginPermsTopBtn").onclick = savePluginPerms;
 
   if ($("closePluginConnectBtn")) $("closePluginConnectBtn").onclick = closePluginConnectModal;
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (e.target && typeof e.target.closest === "function" && e.target.closest(".xterm")) {
+      return;
+    }
     if ($("pluginConnectModal") && !$("pluginConnectModal").classList.contains("d-none")) {
       closePluginConnectModal();
-    } else if ($("pluginPermsModal") && !$("pluginPermsModal").classList.contains("d-none")) {
-      closePluginPermsModal();
     }
   });
 
@@ -2942,12 +3678,29 @@
     };
   }
 
+  const PLUGIN_KEY_SEQS = {
+    enter: "\r",
+    up: "\x1b[A",
+    down: "\x1b[B",
+    left: "\x1b[D",
+    right: "\x1b[C",
+    tab: "\t",
+    esc: "\x1b",
+    space: " ",
+    ctrl_c: "\x03",
+  };
   document.querySelectorAll(".plugin-key-btn").forEach((btn) => {
     btn.onclick = async () => {
+      const key = (btn.dataset.key || "").trim();
+      const seq = PLUGIN_KEY_SEQS[key];
+      if (seq && pluginConnectTerm && pluginConnectTerm.sendInput(seq)) {
+        pluginConnectTerm.focus();
+        return;
+      }
       try {
         const st = await api("/api/plugins/connect/input", {
           method: "POST",
-          body: JSON.stringify({ key: btn.dataset.key }),
+          body: JSON.stringify({ key }),
         });
         renderPluginConnectState(st);
       } catch (err) { toast(err.message, "err"); }
@@ -2958,6 +3711,12 @@
     $("pluginManualInputForm").onsubmit = async (e) => {
       e.preventDefault();
       const val = $("pluginManualInput").value;
+      const payload = val ? `${val.replace(/[\r\n]+$/, "")}\r` : "\r";
+      if (pluginConnectTerm && pluginConnectTerm.sendInput(payload)) {
+        $("pluginManualInput").value = "";
+        pluginConnectTerm.focus();
+        return;
+      }
       try {
         const st = await api("/api/plugins/connect/input", {
           method: "POST",

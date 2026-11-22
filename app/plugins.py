@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import urllib.error
@@ -40,9 +41,12 @@ _CONNECT_KEYS: dict[str, str] = {
     "enter": "\r",
     "up": "\x1b[A",
     "down": "\x1b[B",
+    "left": "\x1b[D",
+    "right": "\x1b[C",
     "tab": "\t",
     "esc": "\x1b",
     "space": " ",
+    "ctrl_c": "\x03",
 }
 
 FEATURED_PLUGIN_NAMES: tuple[str, ...] = ("gmail", "gcalendar", "gdrive")
@@ -1193,21 +1197,74 @@ def extract_signed_in_account(text: str) -> tuple[bool, str]:
     return False, ""
 
 
+_NON_AUTH_HOSTS = frozenset(
+    {
+        "policies.google.com",
+        "support.google.com",
+        "developers.google.com",
+        "cloud.google.com",
+    }
+)
+_NON_AUTH_PATH_SEGMENTS = (
+    "/terms",
+    "/privacy",
+    "/legal",
+    "/tos",
+    "/eula",
+    "/terms-of-service",
+    "/privacy-policy",
+)
+
+
+def _is_non_auth_info_url(url: str) -> bool:
+    """Vrátí True pro právní či informační odkazy (např. `/terms`), které nejsou OAuth loginem."""
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        return True
+    host = parsed.hostname.lower()
+    path = (parsed.path or "").lower()
+    query = (parsed.query or "").lower()
+    if "redirect_uri=" in query or "client_id=" in query or "response_type=code" in query:
+        return False
+    if host in _NON_AUTH_HOSTS:
+        return True
+    if host == "antigravity.google" and not path.startswith(
+        ("/oauth", "/authorize", "/login", "/signin")
+    ):
+        return True
+    return any(seg in path for seg in _NON_AUTH_PATH_SEGMENTS)
+
+
 def _pick_best_oauth_url(urls: list[str]) -> str:
-    """Vybere z extrahovaných odkazů nejpravděpodobnější OAuth přihlašovací URL."""
-    clean_urls = [u.strip() for u in urls if isinstance(u, str) and u.strip()]
+    """Vybere z extrahovaných odkazů reálnou OAuth přihlašovací URL (nikdy `/terms` apod.)."""
+    clean_urls = [
+        u.strip()
+        for u in urls
+        if isinstance(u, str) and u.strip() and not _is_non_auth_info_url(u)
+    ]
     if not clean_urls:
         return ""
     for scorer in (
         lambda u: ("accounts.google.com/o/oauth2" in u and "redirect_uri=" in u),
         lambda u: "redirect_uri=" in u,
         lambda u: "accounts.google.com/o/oauth2" in u,
-        lambda u: ("/oauth" in u.lower() or "/authorize" in u.lower()),
+        lambda u: any(
+            tok in u.lower()
+            for tok in (
+                "/oauth",
+                "/authorize",
+                "client_id=",
+                "response_type=code",
+                "/login/oauth",
+                "/device",
+                "/signin",
+            )
+        ),
     ):
         matches = [u for u in clean_urls if scorer(u)]
         if matches:
             return max(matches, key=len)
-    return clean_urls[0]
+    return ""
 
 
 def extract_oauth_callback_info(urls: list[str]) -> dict[str, Any]:
@@ -2250,6 +2307,8 @@ class PluginManager:
         self._master_fd: int | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._nav_task: asyncio.Task[None] | None = None
+        self._connect_subscribers: set[asyncio.Queue[str | None]] = set()
+        self._manual_override = False
 
     async def _run_agy_plugin_cmd(
         self, *cli_args: str, timeout: float = 45.0
@@ -2953,6 +3012,52 @@ class PluginManager:
             "custom_mcp": self._custom_mcp_public_dict(updated_srv),
         }
 
+    def subscribe_connect(self) -> tuple[str, asyncio.Queue[str | None]]:
+        """Přihlásí odběratele k živému PTY proudu připojování pluginu a vrátí dosavadní výstup."""
+        queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
+        self._connect_subscribers.add(queue)
+        return self._raw_output, queue
+
+    def unsubscribe_connect(self, queue: asyncio.Queue[str | None]) -> None:
+        """Odhlásí odběratele z živého PTY proudu připojování pluginu."""
+        self._connect_subscribers.discard(queue)
+
+    def _broadcast_connect(self, data: str | None) -> None:
+        for queue in list(self._connect_subscribers):
+            if queue.full():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(data)
+
+    def write_connect_raw(self, data: str) -> None:
+        """Zapíše surové znaky z webového terminálu do PTY a předá ovládání uživateli."""
+        if not data or not self._connect_state.running or self._master_fd is None:
+            return
+        self._manual_override = True
+        with contextlib.suppress(OSError):
+            os.write(self._master_fd, data.encode("utf-8"))
+
+    def resize_connect(self, cols: int, rows: int) -> None:
+        """Upraví velikost PTY okna podle rozměrů xterm.js v modalu."""
+        eff_cols = max(40, min(int(cols), 300))
+        eff_rows = max(12, min(int(rows), 100))
+        if self._master_fd is not None and fcntl is not None and termios is not None:
+            with contextlib.suppress(OSError):
+                fcntl.ioctl(
+                    self._master_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", eff_rows, eff_cols, 0, 0),
+                )
+            if (
+                self._proc is not None
+                and self._proc.poll() is None
+                and hasattr(os, "killpg")
+                and hasattr(signal, "SIGWINCH")
+            ):
+                with contextlib.suppress(OSError, ProcessLookupError):
+                    os.killpg(self._proc.pid, signal.SIGWINCH)
+
     def get_connect_state(self) -> PluginConnectState:
         """Vrátí aktuální stav PTY relace připojování účtu k pluginu."""
         if self._proc is not None and self._proc.poll() is not None:
@@ -2985,10 +3090,13 @@ class PluginManager:
         force_reconnect: bool = False,
         account_id: int | None = None,
         interactive_config: bool = False,
+        cols: int = 100,
+        rows: int = 26,
     ) -> PluginConnectState:
         """Spustí interaktivní `agy` relaci v PTY pro OAuth přihlášení nebo MCP konfiguraci."""
         safe_name = validate_plugin_name(plugin_name)
         await self.stop_connect()
+        self._manual_override = False
 
         if pty is None:
             self._connect_state = PluginConnectState(
@@ -3029,16 +3137,22 @@ class PluginManager:
         eff_ws = self.settings.workspace_dir
         eff_home.mkdir(parents=True, exist_ok=True)
         eff_ws.mkdir(parents=True, exist_ok=True)
+        eff_cols = max(40, min(int(cols), 300))
+        eff_rows = max(12, min(int(rows), 100))
 
         master_fd, slave_fd = pty.openpty()
         if fcntl is not None and termios is not None:
             with contextlib.suppress(OSError):
-                fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 2000, 0, 0))
+                fcntl.ioctl(
+                    slave_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", eff_rows, eff_cols, 0, 0),
+                )
 
         env = self.settings.subprocess_env(gemini_api_key="", home_dir=eff_home)
         env.setdefault("TERM", "xterm-256color")
-        env["COLUMNS"] = "2000"
-        env["LINES"] = "40"
+        env["COLUMNS"] = str(eff_cols)
+        env["LINES"] = str(eff_rows)
 
         try:
             proc = subprocess.Popen(
@@ -3101,6 +3215,7 @@ class PluginManager:
                 if not chunk:
                     break
                 raw_text = chunk.decode("utf-8", errors="replace")
+                self._broadcast_connect(raw_text)
                 self._raw_output = (self._raw_output + raw_text)[-48000:]
                 cleaned = clean_terminal_output(self._raw_output)[-16000:]
                 self._connect_state.output = cleaned
@@ -3127,6 +3242,7 @@ class PluginManager:
                 self._connect_state.exit_code = rc
             self._connect_state.running = False
             self._close_fd()
+            self._broadcast_connect(None)
 
     def _write_pty(self, data: str) -> None:
         if self._master_fd is not None and self._connect_state.running:
@@ -3165,7 +3281,11 @@ class PluginManager:
         try:
             # 1. Počkej, až TUI naběhne (první výstup + krátká prodleva nebo max 8 s)
             for _ in range(40):
-                if not self._connect_state.running or self._master_fd is None:
+                if (
+                    not self._connect_state.running
+                    or self._master_fd is None
+                    or self._manual_override
+                ):
                     return
                 if self._connect_state.output.strip():
                     await asyncio.sleep(1.2)
@@ -3174,32 +3294,97 @@ class PluginManager:
             else:
                 await asyncio.sleep(0.5)
 
-            if not self._connect_state.running or self._connect_state.auth_url:
+            if (
+                not self._connect_state.running
+                or self._connect_state.auth_url
+                or self._manual_override
+            ):
+                return
+
+            # Pokud agy při prvním spuštění zobrazí interaktivní onboarding wizard ([Previous]/[Done]),
+            # nezasahuj do něj – uživatel ho pohodlně odkliká přímo v živém xterm.js terminálu.
+            low_start = self._connect_state.output.lower()
+            if "[previous]" in low_start and "[done]" in low_start:
+                return
+
+            # Jednoduchý Trust/Terms prompt bez wizardu lze potvrdit Enterem
+            for _ in range(2):
+                if (
+                    not self._connect_state.running
+                    or self._connect_state.auth_url
+                    or self._manual_override
+                ):
+                    return
+                low_start = self._connect_state.output.lower()
+                if "[previous]" in low_start and "[done]" in low_start:
+                    return
+                if any(
+                    tok in low_start
+                    for tok in (
+                        "antigravity.google/terms",
+                        "terms of service",
+                        "accept and continue",
+                        "press enter to continue",
+                        "trust this",
+                        "do you trust",
+                        "trust workspace",
+                    )
+                ) and not any(
+                    tok in low_start for tok in ("installed", "discover", "marketplace:")
+                ):
+                    self._write_pty("\r")
+                    await asyncio.sleep(1.2)
+                else:
+                    break
+
+            if (
+                not self._connect_state.running
+                or self._connect_state.auth_url
+                or self._manual_override
+            ):
                 return
             self._write_pty("/plugin\r")
 
             # 2. Vyčkej na obrazovku Správce pluginů
-            for _ in range(40):
-                if not self._connect_state.running or self._connect_state.auth_url:
+            for step in range(40):
+                if (
+                    not self._connect_state.running
+                    or self._connect_state.auth_url
+                    or self._manual_override
+                ):
                     return
                 low = self._connect_state.output.lower()
                 if "installed" in low or "discover" in low or "plugins" in low:
                     break
+                if step == 15:
+                    self._write_pty("/plugin\r")
                 await asyncio.sleep(0.2)
 
-            if not self._connect_state.running or self._connect_state.auth_url:
+            if (
+                not self._connect_state.running
+                or self._connect_state.auth_url
+                or self._manual_override
+            ):
                 return
             await asyncio.sleep(0.5)
             # Napiš název pluginu pro odfiltrování v záložce Installed a rozbal detail
             self._write_pty(plugin_name)
             await asyncio.sleep(0.6)
-            if not self._connect_state.running or self._connect_state.auth_url:
+            if (
+                not self._connect_state.running
+                or self._connect_state.auth_url
+                or self._manual_override
+            ):
                 return
             self._write_pty("\r")
 
             # 3. Vyčkej až 4 s na rozbalení detailu (nebo rovnou OAuth URL)
             for _ in range(20):
-                if not self._connect_state.running or self._connect_state.auth_url:
+                if (
+                    not self._connect_state.running
+                    or self._connect_state.auth_url
+                    or self._manual_override
+                ):
                     return
                 low = self._connect_state.output.lower()
                 if any(
@@ -3223,7 +3408,11 @@ class PluginManager:
                 # U pluginů vyžadujících konfiguraci MCP (např. n8n) necháme PTY otevřené pro uživatele
                 return
 
-            if not self._connect_state.running or self._connect_state.auth_url:
+            if (
+                not self._connect_state.running
+                or self._connect_state.auth_url
+                or self._manual_override
+            ):
                 return
 
             is_signed_in, account = extract_signed_in_account(self._connect_state.output)
@@ -3246,23 +3435,33 @@ class PluginManager:
                 # Stávající účet odhlásit (`Confirm Sign Out` -> `y`) a pak spustit nové přihlášení
                 self._write_pty("\r")
                 for _ in range(15):
-                    if not self._connect_state.running:
+                    if not self._connect_state.running or self._manual_override:
                         return
                     if "confirm sign out" in self._connect_state.output.lower():
                         break
                     await asyncio.sleep(0.2)
+                if not self._connect_state.running or self._manual_override:
+                    return
                 self._write_pty("y")
                 await asyncio.sleep(1.5)
                 self._raw_output = ""
                 self._connect_state.output = ""
-                if not self._connect_state.running or self._connect_state.auth_url:
+                if (
+                    not self._connect_state.running
+                    or self._connect_state.auth_url
+                    or self._manual_override
+                ):
                     return
 
             # 4. Spusť přihlášení (`Sign in`) a čekej na OAuth URL
             self._write_pty("\r")
             nudged_down = False
             for step in range(25):
-                if not self._connect_state.running or self._connect_state.auth_url:
+                if (
+                    not self._connect_state.running
+                    or self._connect_state.auth_url
+                    or self._manual_override
+                ):
                     return
                 if not force_reconnect:
                     signed_now, acct_now = extract_signed_in_account(self._connect_state.output)
@@ -3364,6 +3563,7 @@ class PluginManager:
 
     async def stop_connect(self) -> None:
         """Bezpečně ukončí běžící PTY relaci připojování pluginu."""
+        self._manual_override = False
         if self._nav_task is not None and not self._nav_task.done():
             self._nav_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -3381,3 +3581,4 @@ class PluginManager:
         self._nav_task = None
         self._raw_output = ""
         self._connect_state.running = False
+        self._broadcast_connect(None)

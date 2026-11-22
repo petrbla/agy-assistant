@@ -72,6 +72,13 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert "bootstrap@5.3.9/dist/css/bootstrap.min.css" in home_res.text
     assert "bootstrap@5.3.9/dist/js/bootstrap.bundle.min.js" in home_res.text
     assert "bootstrap-icons@1.13.2/font/bootstrap-icons.min.css" in home_res.text
+    assert "@xterm/xterm@5.5.0" in home_res.text
+    assert "pluginConnectTerminal" in home_res.text
+    assert "oauthTerminal" in home_res.text
+    assert "onboardOauthTerminal" in home_res.text
+    assert "memoryModeSeg" in home_res.text
+    assert "memoryToolbar" in home_res.text
+    assert "memoryPreview" in home_res.text
     assert "tabler-icons" not in home_res.text
     assert "no-cache" in (home_res.headers.get("cache-control") or "").lower()
     assert f"/static/styles.css?v={__version__}-" in home_res.text
@@ -82,6 +89,13 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert client.get("/favicon.ico").status_code == 200
     assert client.get("/static/styles.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
+
+    for spa_path in ("/chat", "/memory", "/ops", "/settings", "/settings/plugins/gmail"):
+        spa_res = client.get(spa_path)
+        assert spa_res.status_code == 200
+        assert "tab-plugin-perms" in spa_res.text
+        assert "no-cache" in (spa_res.headers.get("cache-control") or "").lower()
+    assert client.get("/api/neexistuje").status_code == 404
     health_res = client.get("/api/health")
     assert health_res.status_code == 200
     assert health_res.json()["version"] == __version__
@@ -350,5 +364,96 @@ async def test_app_version_checker_and_api(tmp_path: Path) -> None:
     assert st_json["app_latest_version"] == "0.0.7"
     assert st_json["app_up_to_date"] is False
     assert st_json["app_update_available"] is True
+
+
+def test_pty_websockets_auth_and_streaming(tmp_path: Path) -> None:
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    from app.auth_session import AgyAuthManager
+    from app.plugins import PluginManager
+
+    settings = Settings(
+        workspace_dir=tmp_path,
+        data_dir=tmp_path / "data",
+        home_dir=tmp_path / "home",
+        web_auth_token="ws-secret",
+    )
+    (tmp_path / "MEMORY.md").write_text("# Paměť", encoding="utf-8")
+    db = AssistantDB(settings.db_path)
+    memory = WorkspaceMemory(tmp_path)
+    runner = AsyncMock()
+    auth_mgr = AgyAuthManager(settings)
+    plugin_mgr = PluginManager(settings, db)
+
+    plugin_inputs: list[str] = []
+    plugin_resizes: list[tuple[int, int]] = []
+    auth_inputs: list[str] = []
+    auth_resizes: list[tuple[int, int]] = []
+
+    plugin_mgr.write_connect_raw = lambda data: plugin_inputs.append(data)  # type: ignore[method-assign]
+    plugin_mgr.resize_connect = lambda c, r: plugin_resizes.append((c, r))  # type: ignore[method-assign]
+    auth_mgr.write_raw = lambda data: auth_inputs.append(data)  # type: ignore[method-assign]
+    auth_mgr.resize = lambda c, r: auth_resizes.append((c, r))  # type: ignore[method-assign]
+
+    app = create_app(
+        settings,
+        db,
+        memory,
+        runner,
+        auth_manager=auth_mgr,
+        plugin_manager=plugin_mgr,
+    )
+    client = TestClient(app)
+
+    # 1. Odmítnutí neplatného tokenu na obou WS endpointech
+    for ws_path in ("/ws/pty/plugin", "/ws/pty/auth"):
+        with client.websocket_connect(ws_path) as ws:
+            ws.send_json({"type": "auth", "token": "spatny-token"})
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                ws.receive_json()
+            assert exc_info.value.code == 4401
+
+    # 2. Plugin PTY WebSocket: snapshot, resize, input, live chunk i exit
+    plugin_mgr._connect_state.running = True
+    plugin_mgr._connect_state.exit_code = None
+    plugin_mgr._raw_output = "\x1b[32mHello TUI\x1b[0m"
+    with client.websocket_connect("/ws/pty/plugin") as ws:
+        ws.send_json({"type": "auth", "token": "ws-secret"})
+        assert ws.receive_json() == {"type": "ready", "running": True}
+        assert ws.receive_json() == {"type": "output", "data": "\x1b[32mHello TUI\x1b[0m"}
+
+        ws.send_json({"type": "resize", "cols": 92, "rows": 28})
+        ws.send_json({"type": "input", "data": "\x1b[B"})
+
+        plugin_mgr._broadcast_connect("next-chunk")
+        assert ws.receive_json() == {"type": "output", "data": "next-chunk"}
+
+        plugin_mgr._connect_state.exit_code = 0
+        plugin_mgr._broadcast_connect(None)
+        assert ws.receive_json() == {"type": "exit", "exit_code": 0}
+
+    assert plugin_resizes == [(92, 28)]
+    assert plugin_inputs == ["\x1b[B"]
+
+    # 3. Auth PTY WebSocket: snapshot, resize, input i exit
+    auth_mgr._state.running = True
+    auth_mgr._state.exit_code = None
+    auth_mgr._raw_output = "Prompt>"
+    with client.websocket_connect("/ws/pty/auth") as ws:
+        ws.send_json({"type": "auth", "token": "ws-secret"})
+        assert ws.receive_json() == {"type": "ready", "running": True}
+        assert ws.receive_json() == {"type": "output", "data": "Prompt>"}
+
+        ws.send_json({"type": "resize", "cols": 88, "rows": 24})
+        ws.send_json({"type": "input", "data": "\r"})
+
+        auth_mgr._state.exit_code = 0
+        auth_mgr._broadcast(None)
+        assert ws.receive_json() == {"type": "exit", "exit_code": 0}
+
+    assert auth_resizes == [(88, 24)]
+    assert auth_inputs == ["\r"]
+
 
 

@@ -1186,3 +1186,80 @@ def test_http_mcp_tool_discovery_sse_json_and_permissions(tmp_path: Path) -> Non
         server.server_close()
 
 
+def test_extract_oauth_ignores_terms_and_info_urls() -> None:
+    empty_info = extract_oauth_callback_info(
+        [
+            "https://antigravity.google/terms",
+            "https://policies.google.com/privacy",
+            "https://antigravity.google/docs",
+        ]
+    )
+    assert empty_info["auth_url"] == ""
+    assert empty_info["flow_type"] == ""
+
+    google_oauth = (
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id=c1"
+        "&redirect_uri=http%3A%2F%2F127.0.0.1%3A44535%2Fcallback"
+        "&response_type=code&state=S1"
+    )
+    with_google = extract_oauth_callback_info(
+        ["https://antigravity.google/terms", google_oauth]
+    )
+    assert with_google["auth_url"] == google_oauth
+    assert with_google["flow_type"] == "localhost_callback"
+    assert with_google["callback_port"] == 44535
+    assert with_google["expected_state"] == "S1"
+
+    partner_oauth = "https://auth.example.com/oauth/authorize?client_id=abc&response_type=code"
+    with_partner = extract_oauth_callback_info(
+        ["https://antigravity.google/terms", partner_oauth]
+    )
+    assert with_partner["auth_url"] == partner_oauth
+    assert with_partner["flow_type"] == "unknown"
+
+
+def test_ensure_profile_home_seeded_copies_main_oauth_and_state_without_plugin_tokens(
+    tmp_path: Path,
+) -> None:
+    from app.user_env import ensure_profile_home_seeded
+
+    main_home = tmp_path / "home"
+    (main_home / ".gemini" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
+    (main_home / ".config" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
+    (main_home / ".local" / "share" / "antigravity-cli").mkdir(parents=True, exist_ok=True)
+
+    (main_home / ".gemini" / "antigravity-cli" / "jetski_state.pbtxt").write_text(
+        'refresh_token: "1//sample-refresh-token"\nuser_email: "user@example.com"\n',
+        encoding="utf-8",
+    )
+    (main_home / ".gemini" / "antigravity-cli" / "settings.json").write_text(
+        '{"agentMode": "auto"}\n', encoding="utf-8"
+    )
+    (main_home / ".gemini" / "mcp_oauth_tokens.json").write_text(
+        '{"gmail": {"token": "first-account"}}\n', encoding="utf-8"
+    )
+    (main_home / ".config" / "antigravity-cli" / "oauth_creds.json").write_text(
+        '{"access_token": "tok"}\n', encoding="utf-8"
+    )
+    (main_home / ".local" / "share" / "antigravity-cli" / "session_auth.json").write_text(
+        '{"token": "sess"}\n', encoding="utf-8"
+    )
+
+    # Simulace neúspěšného předchozího spuštění profilu bez platného OAuth
+    stale_prof = main_home / "profiles" / "pracovni" / ".gemini" / "antigravity-cli"
+    stale_prof.mkdir(parents=True, exist_ok=True)
+    (stale_prof / "jetski_state.pbtxt").write_text("# empty state\n", encoding="utf-8")
+
+    s = Settings(workspace_dir=tmp_path / "ws", data_dir=tmp_path / "data", home_dir=main_home)
+    prof_home = ensure_profile_home_seeded(s, "pracovni")
+
+    assert "sample-refresh-token" in (
+        prof_home / ".gemini" / "antigravity-cli" / "jetski_state.pbtxt"
+    ).read_text(encoding="utf-8")
+    assert (prof_home / ".gemini" / "antigravity-cli" / "settings.json").is_file()
+    assert (prof_home / ".config" / "antigravity-cli" / "oauth_creds.json").is_file()
+    assert (prof_home / ".local" / "share" / "antigravity-cli" / "session_auth.json").is_file()
+    assert not (prof_home / ".gemini" / "mcp_oauth_tokens.json").exists()
+
+
+

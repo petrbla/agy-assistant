@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import secrets
 from dataclasses import asdict
@@ -10,7 +11,7 @@ from typing import Any, Awaitable, Callable, Literal
 from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -117,6 +118,8 @@ class McpServerUpsertRequest(BaseModel):
 
 class AuthStartRequest(BaseModel):
     mode: Literal["auth_login", "interactive"] = "interactive"
+    cols: int = Field(default=100, ge=40, le=300)
+    rows: int = Field(default=26, ge=12, le=100)
 
 
 class AuthInputRequest(BaseModel):
@@ -140,6 +143,8 @@ class PluginConnectStartRequest(BaseModel):
     force_reconnect: bool = False
     account_id: int | None = None
     interactive_config: bool = False
+    cols: int = Field(default=100, ge=40, le=300)
+    rows: int = Field(default=26, ge=12, le=100)
 
 
 class PluginAccountCreateRequest(BaseModel):
@@ -340,11 +345,7 @@ def create_app(
             owner = db.ensure_owner(settings)
         return owner
 
-    async def require_auth(
-        authorization: str | None = Header(default=None),
-        x_auth_token: str | None = Header(default=None),
-    ) -> OwnerConfig:
-        provided = _extract_bearer(authorization, x_auth_token)
+    def _authenticate_token(provided: str) -> OwnerConfig:
         owner = _get_owner()
 
         if provided:
@@ -375,6 +376,12 @@ def create_app(
             )
         return owner
 
+    async def require_auth(
+        authorization: str | None = Header(default=None),
+        x_auth_token: str | None = Header(default=None),
+    ) -> OwnerConfig:
+        return _authenticate_token(_extract_bearer(authorization, x_auth_token))
+
     def _verify_second_factor(owner: OwnerConfig, code: str) -> bool:
         if verify_totp_code(owner.totp_secret, code):
             return True
@@ -391,7 +398,12 @@ def create_app(
         return False
 
     @app.get("/", response_model=None)
-    async def index() -> HTMLResponse | dict[str, str]:
+    @app.get("/chat", response_model=None)
+    @app.get("/memory", response_model=None)
+    @app.get("/ops", response_model=None)
+    @app.get("/settings", response_model=None)
+    @app.get("/settings/plugins/{plugin_name}", response_model=None)
+    async def index(plugin_name: str | None = None) -> HTMLResponse | dict[str, str]:
         index_file = STATIC_DIR / "index.html"
         if index_file.is_file():
             html = index_file.read_text(encoding="utf-8")
@@ -1043,6 +1055,8 @@ def create_app(
                 force_reconnect=payload.force_reconnect,
                 account_id=payload.account_id,
                 interactive_config=payload.interactive_config,
+                cols=payload.cols,
+                rows=payload.rows,
             )
             return asdict(state)
         except (ValueError, RuntimeError) as exc:
@@ -1073,7 +1087,11 @@ def create_app(
         prepare_agy_home(settings, db)
         if isinstance(runner, AgyRunner):
             runner.invalidate_models_cache()
-        state = await auth_manager.start(mode=payload.mode)
+        state = await auth_manager.start(
+            mode=payload.mode,
+            cols=payload.cols,
+            rows=payload.rows,
+        )
         return asdict(state)
 
     @app.get("/api/auth/status")
@@ -1125,6 +1143,117 @@ def create_app(
             "has_gemini_api_key": False,
             "agy_authenticated": False,
         }
+
+    async def _serve_pty_websocket(
+        websocket: WebSocket,
+        *,
+        is_running: Callable[[], bool],
+        get_exit_code: Callable[[], int | None],
+        subscribe: Callable[[], tuple[str, asyncio.Queue[str | None]]],
+        unsubscribe: Callable[[asyncio.Queue[str | None]], None],
+        write_raw: Callable[[str], None],
+        resize: Callable[[int, int], None],
+    ) -> None:
+        await websocket.accept()
+        try:
+            raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            auth_msg = json.loads(raw_auth)
+            if not isinstance(auth_msg, dict) or auth_msg.get("type") != "auth":
+                raise ValueError("Missing auth frame")
+            _authenticate_token(str(auth_msg.get("token") or "").strip())
+        except Exception:
+            with contextlib.suppress(Exception):
+                await websocket.close(code=4401, reason="Unauthorized")
+            return
+
+        snapshot, queue = subscribe()
+        sender_task: asyncio.Task[None] | None = None
+        try:
+            await websocket.send_json({"type": "ready", "running": bool(is_running())})
+            if snapshot:
+                await websocket.send_json({"type": "output", "data": snapshot})
+
+            async def _pump_output() -> None:
+                while True:
+                    chunk = await queue.get()
+                    if chunk is None:
+                        await websocket.send_json(
+                            {"type": "exit", "exit_code": get_exit_code()}
+                        )
+                        break
+                    await websocket.send_json({"type": "output", "data": chunk})
+
+            sender_task = asyncio.create_task(_pump_output())
+            while True:
+                raw_msg = await websocket.receive_text()
+                try:
+                    msg = json.loads(raw_msg)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+                msg_type = msg.get("type")
+                if msg_type == "input":
+                    data = msg.get("data")
+                    if isinstance(data, str) and 0 < len(data) <= 8192:
+                        write_raw(data)
+                elif msg_type == "resize":
+                    try:
+                        cols_val = int(msg.get("cols", 100))
+                        rows_val = int(msg.get("rows", 26))
+                    except (TypeError, ValueError):
+                        continue
+                    resize(cols_val, rows_val)
+        except WebSocketDisconnect:
+            return
+        except Exception:
+            return
+        finally:
+            if sender_task is not None:
+                sender_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await sender_task
+            unsubscribe(queue)
+
+    @app.websocket("/ws/pty/plugin")
+    async def ws_pty_plugin(websocket: WebSocket) -> None:
+        await _serve_pty_websocket(
+            websocket,
+            is_running=lambda: bool(plugin_manager.get_connect_state().running),
+            get_exit_code=lambda: plugin_manager.get_connect_state().exit_code,
+            subscribe=plugin_manager.subscribe_connect,
+            unsubscribe=plugin_manager.unsubscribe_connect,
+            write_raw=plugin_manager.write_connect_raw,
+            resize=plugin_manager.resize_connect,
+        )
+
+    @app.websocket("/ws/pty/auth")
+    async def ws_pty_auth(websocket: WebSocket) -> None:
+        if auth_manager is None:
+            await websocket.accept()
+            try:
+                raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+                auth_msg = json.loads(raw_auth)
+                if not isinstance(auth_msg, dict) or auth_msg.get("type") != "auth":
+                    raise ValueError("Missing auth frame")
+                _authenticate_token(str(auth_msg.get("token") or "").strip())
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await websocket.close(code=4401, reason="Unauthorized")
+                return
+            await websocket.send_json({"type": "ready", "running": False})
+            await websocket.close(code=1000)
+            return
+
+        await _serve_pty_websocket(
+            websocket,
+            is_running=lambda: bool(auth_manager.get_state().running),
+            get_exit_code=lambda: auth_manager.get_state().exit_code,
+            subscribe=auth_manager.subscribe,
+            unsubscribe=auth_manager.unsubscribe,
+            write_raw=auth_manager.write_raw,
+            resize=auth_manager.resize,
+        )
 
     @app.get("/api/app/version")
     async def get_app_version(

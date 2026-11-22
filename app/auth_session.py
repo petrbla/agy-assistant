@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import re
+import signal
 import struct
 import subprocess
 from dataclasses import dataclass, field
@@ -162,6 +163,52 @@ class AgyAuthManager:
         self._proc: subprocess.Popen[bytes] | None = None
         self._master_fd: int | None = None
         self._reader_task: asyncio.Task[None] | None = None
+        self._subscribers: set[asyncio.Queue[str | None]] = set()
+
+    def subscribe(self) -> tuple[str, asyncio.Queue[str | None]]:
+        """Přihlásí odběratele k živému PTY proudu a vrátí dosavadní surový výstup."""
+        queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
+        self._subscribers.add(queue)
+        return self._raw_output, queue
+
+    def unsubscribe(self, queue: asyncio.Queue[str | None]) -> None:
+        """Odhlásí odběratele z živého PTY proudu."""
+        self._subscribers.discard(queue)
+
+    def _broadcast(self, data: str | None) -> None:
+        for queue in list(self._subscribers):
+            if queue.full():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(data)
+
+    def write_raw(self, data: str) -> None:
+        """Zapíše surové bajty klávesnice z WebSocket terminálu přímo do PTY."""
+        if not data or not self._state.running or self._master_fd is None:
+            return
+        with contextlib.suppress(OSError):
+            os.write(self._master_fd, data.encode("utf-8"))
+
+    def resize(self, cols: int, rows: int) -> None:
+        """Upraví velikost PTY okna podle rozměrů frontendového terminálu."""
+        eff_cols = max(40, min(int(cols), 300))
+        eff_rows = max(12, min(int(rows), 100))
+        if self._master_fd is not None and fcntl is not None and termios is not None:
+            with contextlib.suppress(OSError):
+                fcntl.ioctl(
+                    self._master_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", eff_rows, eff_cols, 0, 0),
+                )
+            if (
+                self._proc is not None
+                and self._proc.poll() is None
+                and hasattr(os, "killpg")
+                and hasattr(signal, "SIGWINCH")
+            ):
+                with contextlib.suppress(OSError, ProcessLookupError):
+                    os.killpg(self._proc.pid, signal.SIGWINCH)
 
     def get_state(self) -> AuthSessionState:
         """Vrátí aktuální stav interaktivního přihlášení."""
@@ -177,7 +224,13 @@ class AgyAuthManager:
             error=self._state.error,
         )
 
-    async def start(self, mode: str = "interactive") -> AuthSessionState:
+    async def start(
+        self,
+        mode: str = "interactive",
+        *,
+        cols: int = 100,
+        rows: int = 26,
+    ) -> AuthSessionState:
         """Spustí interaktivní `agy` přihlášení v PTY."""
         await self.stop()
 
@@ -193,15 +246,21 @@ class AgyAuthManager:
         eff_home.mkdir(parents=True, exist_ok=True)
         eff_ws.mkdir(parents=True, exist_ok=True)
         args = [self.settings.agy_bin]
+        eff_cols = max(40, min(int(cols), 300))
+        eff_rows = max(12, min(int(rows), 100))
 
         master_fd, slave_fd = pty.openpty()
         if fcntl is not None and termios is not None:
             with contextlib.suppress(OSError):
-                fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 2000, 0, 0))
+                fcntl.ioctl(
+                    slave_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", eff_rows, eff_cols, 0, 0),
+                )
         env = self.settings.subprocess_env(gemini_api_key="", home_dir=eff_home)
         env.setdefault("TERM", "xterm-256color")
-        env["COLUMNS"] = "2000"
-        env["LINES"] = "40"
+        env["COLUMNS"] = str(eff_cols)
+        env["LINES"] = str(eff_rows)
 
         try:
             proc = subprocess.Popen(
@@ -244,6 +303,7 @@ class AgyAuthManager:
                 if not chunk:
                     break
                 raw_text = chunk.decode("utf-8", errors="replace")
+                self._broadcast(raw_text)
                 self._raw_output = (self._raw_output + raw_text)[-32000:]
                 self._state.output = clean_terminal_output(self._raw_output)[-16000:]
                 self._state.urls = _merge_unique_urls(
@@ -261,6 +321,7 @@ class AgyAuthManager:
                 self._state.exit_code = rc
             self._state.running = False
             self._close_fd()
+            self._broadcast(None)
 
     async def send_input(self, value: str = "") -> AuthSessionState:
         """Pošle vstup (nebo samotný Enter) do běžící relace `agy`."""
@@ -291,3 +352,4 @@ class AgyAuthManager:
         self._reader_task = None
         self._raw_output = ""
         self._state.running = False
+        self._broadcast(None)
