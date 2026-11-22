@@ -256,6 +256,26 @@
               </div>
             </div>
             <div class="card-body p-3">
+              <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                <button id="exportMemoryBtn" type="button" class="btn btn-outline-secondary btn-sm flex-grow-1">
+                  <i class="bi bi-download me-1" aria-hidden="true"></i><span data-i18n="btn_export_memory">Export ZIP</span>
+                </button>
+                <button id="importMemoryBtn" type="button" class="btn btn-outline-secondary btn-sm flex-grow-1">
+                  <i class="bi bi-upload me-1" aria-hidden="true"></i><span data-i18n="btn_import_memory">Import ZIP</span>
+                </button>
+                <input id="importMemoryFile" type="file" accept=".zip,application/zip" class="d-none" />
+              </div>
+              <div id="importMemoryBox" class="d-none p-2 mb-2 rounded border bg-body-tertiary">
+                <div id="importMemoryFileName" class="small fw-semibold font-monospace text-truncate mb-2"></div>
+                <div class="form-check mb-2">
+                  <input id="importMemoryReplaceChk" class="form-check-input" type="checkbox" />
+                  <label for="importMemoryReplaceChk" class="form-check-label small" data-i18n="memory_import_replace_label">Clear memory/ and skills/ before importing (clean restore)</label>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                  <button id="confirmImportMemoryBtn" type="button" class="btn btn-primary btn-sm flex-grow-1" data-i18n="btn_confirm_import">Import</button>
+                  <button id="cancelImportMemoryBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="plugin_account_btn_cancel">Cancel</button>
+                </div>
+              </div>
               <div class="mb-2">
                 <input id="fileFilter" type="text" class="form-control form-control-sm" placeholder="Filter files…" data-i18n-placeholder="file_filter_placeholder" />
               </div>
@@ -641,6 +661,60 @@
         </div>
       </div>
 
+      <!-- GitHub Agent Backup -->
+      <div class="card shadow-sm mb-3">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div>
+            <h2 class="h6 fw-bold mb-0" data-i18n="gh_backup_title">Daily GitHub Agent Backup</h2>
+            <p class="small text-body-secondary mb-0" data-i18n="gh_backup_subtitle">Automatically pushes a sanitized snapshot of workspace memory, custom skills, scheduled tasks, and plugin/MCP configuration to GitHub.</p>
+          </div>
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <span id="ghBackupBadge" class="badge rounded-pill text-bg-secondary" data-i18n="gh_backup_status_off">Disabled</span>
+            <button id="runGhBackupBtn" type="button" class="btn btn-outline-primary btn-sm" data-i18n="btn_run_gh_backup">Back up now</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <form id="githubBackupForm">
+            <div class="row g-2 align-items-center mb-3">
+              <div class="col-md-5">
+                <div class="form-check form-switch mb-0">
+                  <input id="cfgGhBackupEnabled" class="form-check-input" type="checkbox" role="switch" />
+                  <label for="cfgGhBackupEnabled" class="form-check-label fw-semibold small" data-i18n="gh_backup_enabled">Daily GitHub backup enabled</label>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <input id="cfgGhBackupCron" type="text" class="form-control form-control-sm font-monospace" placeholder="30 2 * * *" data-i18n-title="gh_backup_cron_title" title="Backup schedule (cron, e.g. 30 2 * * * = daily at 2:30)" />
+              </div>
+              <div class="col-md-4 text-md-end">
+                <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_save_gh_backup">Save backup settings</button>
+              </div>
+            </div>
+
+            <div class="row g-2 mb-3">
+              <div class="col-md-8">
+                <label for="cfgGhBackupRepo" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_repo">GitHub repository</label>
+                <input id="cfgGhBackupRepo" type="text" class="form-control form-control-sm font-monospace" placeholder="owner/private-backup-repo or https://github.com/owner/repo" data-i18n-placeholder="placeholder_gh_backup_repo" />
+              </div>
+              <div class="col-md-4">
+                <label for="cfgGhBackupBranch" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_branch">Branch</label>
+                <input id="cfgGhBackupBranch" type="text" class="form-control form-control-sm font-monospace" placeholder="main" />
+              </div>
+            </div>
+
+            <div class="mb-2">
+              <label for="cfgGhBackupToken" class="form-label small fw-semibold text-body-secondary" data-i18n="label_gh_backup_token">GitHub Personal Access Token (PAT)</label>
+              <div class="d-flex align-items-center gap-2">
+                <input id="cfgGhBackupToken" type="password" class="form-control form-control-sm flex-grow-1 font-monospace" placeholder="github_pat_… (empty = keep unchanged)" data-i18n-placeholder="placeholder_gh_backup_token" />
+                <button id="clearGhBackupTokenBtn" type="button" class="btn btn-outline-danger btn-sm d-none text-nowrap" data-i18n="btn_clear_gh_token">Clear token</button>
+              </div>
+            </div>
+
+            <div class="form-text mb-2" data-i18n="gh_backup_help">Use a private repository and a Fine-grained PAT with Contents: Read and write permission. Passwords, API keys, and OAuth tokens are never included in backups.</div>
+            <div id="ghBackupLastInfo" class="small text-body-secondary"></div>
+          </form>
+        </div>
+      </div>
+
       <!-- Antigravity CLI & OAuth -->
       <div class="card shadow-sm mb-3">
         <div id="agyAuthHeader" class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 border-bottom-0">
@@ -953,29 +1027,53 @@
             <div id="pluginConnectUrlWrap" class="d-flex align-items-center flex-wrap gap-2"></div>
           </div>
 
-          <div id="pluginEmbeddedBrowserBox" class="embedded-browser-box mb-3 d-none">
-            <div class="embedded-browser-bar">
-              <button id="pluginBrowserBackBtn" type="button" class="btn btn-outline-secondary btn-sm" title="Back" data-i18n-title="btn_back">
-                <i class="bi bi-arrow-left" aria-hidden="true"></i>
-              </button>
-              <button id="pluginBrowserReloadBtn" type="button" class="btn btn-outline-secondary btn-sm" title="Refresh" data-i18n-title="btn_refresh">
-                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
-              </button>
-              <div id="pluginBrowserUrl" class="embedded-browser-url font-monospace">about:blank</div>
-              <button id="pluginBrowserPasteBtn" type="button" class="btn btn-outline-secondary btn-sm text-nowrap" data-i18n="plugin_browser_paste_btn">Paste text</button>
-              <button id="pluginBrowserCloseBtn" type="button" class="btn btn-outline-danger btn-sm text-nowrap" data-i18n="plugin_browser_close_btn">Close browser</button>
-            </div>
-            <div id="pluginBrowserViewport" class="embedded-browser-viewport" tabindex="0">
-              <img id="pluginBrowserImg" class="embedded-browser-img" alt="OAuth browser" />
-              <div id="pluginBrowserOverlay" class="embedded-browser-overlay">
-                <span data-i18n="plugin_browser_loading">Starting built-in browser…</span>
-              </div>
-            </div>
-            <div class="px-2 py-1 small text-body-secondary border-top bg-body-tertiary" data-i18n="plugin_browser_hint">Click inside the browser to sign in. Once approved, the connection completes automatically.</div>
-          </div>
-
           <form id="pluginCallbackForm" class="d-none">
-            <div class="alert alert-info py-2 small my-2" data-i18n="plugin_connect_callback_hint">After approving access in Google, the browser shows a “127.0.0.1 refused to connect” page — that is expected! Copy the entire address from your browser's address bar (starting with http://127.0.0.1:…) and paste it below:</div>
+            <div class="oauth-guide-card mb-3">
+              <div class="d-flex align-items-start gap-2 mb-2">
+                <i class="bi bi-info-circle-fill text-primary mt-1 flex-shrink-0" aria-hidden="true"></i>
+                <div>
+                  <div class="fw-semibold small" data-i18n="plugin_guide_title">How to finish connecting (takes 10 seconds)</div>
+                  <div class="small text-body-secondary" data-i18n="plugin_guide_why">Because the assistant runs on a server, the browser cannot reach localhost (127.0.0.1) on your PC. That error page actually means Google approved access.</div>
+                </div>
+              </div>
+              <ol class="oauth-guide-steps list-unstyled mb-0">
+                <li>
+                  <span class="oauth-step-num">1</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="plugin_guide_step1_title">Sign in and allow access</div>
+                    <div class="small text-body-secondary" data-i18n="plugin_guide_step1_desc">Click the button above, pick your account, and approve the requested permissions.</div>
+                  </div>
+                </li>
+                <li>
+                  <span class="oauth-step-num">2</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="plugin_guide_step2_title">Expect the “127.0.0.1 refused to connect” page</div>
+                    <div class="small text-body-secondary" data-i18n="plugin_guide_step2_desc">Do not close that browser tab! Even though it looks like an error, the login token is inside its address bar.</div>
+                  </div>
+                </li>
+                <li>
+                  <span class="oauth-step-num">3</span>
+                  <div class="flex-grow-1 min-w-0">
+                    <div class="fw-semibold small" data-i18n="plugin_guide_step3_title">Copy the full address from the browser bar</div>
+                    <div class="small text-body-secondary mb-2" data-i18n="plugin_guide_step3_desc">Click the address bar (or press Ctrl+L / Cmd+L) and copy the entire URL (Ctrl+C / Cmd+C).</div>
+                    <div class="oauth-url-mockup">
+                      <div class="oauth-url-mockup-bar">
+                        <i class="bi bi-globe2 text-body-secondary flex-shrink-0" aria-hidden="true"></i>
+                        <code class="oauth-url-mockup-text">http://127.0.0.1:12345/callback?state=…&amp;code=4/0A…</code>
+                        <span class="badge text-bg-primary flex-shrink-0" data-i18n="plugin_guide_copy_badge">Copy whole URL</span>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li>
+                  <span class="oauth-step-num">4</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="plugin_guide_step4_title">Return here and paste</div>
+                    <div class="small text-body-secondary" data-i18n="plugin_guide_step4_desc">Click “Paste from clipboard” below or press Ctrl+V / Cmd+V anywhere in this window — connection finishes automatically.</div>
+                  </div>
+                </li>
+              </ol>
+            </div>
             <div class="d-flex align-items-center flex-wrap gap-2">
               <input id="pluginCallbackInput" type="text" class="form-control form-control-sm flex-grow-1 font-monospace" required placeholder="http://127.0.0.1:12345/callback?state=…&amp;code=…" />
               <button id="pluginPasteCallbackBtn" type="button" class="btn btn-outline-primary btn-sm text-nowrap" data-i18n="plugin_connect_paste_btn">Paste from clipboard</button>

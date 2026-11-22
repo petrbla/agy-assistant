@@ -5,6 +5,7 @@
     heartbeat: "job_name_heartbeat",
     briefing: "job_name_briefing",
     nightly_reset: "job_name_nightly",
+    github_backup: "job_name_github_backup",
   };
 
   let currentLang = "en";
@@ -42,10 +43,6 @@
   let settingsOauthTerm = null;
   let onboardOauthTerm = null;
   let pluginConnectTerm = null;
-  let embeddedBrowserWs = null;
-  let embeddedBrowserOpen = false;
-  let embeddedBrowserDims = { width: 1024, height: 720 };
-  let embeddedBrowserCompleting = false;
   const FEATURED_PLUGINS = ["gmail", "gcalendar", "gdrive"];
   const BS_ICONS = {
     sun: "bi-sun",
@@ -1460,6 +1457,116 @@
     }
   };
 
+  let pendingImportZipFile = null;
+
+  function clearImportMemoryUi() {
+    pendingImportZipFile = null;
+    if ($("importMemoryFile")) $("importMemoryFile").value = "";
+    if ($("importMemoryReplaceChk")) $("importMemoryReplaceChk").checked = false;
+    if ($("importMemoryFileName")) $("importMemoryFileName").textContent = "";
+    if ($("importMemoryBox")) $("importMemoryBox").classList.add("d-none");
+  }
+
+  if ($("exportMemoryBtn")) {
+    $("exportMemoryBtn").onclick = async () => {
+      const btn = $("exportMemoryBtn");
+      btn.disabled = true;
+      try {
+        const hdrs = {};
+        const tok = (localStorage.getItem("agy_web_token") || "").trim();
+        if (tok) hdrs.Authorization = `Bearer ${tok}`;
+        const res = await fetch("/api/memory/export", { headers: hdrs });
+        if (res.status === 401) {
+          localStorage.removeItem("agy_web_token");
+          await loadAuthAndBootstrap();
+          throw new Error(t("err_login_required"));
+        }
+        if (!res.ok) {
+          const msg = await res.text();
+          throw new Error(msg || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const disp = res.headers.get("Content-Disposition") || "";
+        const m = disp.match(/filename="?([^";]+)"?/i);
+        const filename = (m && m[1]) || "assistant-memory.zip";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast(t("toast_memory_exported"));
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
+  if ($("importMemoryBtn") && $("importMemoryFile")) {
+    $("importMemoryBtn").onclick = () => $("importMemoryFile").click();
+    $("importMemoryFile").onchange = () => {
+      const file = $("importMemoryFile").files && $("importMemoryFile").files[0];
+      if (!file) return;
+      pendingImportZipFile = file;
+      if ($("importMemoryFileName")) $("importMemoryFileName").textContent = file.name;
+      if ($("importMemoryReplaceChk")) $("importMemoryReplaceChk").checked = false;
+      if ($("importMemoryBox")) $("importMemoryBox").classList.remove("d-none");
+    };
+  }
+
+  if ($("cancelImportMemoryBtn")) {
+    $("cancelImportMemoryBtn").onclick = clearImportMemoryUi;
+  }
+
+  if ($("confirmImportMemoryBtn")) {
+    $("confirmImportMemoryBtn").onclick = async () => {
+      if (!pendingImportZipFile) return;
+      const btn = $("confirmImportMemoryBtn");
+      btn.disabled = true;
+      try {
+        const mode = $("importMemoryReplaceChk")?.checked ? "replace" : "merge";
+        const hdrs = { "Content-Type": "application/zip" };
+        const tok = (localStorage.getItem("agy_web_token") || "").trim();
+        if (tok) hdrs.Authorization = `Bearer ${tok}`;
+        const res = await fetch(`/api/memory/import?mode=${encodeURIComponent(mode)}`, {
+          method: "POST",
+          headers: hdrs,
+          body: pendingImportZipFile,
+        });
+        if (res.status === 401) {
+          localStorage.removeItem("agy_web_token");
+          await loadAuthAndBootstrap();
+          throw new Error(t("err_login_required"));
+        }
+        const text = await res.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (_) {}
+        if (!res.ok) {
+          throw new Error(data.detail || text || `HTTP ${res.status}`);
+        }
+        clearImportMemoryUi();
+        currentFile = null;
+        fileDirty = false;
+        $("currentFileLabel").textContent = t("select_file");
+        $("fileDirtyHint").textContent = t("file_hint_shortcut");
+        $("fileEditor").value = "";
+        $("fileEditor").disabled = true;
+        $("saveFileBtn").disabled = true;
+        syncMemoryModeUi();
+        await loadFiles();
+        toast(t("toast_memory_imported", { count: data.imported_count || 0 }));
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
   // Scheduler & History
   function renderKpi(valId, subId, st) {
     const tilde = st.estimated_runs > 0 && st.exact_runs === 0 ? "~" : "";
@@ -1717,11 +1824,113 @@
       $("cfgBriefCron").value = s.morning_briefing_cron || "0 8 * * *";
       $("cfgNightlyEnabled").checked = s.nightly_reset_enabled !== false;
       $("cfgNightlyCron").value = s.nightly_reset_cron || "15 0 * * *";
+      renderGithubBackupUi(s);
       updateAgyBadges(s);
       updateSecurityUi(s);
     } catch (err) {
       toast(err.message, "err");
     }
+  }
+
+  function renderGithubBackupUi(s) {
+    if ($("cfgGhBackupEnabled")) $("cfgGhBackupEnabled").checked = Boolean(s.github_backup_enabled);
+    if ($("cfgGhBackupCron")) $("cfgGhBackupCron").value = s.github_backup_cron || "30 2 * * *";
+    if ($("cfgGhBackupRepo")) $("cfgGhBackupRepo").value = s.github_backup_repo || "";
+    if ($("cfgGhBackupBranch")) $("cfgGhBackupBranch").value = s.github_backup_branch || "main";
+    if ($("clearGhBackupTokenBtn")) {
+      $("clearGhBackupTokenBtn").classList.toggle("d-none", !s.has_github_backup_token);
+    }
+    const badge = $("ghBackupBadge");
+    if (badge) {
+      if (s.github_backup_last_status === "error") {
+        badge.className = badgeCls("err");
+        badge.textContent = t("gh_backup_status_err");
+      } else if (s.github_backup_enabled && s.github_backup_repo && s.has_github_backup_token) {
+        badge.className = (s.github_backup_last_status === "ok" || s.github_backup_last_status === "no_changes")
+          ? badgeCls("ok")
+          : badgeCls("primary");
+        badge.textContent = t("gh_backup_status_on");
+      } else {
+        badge.className = badgeCls();
+        badge.textContent = t("gh_backup_status_off");
+      }
+    }
+    const lastInfo = $("ghBackupLastInfo");
+    if (lastInfo) {
+      if (s.github_backup_last_run_at) {
+        let timeStr = s.github_backup_last_run_at;
+        try {
+          timeStr = new Date(s.github_backup_last_run_at).toLocaleString(dateLocale());
+        } catch (_) {}
+        const key = s.github_backup_last_status === "error" ? "gh_backup_last_err" : "gh_backup_last_ok";
+        lastInfo.textContent = t(key, {
+          time: timeStr,
+          msg: s.github_backup_last_message || "",
+        });
+      } else {
+        lastInfo.textContent = t("gh_backup_last_never");
+      }
+    }
+  }
+
+  if ($("githubBackupForm")) {
+    $("githubBackupForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        github_backup_enabled: $("cfgGhBackupEnabled").checked,
+        github_backup_cron: $("cfgGhBackupCron").value.trim() || "30 2 * * *",
+        github_backup_repo: $("cfgGhBackupRepo").value.trim(),
+        github_backup_branch: $("cfgGhBackupBranch").value.trim() || "main",
+      };
+      const pat = $("cfgGhBackupToken") ? $("cfgGhBackupToken").value.trim() : "";
+      if (pat) body.github_backup_token = pat;
+      try {
+        await api("/api/settings", { method: "POST", body: JSON.stringify(body) });
+        if ($("cfgGhBackupToken")) $("cfgGhBackupToken").value = "";
+        toast(t("toast_gh_backup_saved"));
+        await loadSettings();
+        if (activeTab === "ops") loadOps();
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    };
+  }
+
+  if ($("clearGhBackupTokenBtn")) {
+    $("clearGhBackupTokenBtn").onclick = async () => {
+      try {
+        await api("/api/settings", {
+          method: "POST",
+          body: JSON.stringify({ clear_github_backup_token: true }),
+        });
+        if ($("cfgGhBackupToken")) $("cfgGhBackupToken").value = "";
+        toast(t("toast_gh_token_cleared"));
+        await loadSettings();
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    };
+  }
+
+  if ($("runGhBackupBtn")) {
+    $("runGhBackupBtn").onclick = async () => {
+      const btn = $("runGhBackupBtn");
+      btn.disabled = true;
+      toast(t("toast_gh_backup_running"), "warn");
+      try {
+        const res = await api("/api/backup/github/run", { method: "POST" });
+        toast(
+          res.changed
+            ? t("toast_gh_backup_done", { count: res.file_count || 0, sha: res.commit_sha || "" })
+            : t("toast_gh_backup_no_changes", { count: res.file_count || 0 })
+        );
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+        await loadSettings();
+      }
+    };
   }
 
   $("settingsForm").onsubmit = async (e) => {
@@ -2436,10 +2645,31 @@
     }
 
     displayList.forEach((p) => {
+      const accounts = Array.isArray(p.accounts) ? p.accounts : [];
+      const connectedCount = accounts.filter((a) => a.connected).length;
+      const isConnected = Boolean(
+        p.custom_url_connected || (p.installed && (connectedCount > 0 || p.connected))
+      );
+      const needsConnect = Boolean(
+        p.installed && p.enabled && !isConnected && (p.supports_oauth || p.supports_custom_url)
+      );
+      const isInstalledOnlyReady = Boolean(
+        p.installed && p.enabled && !isConnected && !needsConnect
+      );
+      const isDisabled = Boolean(p.installed && !p.enabled);
+
       const card = document.createElement("div");
-      card.className = (p.installed && p.enabled) || p.custom_url_connected
-        ? "card h-100 shadow-sm border-primary plugin-card"
-        : "card h-100 shadow-sm plugin-card";
+      if (isConnected) {
+        card.className = "card shadow-sm plugin-card plugin-card-connected";
+      } else if (needsConnect) {
+        card.className = "card shadow-sm plugin-card plugin-card-unconnected";
+      } else if (isInstalledOnlyReady) {
+        card.className = "card shadow-sm plugin-card plugin-card-installed";
+      } else if (isDisabled) {
+        card.className = "card shadow-sm plugin-card plugin-card-disabled";
+      } else {
+        card.className = "card shadow-sm plugin-card";
+      }
 
       const cardBody = document.createElement("div");
       cardBody.className = "card-body d-flex flex-column gap-2 p-3";
@@ -2468,8 +2698,6 @@
         iconEl.innerHTML = uiIcon("puzzle", "fs-5");
       }
 
-      const accounts = Array.isArray(p.accounts) ? p.accounts : [];
-      const connectedCount = accounts.filter((a) => a.connected).length;
       const textBox = document.createElement("div");
       textBox.className = "min-w-0";
       const acctPart = p.installed && connectedCount === 1 && p.account_label ? ` · ${p.account_label}` : "";
@@ -2481,15 +2709,18 @@
       if (p.installed && connectedCount > 1) {
         badge.className = badgeCls("ok");
         badge.textContent = t("plugin_status_connected_multi", { count: connectedCount });
-      } else if (p.custom_url_connected || (p.installed && p.connected)) {
+      } else if (isConnected) {
         badge.className = badgeCls("ok");
         badge.textContent = t("plugin_status_connected");
         if (p.account_label) badge.title = p.account_label;
-      } else if (p.installed && p.enabled) {
+      } else if (needsConnect) {
+        badge.className = badgeCls("warn");
+        badge.textContent = t("plugin_status_needs_connect");
+      } else if (isInstalledOnlyReady) {
         badge.className = badgeCls("primary");
         badge.textContent = t("plugin_status_installed");
-      } else if (p.installed) {
-        badge.className = badgeCls("warn");
+      } else if (isDisabled) {
+        badge.className = badgeCls();
         badge.textContent = t("plugin_status_disabled");
       } else {
         badge.className = badgeCls();
@@ -2498,7 +2729,7 @@
       head.append(titleWrap, badge);
 
       const desc = document.createElement("p");
-      desc.className = "small text-body-secondary mb-auto";
+      desc.className = "small text-body-secondary mb-1";
       desc.textContent = pluginDescription(p);
 
       const actions = document.createElement("div");
@@ -2893,7 +3124,9 @@
 
         accounts.forEach((acct) => {
           const box = document.createElement("div");
-          box.className = "p-2 rounded border bg-body-tertiary d-flex flex-column gap-2";
+          box.className = `p-2 rounded border bg-body-tertiary d-flex flex-column gap-2 plugin-acct-box ${
+            acct.connected ? "plugin-acct-connected" : "plugin-acct-disconnected"
+          }`;
 
           const acctHead = document.createElement("div");
           acctHead.className = "d-flex align-items-start justify-content-between flex-wrap gap-2";
@@ -2910,13 +3143,13 @@
           scopeBadge.textContent = scopeLabel(acct.scope);
           const stateBadge = document.createElement("span");
           if (!acct.enabled) {
-            stateBadge.className = badgeCls("warn");
+            stateBadge.className = badgeCls();
             stateBadge.textContent = t("plugin_account_status_paused");
           } else if (acct.connected) {
             stateBadge.className = badgeCls("ok");
             stateBadge.textContent = t("plugin_account_status_connected");
           } else {
-            stateBadge.className = badgeCls();
+            stateBadge.className = badgeCls("warn");
             stateBadge.textContent = t("plugin_account_status_disconnected");
           }
           titleRow.append(titleSpan, scopeBadge, stateBadge);
@@ -3147,16 +3380,6 @@
         const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || st.plugin_name || "Google";
         a.innerHTML = `<i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span>${escapeHtml(t("plugin_connect_open_google", { name: disp }))}</span>`;
         urlWrap.appendChild(a);
-
-        const ebBtn = document.createElement("button");
-        ebBtn.type = "button";
-        ebBtn.className = "btn btn-outline-primary btn-sm";
-        const ebAvail = st.browser_available !== false;
-        ebBtn.disabled = !ebAvail;
-        if (!ebAvail) ebBtn.title = t("plugin_browser_unavailable");
-        ebBtn.innerHTML = `<i class="bi bi-window me-1" aria-hidden="true"></i><span>${escapeHtml(t("plugin_connect_open_embedded"))}</span>`;
-        ebBtn.onclick = () => openEmbeddedBrowser();
-        urlWrap.appendChild(ebBtn);
       } else {
         const hint = document.createElement("span");
         hint.className = "text-body-secondary small";
@@ -3175,7 +3398,7 @@
     if (cbForm) {
       cbForm.classList.toggle(
         "d-none",
-        st.flow_type !== "localhost_callback" || Boolean(st.connected) || embeddedBrowserOpen
+        st.flow_type !== "localhost_callback" || Boolean(st.connected)
       );
     }
     if (codeForm) codeForm.classList.toggle("d-none", st.flow_type !== "code_paste" || Boolean(st.connected));
@@ -3288,118 +3511,9 @@
     }
   }
 
-  async function closeEmbeddedBrowser({ stopBackend = true } = {}) {
-    embeddedBrowserOpen = false;
-    embeddedBrowserCompleting = false;
-    if (embeddedBrowserWs) {
-      try { embeddedBrowserWs.close(); } catch (_) {}
-      embeddedBrowserWs = null;
-    }
-    const box = $("pluginEmbeddedBrowserBox");
-    if (box) box.classList.add("d-none");
-    const img = $("pluginBrowserImg");
-    if (img) img.removeAttribute("src");
-    const overlay = $("pluginBrowserOverlay");
-    if (overlay) overlay.classList.remove("d-none");
-    if ($("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = "about:blank";
-    if (stopBackend) {
-      try { await api("/api/plugins/connect/browser/stop", { method: "POST" }); } catch (_) {}
-    }
-    if (lastPluginConnectState) renderPluginConnectState(lastPluginConnectState);
-  }
-
-  async function completeEmbeddedBrowserOAuth() {
-    if (embeddedBrowserCompleting) return;
-    embeddedBrowserCompleting = true;
-    try {
-      const res = await api("/api/plugins/connect/browser/complete", { method: "POST" });
-      const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin";
-      toast(t("toast_plugin_connected", { name: disp }));
-      await closePluginConnectModal();
-      await loadPlugins();
-    } catch (err) {
-      embeddedBrowserCompleting = false;
-      toast(err.message, "err");
-    }
-  }
-
-  async function openEmbeddedBrowser() {
-    const box = $("pluginEmbeddedBrowserBox");
-    const overlay = $("pluginBrowserOverlay");
-    const img = $("pluginBrowserImg");
-    const viewport = $("pluginBrowserViewport");
-    if (!box) return;
-
-    embeddedBrowserOpen = true;
-    embeddedBrowserCompleting = false;
-    box.classList.remove("d-none");
-    if (overlay) overlay.classList.remove("d-none");
-    if (img) img.removeAttribute("src");
-    if (lastPluginConnectState) renderPluginConnectState(lastPluginConnectState);
-
-    try {
-      const st = await api("/api/plugins/connect/browser/start", { method: "POST" });
-      if (!st.running) {
-        toast(st.error || t("plugin_browser_unavailable"), "err");
-        await closeEmbeddedBrowser({ stopBackend: false });
-        return;
-      }
-      if ($("pluginBrowserUrl") && st.current_url) {
-        $("pluginBrowserUrl").textContent = st.current_url;
-      }
-
-      if (embeddedBrowserWs) {
-        try { embeddedBrowserWs.close(); } catch (_) {}
-        embeddedBrowserWs = null;
-      }
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${proto}//${location.host}/ws/browser/plugin`);
-      embeddedBrowserWs = ws;
-
-      ws.onopen = () => {
-        const tok = localStorage.getItem("agy_web_token") || "";
-        ws.send(JSON.stringify({ type: "auth", token: tok }));
-      };
-      ws.onmessage = (ev) => {
-        let msg;
-        try { msg = JSON.parse(ev.data); } catch (_) { return; }
-        if (!msg || typeof msg !== "object") return;
-        if (msg.type === "ready") {
-          if (msg.width && msg.height) {
-            embeddedBrowserDims = { width: Number(msg.width), height: Number(msg.height) };
-          }
-          if (msg.url && $("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = msg.url;
-          if (viewport) viewport.focus();
-        } else if (msg.type === "frame" && msg.data) {
-          if (img) img.src = `data:image/jpeg;base64,${msg.data}`;
-          if (overlay) overlay.classList.add("d-none");
-          if (msg.url && $("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = msg.url;
-        } else if (msg.type === "url" && msg.url) {
-          if ($("pluginBrowserUrl")) $("pluginBrowserUrl").textContent = msg.url;
-        } else if (msg.type === "callback_reached") {
-          completeEmbeddedBrowserOAuth();
-        } else if (msg.type === "closed") {
-          if (!embeddedBrowserCompleting && embeddedBrowserOpen) {
-            closeEmbeddedBrowser({ stopBackend: false });
-          }
-        }
-      };
-      ws.onerror = () => {
-        if (embeddedBrowserOpen && !embeddedBrowserCompleting) {
-          toast(t("plugin_browser_unavailable"), "err");
-          closeEmbeddedBrowser({ stopBackend: false });
-        }
-      };
-    } catch (err) {
-      toast(err.message, "err");
-      await closeEmbeddedBrowser({ stopBackend: false });
-    }
-  }
-
   async function closePluginConnectModal() {
     if (pluginConnectTimer) { clearInterval(pluginConnectTimer); pluginConnectTimer = null; }
     if (pluginConnectTerm) pluginConnectTerm.disconnect({ keepContent: false });
-    await closeEmbeddedBrowser({ stopBackend: false });
     const modal = $("pluginConnectModal");
     if (modal) modal.classList.add("d-none");
     activeConnectPlugin = null;
@@ -3800,7 +3914,8 @@
         method: "POST",
         body: JSON.stringify({ callback_url: cleaned }),
       });
-      const disp = (activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin";
+      const acctSuffix = res.account ? ` (${res.account})` : "";
+      const disp = ((activeConnectPlugin && activeConnectPlugin.display_name) || res.plugin || "Plugin") + acctSuffix;
       toast(t("toast_plugin_connected", { name: disp }));
       await closePluginConnectModal();
       await loadPlugins();
@@ -3823,6 +3938,23 @@
       }, 0);
     });
   }
+  document.addEventListener("paste", (e) => {
+    const modal = $("pluginConnectModal");
+    const cbForm = $("pluginCallbackForm");
+    if (!modal || modal.classList.contains("d-none")) return;
+    if (!cbForm || cbForm.classList.contains("d-none")) return;
+    const tgt = e.target;
+    if (tgt && typeof tgt.closest === "function" && tgt.closest(".xterm")) return;
+    if (tgt && tgt.id !== "pluginCallbackInput" && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) {
+      return;
+    }
+    const val = (e.clipboardData ? e.clipboardData.getData("text") : "").trim();
+    if (/^https?:\/\/(127\.0\.0\.1|localhost):\d+/i.test(val) && val.includes("code=")) {
+      e.preventDefault();
+      if ($("pluginCallbackInput")) $("pluginCallbackInput").value = val;
+      submitPluginCallbackUrl(val);
+    }
+  });
   if ($("pluginPasteCallbackBtn")) {
     $("pluginPasteCallbackBtn").onclick = async () => {
       try {
@@ -3833,106 +3965,6 @@
         }
         if ($("pluginCallbackInput")) $("pluginCallbackInput").value = text;
         await submitPluginCallbackUrl(text);
-      } catch (_) {
-        toast(t("plugin_connect_clipboard_empty"), "warn");
-      }
-    };
-  }
-
-  function sendBrowserWs(payload) {
-    if (embeddedBrowserWs && embeddedBrowserWs.readyState === WebSocket.OPEN) {
-      embeddedBrowserWs.send(JSON.stringify(payload));
-    }
-  }
-  function browserEventCoords(e) {
-    const vp = $("pluginBrowserViewport");
-    if (!vp) return { x: 0, y: 0 };
-    const rect = vp.getBoundingClientRect();
-    const rx = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
-    const ry = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
-    return {
-      x: Math.max(0, Math.min(embeddedBrowserDims.width, Math.round(rx * embeddedBrowserDims.width))),
-      y: Math.max(0, Math.min(embeddedBrowserDims.height, Math.round(ry * embeddedBrowserDims.height))),
-    };
-  }
-  if ($("pluginBrowserViewport")) {
-    const vp = $("pluginBrowserViewport");
-    let lastMoveTs = 0;
-    vp.addEventListener("mousedown", (e) => {
-      vp.focus();
-      const { x, y } = browserEventCoords(e);
-      const btnMap = { 0: "left", 1: "middle", 2: "right" };
-      sendBrowserWs({ type: "mouse", action: "mousePressed", x, y, button: btnMap[e.button] || "left", clickCount: 1 });
-    });
-    vp.addEventListener("mouseup", (e) => {
-      const { x, y } = browserEventCoords(e);
-      const btnMap = { 0: "left", 1: "middle", 2: "right" };
-      sendBrowserWs({ type: "mouse", action: "mouseReleased", x, y, button: btnMap[e.button] || "left", clickCount: 1 });
-    });
-    vp.addEventListener("mousemove", (e) => {
-      const now = Date.now();
-      if (now - lastMoveTs < 45) return;
-      lastMoveTs = now;
-      const { x, y } = browserEventCoords(e);
-      sendBrowserWs({ type: "mouse", action: "mouseMoved", x, y });
-    });
-    vp.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      const { x, y } = browserEventCoords(e);
-      sendBrowserWs({ type: "mouse", action: "mouseWheel", x, y, deltaX: Math.round(e.deltaX), deltaY: Math.round(e.deltaY) });
-    }, { passive: false });
-    vp.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
-      e.preventDefault();
-      const modifiers = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        sendBrowserWs({ type: "text", text: e.key });
-      } else {
-        sendBrowserWs({
-          type: "key",
-          action: "keyDown",
-          key: e.key,
-          code: e.code,
-          windowsVirtualKeyCode: e.keyCode || 0,
-          modifiers,
-        });
-      }
-    });
-    vp.addEventListener("keyup", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
-      e.preventDefault();
-      const modifiers = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
-      sendBrowserWs({
-        type: "key",
-        action: "keyUp",
-        key: e.key,
-        code: e.code,
-        windowsVirtualKeyCode: e.keyCode || 0,
-        modifiers,
-      });
-    });
-    vp.addEventListener("paste", (e) => {
-      const txt = e.clipboardData ? e.clipboardData.getData("text") : "";
-      if (txt) {
-        e.preventDefault();
-        sendBrowserWs({ type: "text", text: txt });
-      }
-    });
-  }
-  if ($("pluginBrowserBackBtn")) $("pluginBrowserBackBtn").onclick = () => sendBrowserWs({ type: "back" });
-  if ($("pluginBrowserReloadBtn")) $("pluginBrowserReloadBtn").onclick = () => sendBrowserWs({ type: "reload" });
-  if ($("pluginBrowserCloseBtn")) $("pluginBrowserCloseBtn").onclick = () => closeEmbeddedBrowser({ stopBackend: true });
-  if ($("pluginBrowserPasteBtn")) {
-    $("pluginBrowserPasteBtn").onclick = async () => {
-      try {
-        const txt = await navigator.clipboard.readText();
-        if (!txt) {
-          toast(t("plugin_connect_clipboard_empty"), "warn");
-          return;
-        }
-        sendBrowserWs({ type: "text", text: txt });
-        if ($("pluginBrowserViewport")) $("pluginBrowserViewport").focus();
       } catch (_) {
         toast(t("plugin_connect_clipboard_empty"), "warn");
       }

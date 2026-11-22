@@ -2318,6 +2318,156 @@ def detect_mcp_oauth_connected_plugins(home_dir: Path) -> set[str]:
     return connected
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMAIL_KEY_CANDIDATES = (
+    "email",
+    "account_email",
+    "user_email",
+    "signed_in_as",
+    "identity",
+    "account",
+    "user",
+    "login",
+)
+
+
+def _extract_email_from_jwt(token: str) -> str:
+    """Bezpečně vytáhne e-mail z JWT payloadu (bez ověření podpisu)."""
+    if not isinstance(token, str):
+        return ""
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        return ""
+    payload_b64 = parts[1].strip()
+    if not payload_b64:
+        return ""
+    pad_len = (-len(payload_b64)) % 4
+    try:
+        decoded = base64.urlsafe_b64decode(payload_b64 + ("=" * pad_len))
+        data = json.loads(decoded.decode("utf-8", errors="ignore"))
+    except Exception:
+        return ""
+    if isinstance(data, dict):
+        raw_email = str(data.get("email") or "").strip()
+        if _EMAIL_RE.fullmatch(raw_email):
+            return raw_email
+    return ""
+
+
+def _extract_email_from_json_obj(obj: Any, _depth: int = 0) -> str:
+    """Rekurzivně (do hloubky 4) najde e-mail nebo JWT id_token v objektu tokenu pluginu."""
+    if _depth > 4:
+        return ""
+    if isinstance(obj, str):
+        s = obj.strip()
+        if _EMAIL_RE.fullmatch(s):
+            return s
+        return _extract_email_from_jwt(s)
+    if isinstance(obj, list):
+        for item in obj:
+            found = _extract_email_from_json_obj(item, _depth + 1)
+            if found:
+                return found
+        return ""
+    if isinstance(obj, dict):
+        for key in _EMAIL_KEY_CANDIDATES:
+            if key in obj:
+                found = _extract_email_from_json_obj(obj[key], _depth + 1)
+                if found:
+                    return found
+        id_tok = obj.get("id_token")
+        if isinstance(id_tok, str) and id_tok.strip():
+            found = _extract_email_from_jwt(id_tok)
+            if found:
+                return found
+        for val in obj.values():
+            if isinstance(val, (dict, list)):
+                found = _extract_email_from_json_obj(val, _depth + 1)
+                if found:
+                    return found
+    return ""
+
+
+def detect_plugin_account_email_from_disk(
+    profile_home: Path,
+    plugin_name: str,
+    *,
+    mcp_servers: list[str] | None = None,
+) -> str:
+    """Vyčte e-mail připojeného účtu pluginu z jeho OAuth úložiště v `profile_home` (mimo hlavní agy OAuth)."""
+    pname = (plugin_name or "").strip().lower()
+    if not pname or not profile_home.is_dir():
+        return ""
+
+    keys_to_match: list[str] = [pname]
+    for srv in mcp_servers or []:
+        low_srv = str(srv or "").strip().lower()
+        if low_srv:
+            keys_to_match.extend([low_srv, f"{pname}_{low_srv}"])
+
+    # 1. mcp_oauth_tokens.json
+    token_files = (
+        profile_home / ".gemini" / "antigravity" / "mcp_oauth_tokens.json",
+        profile_home / ".gemini" / "antigravity-cli" / "mcp_oauth_tokens.json",
+    )
+    for token_file in token_files:
+        if not token_file.is_file() or token_file.is_symlink():
+            continue
+        try:
+            data = json.loads(token_file.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        low_map = {
+            str(k).strip().lower(): v for k, v in data.items() if isinstance(k, str) and k.strip()
+        }
+        for key in keys_to_match:
+            if key in low_map:
+                found = _extract_email_from_json_obj(low_map[key])
+                if found:
+                    return found
+        for k_low, val in low_map.items():
+            if any(k == k_low or k in k_low for k in keys_to_match):
+                found = _extract_email_from_json_obj(val)
+                if found:
+                    return found
+
+    # 2. plugin_auth / plugin_accounts soubory v izolovaném profilu
+    google_tokens = ("google", "workspace") if pname in _GOOGLE_CLI_PLUGINS else ()
+    match_tokens = tuple(dict.fromkeys([*keys_to_match, *google_tokens]))
+    auth_bases = (
+        profile_home / ".gemini" / "antigravity-cli",
+        profile_home / ".gemini" / "antigravity",
+        profile_home / ".config" / "antigravity-cli",
+        profile_home / ".local" / "share" / "antigravity-cli",
+    )
+    for base in auth_bases:
+        for subname in ("plugin_auth", "plugin_accounts"):
+            subdir = base / subname
+            if not subdir.is_dir() or subdir.is_symlink():
+                continue
+            try:
+                candidates = sorted(subdir.rglob("*.json"), key=lambda p: str(p).lower())
+            except OSError:
+                continue
+            for cand in candidates:
+                if cand.is_symlink() or not cand.is_file():
+                    continue
+                rel_low = cand.relative_to(subdir).as_posix().lower()
+                if not any(tok in rel_low for tok in match_tokens):
+                    continue
+                try:
+                    raw = json.loads(cand.read_text(encoding="utf-8", errors="ignore"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                found = _extract_email_from_json_obj(raw)
+                if found:
+                    return found
+
+    return ""
+
+
 class PluginManager:
     """Správa Antigravity pluginů, jejich OAuth připojení v PTY a oprávnění."""
 
@@ -2636,11 +2786,31 @@ class PluginManager:
                 accounts_by_plugin[pname_low] = accts
 
             disk_connected = _is_connected(pname_low, inst_info, disk_info) if inst_info is not None else False
+            mcp_srvs = list(
+                (inst_info or {}).get("disk_mcp_servers")
+                or (inst_info or {}).get("mcpServers")
+                or (disk_info or {}).get("mcp_servers")
+                or []
+            )
             out_accts: list[dict[str, Any]] = []
             for acct in accts:
                 eff_conn = acct.connected or (
                     len(accts) == 1 and acct.profile_key == "default" and disk_connected
                 )
+                if eff_conn and not acct.account_email.strip():
+                    found_email = detect_plugin_account_email_from_disk(
+                        get_profile_home_dir(self.settings, acct.profile_key),
+                        pname_low,
+                        mcp_servers=mcp_srvs,
+                    )
+                    if found_email:
+                        updated_acct = self.db.update_plugin_account(
+                            acct.id, account_email=found_email
+                        )
+                        if updated_acct is not None:
+                            acct = updated_acct
+                        if sanitize_profile_key(acct.profile_key) == "default":
+                            self.db.upsert_plugin_config(pname_low, account_label=found_email)
                 out_accts.append(
                     self._account_public_dict(acct, connected_override=eff_conn, lang=lang)
                 )
@@ -3569,6 +3739,7 @@ class PluginManager:
                 self._raw_output = ""
                 self._raw_total_len = 0
                 self._connect_state.output = ""
+                self._connect_state.account = ""
                 if (
                     not self._connect_state.running
                     or self._connect_state.auth_url
@@ -3649,6 +3820,7 @@ class PluginManager:
             expected_path=state.callback_path or "/callback",
             expected_state=state.expected_state,
         )
+        post_cb_mark = self._raw_total_len
         try:
             http_status, location, body = await asyncio.to_thread(
                 forward_localhost_callback_sync, validated
@@ -3663,25 +3835,53 @@ class PluginManager:
                 f"Dokončení přihlášení selhalo (HTTP {http_status}): {body or location}"
             )
 
-        # Dej agy krátký čas na výměnu kódu za token a zapsání na disk
-        res = await self.finalize_browser_oauth()
-        return {
-            **res,
-            "http_status": http_status,
-            "location": location,
-        }
+        # Vyčkej na výměnu kódu za token (min 1.5 s, max 4.5 s) a zjisti e-mail účtu z PTY výstupu
+        detected_email = ""
+        found_at: float | None = None
+        elapsed = 0.0
+        step = 0.25
+        while elapsed < 4.5:
+            delta = self._raw_total_len - post_cb_mark
+            fresh_text = ""
+            if delta > 0 and self._raw_output:
+                fresh_text = clean_terminal_output(
+                    self._raw_output[-min(delta, len(self._raw_output)) :]
+                )
+            signed_fresh, acct_fresh = extract_signed_in_account(fresh_text)
+            if signed_fresh and acct_fresh:
+                detected_email = acct_fresh
+            else:
+                signed_all, acct_all = extract_signed_in_account(self._connect_state.output)
+                if signed_all and acct_all:
+                    detected_email = acct_all
+            if detected_email:
+                self._connect_state.account = detected_email
+                if found_at is None:
+                    found_at = elapsed
+                if elapsed >= 1.5 and (elapsed - found_at) >= 0.4:
+                    break
+            await asyncio.sleep(step)
+            elapsed += step
 
-    async def finalize_browser_oauth(self, wait_seconds: float = 1.5) -> dict[str, Any]:
-        """Dokončí OAuth relaci po přijetí callbacku v prohlížeči a uloží stav účtu."""
-        state = self.get_connect_state()
-        await asyncio.sleep(wait_seconds)
         plugin_name = state.plugin_name
+        if not detected_email and plugin_name:
+            prof_home = get_profile_home_dir(self.settings, state.profile_key)
+            disk_map = detect_installed_plugins_from_disk(self.settings.effective_home_dir)
+            disk_srvs = (disk_map.get(plugin_name.lower()) or {}).get("mcp_servers") or []
+            detected_email = detect_plugin_account_email_from_disk(
+                prof_home, plugin_name, mcp_servers=disk_srvs
+            )
+        if not detected_email:
+            detected_email = state.account
+        if detected_email:
+            self._connect_state.account = detected_email
+
         if plugin_name:
             self._persist_account_connected(
                 plugin_name,
                 account_id=state.account_id,
                 profile_key=state.profile_key,
-                account_email=state.account,
+                account_email=detected_email,
             )
         self._connect_state.connected = True
         await self.stop_connect()
@@ -3689,6 +3889,9 @@ class PluginManager:
             "status": "ok",
             "plugin": plugin_name,
             "connected": True,
+            "account": detected_email,
+            "http_status": http_status,
+            "location": location,
         }
 
     def _close_fd(self) -> None:

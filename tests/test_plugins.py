@@ -22,6 +22,7 @@ from app.plugins import (
     build_plugin_permissions_prompt_hint,
     compute_plugin_deny_rules,
     detect_installed_plugins_from_disk,
+    detect_plugin_account_email_from_disk,
     extract_oauth_callback_info,
     extract_signed_in_account,
     forward_localhost_callback_sync,
@@ -1462,6 +1463,113 @@ async def test_terminal_auto_responses_do_not_abort_auto_navigate(
     assert pm._manual_override is False
     assert sent[:4] == ["/plugin\r", "\r", "gmail", "\r"]
     assert "accounts.google.com/o/oauth2/v2/auth" in pm._connect_state.auth_url
+
+
+async def test_submit_callback_persists_email_from_pty_and_disk_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import base64
+
+    home_dir = tmp_path / "home"
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    s = Settings(workspace_dir=ws_dir, data_dir=tmp_path / "data", home_dir=home_dir)
+    db = AssistantDB(s.db_path)
+    pm = PluginManager(s, db)
+
+    # Hlavní agy účet nesmí být omylem přiřazen druhému účtu pluginu
+    (home_dir / ".gemini").mkdir(parents=True, exist_ok=True)
+    (home_dir / ".gemini" / "google_accounts.json").write_text(
+        json.dumps({"active": "main-agy@example.com"}),
+        encoding="utf-8",
+    )
+
+    acct2 = db.create_plugin_account(
+        "gmail",
+        label="Pracovní",
+        scope="pracovni",
+        profile_key="pracovni",
+        connected=False,
+    )
+
+    # 1. Zjištění e-mailu z PTY výstupu po úspěšném callbacku
+    async def _fast_sleep(_sec: float) -> None:
+        return None
+
+    def _fake_forward(_url: str) -> tuple[int, str, str]:
+        msg = "\nSign-in: ✓ Signed in as second@example.com\n"
+        pm._raw_output += msg
+        pm._raw_total_len += len(msg)
+        pm._connect_state.output = pm._raw_output
+        return 302, "https://antigravity.google/auth-success", ""
+
+    monkeypatch.setattr("app.plugins.asyncio.sleep", _fast_sleep)
+    monkeypatch.setattr("app.plugins.forward_localhost_callback_sync", _fake_forward)
+
+    pm._raw_output = "Open browser: https://accounts.google.com/o/oauth2/v2/auth"
+    pm._raw_total_len = len(pm._raw_output)
+    pm._connect_state = PluginConnectState(
+        running=True,
+        plugin_name="gmail",
+        flow_type="localhost_callback",
+        callback_port=45678,
+        callback_path="/callback",
+        expected_state="S2",
+        account_id=acct2.id,
+        profile_key="pracovni",
+    )
+
+    res = await pm.submit_callback_url(
+        "http://127.0.0.1:45678/callback?state=S2&code=sample-code-2"
+    )
+    assert res["connected"] is True
+    assert res["account"] == "second@example.com"
+    saved = db.get_plugin_account(acct2.id)
+    assert saved is not None
+    assert saved.connected is True
+    assert saved.account_email == "second@example.com"
+
+    # 2. Fallback z pluginového OAuth souboru na disku (mcp_oauth_tokens.json s JWT id_token)
+    prof_home = get_profile_home_dir(s, "pracovni")
+    assert detect_plugin_account_email_from_disk(prof_home, "gmail") == ""
+
+    payload_b64 = base64.urlsafe_b64encode(
+        json.dumps({"email": "jwt-work@example.com"}).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    fake_jwt = f"eyJhbGciOiJub25lIn0.{payload_b64}.sig"
+    token_path = prof_home / ".gemini" / "antigravity" / "mcp_oauth_tokens.json"
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(
+        json.dumps({"gmail": {"access_token": "tok", "id_token": fake_jwt}}),
+        encoding="utf-8",
+    )
+    assert detect_plugin_account_email_from_disk(prof_home, "gmail") == "jwt-work@example.com"
+
+    # Zpětné doplnění e-mailu u již připojeného účtu v list_catalog_with_status
+    acct3 = db.create_plugin_account(
+        "gmail",
+        label="Pracovní 2",
+        scope="pracovni",
+        profile_key="pracovni",
+        connected=True,
+        account_email="",
+    )
+    pdir = home_dir / ".gemini" / "config" / "plugins" / "gmail"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / "plugin.json").write_text(json.dumps({"name": "gmail"}), encoding="utf-8")
+    monkeypatch.setattr(
+        pm,
+        "list_installed",
+        AsyncMock(return_value=[{"name": "gmail", "enabled": True, "version": "1.0.0"}]),
+    )
+    catalog = await pm.list_catalog_with_status(lang="cs")
+    gmail_entry = next(item for item in catalog["plugins"] if item["name"] == "gmail")
+    backfilled = next(a for a in gmail_entry["accounts"] if a["id"] == acct3.id)
+    assert backfilled["account_email"] == "jwt-work@example.com"
+    reloaded3 = db.get_plugin_account(acct3.id)
+    assert reloaded3 is not None and reloaded3.account_email == "jwt-work@example.com"
+
 
 
 

@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     morning_briefing_cron: str = "0 8 * * *"
     nightly_reset_enabled: bool = True
     nightly_reset_cron: str = "15 0 * * *"
+    github_backup_enabled: bool = False
+    github_backup_repo: str = ""
+    github_backup_branch: str = "main"
+    github_backup_token: str = ""
+    github_backup_cron: str = "30 2 * * *"
 
     # Výchozí kontext (auto | pracovni | osobni)
     default_context_mode: ContextMode = "auto"

@@ -12,9 +12,11 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from app import __version__
 from app.agy_runner import AgyResult, AgyRunner
 from app.config import ContextMode, Settings
 from app.db import AssistantDB
+from app.github_backup import GitHubBackupResult, run_github_backup as execute_github_backup
 from app.i18n import t
 from app.user_env import ensure_workspace
 
@@ -108,6 +110,21 @@ class AssistantScheduler:
         nightly_cron = (
             owner.nightly_reset_cron if owner is not None else self.settings.nightly_reset_cron
         )
+        gh_enabled = (
+            owner.github_backup_enabled
+            if owner is not None
+            else self.settings.github_backup_enabled
+        )
+        gh_repo = (
+            owner.github_backup_repo if owner is not None else self.settings.github_backup_repo
+        ).strip()
+        gh_token = (
+            owner.github_backup_token if owner is not None else self.settings.github_backup_token
+        ).strip()
+        gh_cron = (
+            (owner.github_backup_cron if owner is not None else self.settings.github_backup_cron).strip()
+            or "30 2 * * *"
+        )
 
         if hb_enabled:
             self.scheduler.add_job(
@@ -143,6 +160,19 @@ class AssistantScheduler:
                 )
             except ValueError as exc:
                 logger.warning("Neplatný cron výraz nočního resetu '%s': %s", nightly_cron, exc)
+
+        if gh_enabled and gh_repo and gh_token:
+            try:
+                self.scheduler.add_job(
+                    self.run_github_backup,
+                    trigger=CronTrigger.from_crontab(gh_cron, timezone=tz),
+                    kwargs={"notify": True},
+                    id="github_backup",
+                    name=t("ui.job_name_github_backup", owner_lang),
+                    replace_existing=True,
+                )
+            except ValueError as exc:
+                logger.warning("Neplatný cron výraz GitHub zálohy '%s': %s", gh_cron, exc)
 
         if self.db is not None:
             for task in self.db.list_scheduled_tasks(enabled_only=True):
@@ -334,5 +364,25 @@ class AssistantScheduler:
         else:
             self.db.update_scheduled_task(
                 task.id, last_run_at=datetime.now(timezone.utc).isoformat()
+            )
+        return result
+
+    async def run_github_backup(self, notify: bool = True) -> GitHubBackupResult:
+        """Spustí zálohu celého agenta na GitHub a při chybě upozorní vlastníka."""
+        if self.db is None:
+            return GitHubBackupResult(
+                success=False,
+                changed=False,
+                commit_sha="",
+                file_count=0,
+                repo_url="",
+                branch="main",
+                message="Databáze není dostupná.",
+                ran_at=datetime.now(timezone.utc).isoformat(),
+            )
+        result = await execute_github_backup(self.settings, self.db, app_version=__version__)
+        if not result.success and notify:
+            await self._send_notification(
+                t("backend.github_backup_failed_alert", self._lang(), error=result.message)
             )
         return result

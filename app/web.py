@@ -11,8 +11,8 @@ from typing import Any, Awaitable, Callable, Literal
 from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,11 @@ from app.agy_runner import AgyRunner, is_version_up_to_date
 from app.auth_session import AgyAuthManager
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, McpServerRecord, OwnerConfig
-from app.embedded_browser import EmbeddedBrowserManager
+from app.github_backup import (
+    normalize_github_repo_url,
+    run_github_backup,
+    validate_github_branch,
+)
 from app.i18n import get_ui_bundle, list_available_languages, t
 from app.memory import WorkspaceMemory
 from app.plugins import PluginManager
@@ -101,6 +105,12 @@ class SettingsUpdateRequest(BaseModel):
     nightly_reset_enabled: bool | None = None
     nightly_reset_cron: str | None = None
     agy_model: str | None = Field(default=None, max_length=120)
+    github_backup_enabled: bool | None = None
+    github_backup_repo: str | None = Field(default=None, max_length=300)
+    github_backup_branch: str | None = Field(default=None, max_length=100)
+    github_backup_token: str | None = Field(default=None, max_length=300)
+    clear_github_backup_token: bool | None = None
+    github_backup_cron: str | None = Field(default=None, max_length=120)
 
 
 class McpServerUpsertRequest(BaseModel):
@@ -265,6 +275,14 @@ def _owner_public_dict(owner: OwnerConfig, settings: Settings) -> dict[str, obje
         "has_web_auth_token": bool(owner.web_token.strip() or settings.web_auth_token.strip()),
         "has_password": bool(owner.password_hash.strip()),
         "totp_enabled": bool(owner.totp_enabled),
+        "github_backup_enabled": bool(owner.github_backup_enabled),
+        "github_backup_repo": owner.github_backup_repo,
+        "github_backup_branch": owner.github_backup_branch or "main",
+        "has_github_backup_token": bool(owner.github_backup_token.strip()),
+        "github_backup_cron": owner.github_backup_cron or "30 2 * * *",
+        "github_backup_last_run_at": owner.github_backup_last_run_at,
+        "github_backup_last_status": owner.github_backup_last_status,
+        "github_backup_last_message": owner.github_backup_last_message,
         "created_at": owner.created_at,
     }
 
@@ -306,7 +324,6 @@ def create_app(
     scheduler: AssistantScheduler | None = None,
     auth_manager: AgyAuthManager | None = None,
     plugin_manager: PluginManager | None = None,
-    browser_manager: EmbeddedBrowserManager | None = None,
     app_version_checker: AppVersionChecker | None = None,
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
@@ -317,8 +334,6 @@ def create_app(
     db.ensure_owner(settings)
     if plugin_manager is None:
         plugin_manager = PluginManager(settings, db)
-    if browser_manager is None:
-        browser_manager = EmbeddedBrowserManager()
     if app_version_checker is None:
         app_version_checker = AppVersionChecker(settings)
     signing_key = load_or_create_signing_key(settings.data_dir)
@@ -705,6 +720,8 @@ def create_app(
             "nightly_reset_cron",
             "agy_model",
             "gemini_api_key",
+            "github_backup_enabled",
+            "github_backup_cron",
         ):
             if field in raw_updates and raw_updates[field] is not None:
                 owner_updates[field] = (
@@ -713,9 +730,37 @@ def create_app(
                     else raw_updates[field]
                 )
 
+        if "github_backup_repo" in raw_updates and raw_updates["github_backup_repo"] is not None:
+            repo_val = str(raw_updates["github_backup_repo"]).strip()
+            if repo_val:
+                try:
+                    owner_updates["github_backup_repo"] = normalize_github_repo_url(repo_val)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            else:
+                owner_updates["github_backup_repo"] = ""
+
+        if "github_backup_branch" in raw_updates and raw_updates["github_backup_branch"] is not None:
+            try:
+                owner_updates["github_backup_branch"] = validate_github_branch(
+                    str(raw_updates["github_backup_branch"]) or "main"
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if raw_updates.get("clear_github_backup_token"):
+            owner_updates["github_backup_token"] = ""
+        elif (
+            "github_backup_token" in raw_updates
+            and raw_updates["github_backup_token"] is not None
+            and str(raw_updates["github_backup_token"]).strip()
+        ):
+            owner_updates["github_backup_token"] = str(raw_updates["github_backup_token"]).strip()
+
         for cron_field, label in (
             ("morning_briefing_cron", "ranního briefingu"),
             ("nightly_reset_cron", "nočního resetu"),
+            ("github_backup_cron", "GitHub zálohy"),
         ):
             if cron_field in owner_updates:
                 cron_val = str(owner_updates[cron_field]).strip()
@@ -762,6 +807,8 @@ def create_app(
             ):
                 await runner.close_all()
         await _notify_settings_updated()
+        if scheduler is not None and on_settings_updated is None:
+            scheduler.sync_jobs()
         return {"status": "ok", **_owner_public_dict(updated, settings)}
 
     @app.get("/api/mcp")
@@ -840,17 +887,13 @@ def create_app(
 
     @app.get("/api/plugins/connect/status")
     async def plugin_connect_status(_: OwnerConfig = Depends(require_auth)) -> dict[str, Any]:
-        return {
-            **asdict(plugin_manager.get_connect_state()),
-            "browser_available": browser_manager.is_available(),
-        }
+        return asdict(plugin_manager.get_connect_state())
 
     @app.post("/api/plugins/connect/callback")
     async def plugin_connect_callback(
         payload: PluginConnectCallbackRequest,
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, Any]:
-        await browser_manager.stop()
         try:
             res = await plugin_manager.submit_callback_url(payload.callback_url)
         except ValueError as exc:
@@ -878,59 +921,7 @@ def create_app(
 
     @app.post("/api/plugins/connect/stop")
     async def plugin_connect_stop(_: OwnerConfig = Depends(require_auth)) -> dict[str, str]:
-        await browser_manager.stop()
         await plugin_manager.stop_connect()
-        return {"status": "ok"}
-
-    @app.get("/api/plugins/connect/browser/status")
-    async def plugin_connect_browser_status(
-        _: OwnerConfig = Depends(require_auth),
-    ) -> dict[str, Any]:
-        return asdict(browser_manager.get_state())
-
-    @app.post("/api/plugins/connect/browser/start")
-    async def plugin_connect_browser_start(
-        _: OwnerConfig = Depends(require_auth),
-    ) -> dict[str, Any]:
-        conn_state = plugin_manager.get_connect_state()
-        if not conn_state.running or not conn_state.auth_url:
-            raise HTTPException(
-                status_code=400,
-                detail="Aktuálně nečeká žádný OAuth přihlašovací odkaz.",
-            )
-        try:
-            b_state = await browser_manager.start(
-                conn_state.auth_url,
-                callback_port=conn_state.callback_port,
-                callback_path=conn_state.callback_path or "/callback",
-                expected_state=conn_state.expected_state,
-            )
-            return asdict(b_state)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.post("/api/plugins/connect/browser/complete")
-    async def plugin_connect_browser_complete(
-        _: OwnerConfig = Depends(require_auth),
-    ) -> dict[str, Any]:
-        b_state = browser_manager.get_state()
-        if not b_state.callback_reached:
-            raise HTTPException(
-                status_code=400,
-                detail="Prohlížeč zatím nedosáhl OAuth callbacku.",
-            )
-        await browser_manager.stop()
-        res = await plugin_manager.finalize_browser_oauth()
-        _sync_all_plugin_contexts()
-        if isinstance(runner, AgyRunner):
-            await runner.close_all()
-        return res
-
-    @app.post("/api/plugins/connect/browser/stop")
-    async def plugin_connect_browser_stop(
-        _: OwnerConfig = Depends(require_auth),
-    ) -> dict[str, str]:
-        await browser_manager.stop()
         return {"status": "ok"}
 
     @app.post("/api/plugins/{plugin_name}/toggle")
@@ -1287,71 +1278,6 @@ def create_app(
             resize=plugin_manager.resize_connect,
         )
 
-    @app.websocket("/ws/browser/plugin")
-    async def ws_browser_plugin(websocket: WebSocket) -> None:
-        await websocket.accept()
-        try:
-            raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-            auth_msg = json.loads(raw_auth)
-            if not isinstance(auth_msg, dict) or auth_msg.get("type") != "auth":
-                raise ValueError("Missing auth frame")
-            _authenticate_token(str(auth_msg.get("token") or "").strip())
-        except Exception:
-            with contextlib.suppress(Exception):
-                await websocket.close(code=4401, reason="Unauthorized")
-            return
-
-        queue = browser_manager.subscribe()
-        sender_task: asyncio.Task[None] | None = None
-        try:
-            st = browser_manager.get_state()
-            await websocket.send_json(
-                {
-                    "type": "ready",
-                    "running": bool(st.running),
-                    "url": st.current_url,
-                    "width": browser_manager.VIEWPORT_WIDTH,
-                    "height": browser_manager.VIEWPORT_HEIGHT,
-                }
-            )
-            last_frame = browser_manager.get_last_frame()
-            if last_frame:
-                await websocket.send_json(
-                    {
-                        "type": "frame",
-                        "data": last_frame,
-                        "url": st.current_url,
-                    }
-                )
-
-            async def _pump_browser() -> None:
-                while True:
-                    event = await queue.get()
-                    if event is None:
-                        await websocket.send_json({"type": "closed"})
-                        break
-                    await websocket.send_json(event)
-
-            sender_task = asyncio.create_task(_pump_browser())
-            while True:
-                raw_msg = await websocket.receive_text()
-                try:
-                    msg = json.loads(raw_msg)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(msg, dict):
-                    await browser_manager.handle_client_event(msg)
-        except WebSocketDisconnect:
-            return
-        except Exception:
-            return
-        finally:
-            if sender_task is not None:
-                sender_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await sender_task
-            browser_manager.unsubscribe(queue)
-
     @app.websocket("/ws/pty/auth")
     async def ws_pty_auth(websocket: WebSocket) -> None:
         if auth_manager is None:
@@ -1470,6 +1396,39 @@ def create_app(
         mem = get_memory(settings, owner)
         return {"status": "ok", "files": [asdict(f) for f in mem.list_files()]}
 
+    @app.get("/api/memory/export")
+    async def export_memory_archive(owner: OwnerConfig = Depends(require_auth)) -> Response:
+        mem = get_memory(settings, owner)
+        zip_bytes, count = mem.export_memory_zip(app_version=__version__)
+        ts = datetime.now(tz=mem.tz).strftime("%Y%m%d-%H%M%S")
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="assistant-memory-{ts}.zip"',
+                "X-Exported-Files": str(count),
+            },
+        )
+
+    @app.post("/api/memory/import")
+    async def import_memory_archive(
+        request: Request,
+        mode: Literal["merge", "replace"] = "merge",
+        owner: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        raw_zip = await request.body()
+        if not raw_zip:
+            raise HTTPException(status_code=400, detail="Nahraný ZIP archiv je prázdný.")
+        mem = get_memory(settings, owner)
+        try:
+            res = mem.import_memory_zip(raw_zip, mode=mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.reset_all_sessions()
+        if isinstance(runner, AgyRunner):
+            await runner.close_all()
+        return {**res, "files_list": [asdict(f) for f in mem.list_files()]}
+
     @app.get("/api/files")
     async def list_files(owner: OwnerConfig = Depends(require_auth)) -> list[dict[str, object]]:
         mem = get_memory(settings, owner)
@@ -1535,6 +1494,16 @@ def create_app(
         if not scheduler:
             raise HTTPException(status_code=503, detail="Plánovač není aktivní.")
         return await scheduler.run_nightly_reset()
+
+    @app.post("/api/backup/github/run")
+    async def trigger_github_backup(_: OwnerConfig = Depends(require_auth)) -> dict[str, object]:
+        if scheduler is not None:
+            res = await scheduler.run_github_backup(notify=False)
+        else:
+            res = await run_github_backup(settings, db, app_version=__version__)
+        if not res.success:
+            raise HTTPException(status_code=400, detail=res.message)
+        return asdict(res)
 
     @app.get("/api/tasks")
     async def list_scheduled_tasks(_: OwnerConfig = Depends(require_auth)) -> list[dict[str, object]]:

@@ -39,6 +39,14 @@ OWNER_UPDATABLE_FIELDS = frozenset(
         "totp_secret",
         "totp_pending_secret",
         "totp_recovery_hashes_json",
+        "github_backup_enabled",
+        "github_backup_repo",
+        "github_backup_branch",
+        "github_backup_token",
+        "github_backup_cron",
+        "github_backup_last_run_at",
+        "github_backup_last_status",
+        "github_backup_last_message",
     }
 )
 
@@ -72,6 +80,14 @@ class OwnerConfig:
     totp_pending_secret: str
     totp_recovery_hashes_json: str
     created_at: str
+    github_backup_enabled: bool = False
+    github_backup_repo: str = ""
+    github_backup_branch: str = "main"
+    github_backup_token: str = ""
+    github_backup_cron: str = "30 2 * * *"
+    github_backup_last_run_at: str = ""
+    github_backup_last_status: str = ""
+    github_backup_last_message: str = ""
 
     @property
     def allowed_telegram_user_ids(self) -> set[int]:
@@ -257,6 +273,14 @@ class AssistantDB:
                     totp_secret TEXT NOT NULL DEFAULT '',
                     totp_pending_secret TEXT NOT NULL DEFAULT '',
                     totp_recovery_hashes_json TEXT NOT NULL DEFAULT '[]',
+                    github_backup_enabled INTEGER NOT NULL DEFAULT 0,
+                    github_backup_repo TEXT NOT NULL DEFAULT '',
+                    github_backup_branch TEXT NOT NULL DEFAULT 'main',
+                    github_backup_token TEXT NOT NULL DEFAULT '',
+                    github_backup_cron TEXT NOT NULL DEFAULT '30 2 * * *',
+                    github_backup_last_run_at TEXT NOT NULL DEFAULT '',
+                    github_backup_last_status TEXT NOT NULL DEFAULT '',
+                    github_backup_last_message TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
 
@@ -349,6 +373,14 @@ class AssistantDB:
                 """
             )
             self._ensure_column(conn, "owner_config", "language", "TEXT NOT NULL DEFAULT 'en'")
+            self._ensure_column(conn, "owner_config", "github_backup_enabled", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "owner_config", "github_backup_repo", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "owner_config", "github_backup_branch", "TEXT NOT NULL DEFAULT 'main'")
+            self._ensure_column(conn, "owner_config", "github_backup_token", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "owner_config", "github_backup_cron", "TEXT NOT NULL DEFAULT '30 2 * * *'")
+            self._ensure_column(conn, "owner_config", "github_backup_last_run_at", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "owner_config", "github_backup_last_status", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "owner_config", "github_backup_last_message", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "plugin_configs", "account_label", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "mcp_servers", "tool_permissions_json", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "mcp_servers", "cached_tools_json", "TEXT NOT NULL DEFAULT '[]'")
@@ -589,6 +621,40 @@ class AssistantDB:
             totp_pending_secret=row["totp_pending_secret"],
             totp_recovery_hashes_json=row["totp_recovery_hashes_json"],
             created_at=row["created_at"],
+            github_backup_enabled=(
+                bool(row["github_backup_enabled"]) if "github_backup_enabled" in keys else False
+            ),
+            github_backup_repo=(
+                str(row["github_backup_repo"] or "") if "github_backup_repo" in keys else ""
+            ),
+            github_backup_branch=(
+                str(row["github_backup_branch"] or "main")
+                if "github_backup_branch" in keys
+                else "main"
+            ),
+            github_backup_token=(
+                str(row["github_backup_token"] or "") if "github_backup_token" in keys else ""
+            ),
+            github_backup_cron=(
+                str(row["github_backup_cron"] or "30 2 * * *")
+                if "github_backup_cron" in keys
+                else "30 2 * * *"
+            ),
+            github_backup_last_run_at=(
+                str(row["github_backup_last_run_at"] or "")
+                if "github_backup_last_run_at" in keys
+                else ""
+            ),
+            github_backup_last_status=(
+                str(row["github_backup_last_status"] or "")
+                if "github_backup_last_status" in keys
+                else ""
+            ),
+            github_backup_last_message=(
+                str(row["github_backup_last_message"] or "")
+                if "github_backup_last_message" in keys
+                else ""
+            ),
         )
 
     @staticmethod
@@ -728,8 +794,10 @@ class AssistantDB:
                     telegram_notify_chat_id, heartbeat_enabled, heartbeat_interval_minutes,
                     morning_briefing_enabled, morning_briefing_cron,
                     nightly_reset_enabled, nightly_reset_cron,
-                    agy_model, gemini_api_key, created_at
-                ) VALUES (1, 'admin', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    agy_model, gemini_api_key,
+                    github_backup_enabled, github_backup_repo, github_backup_branch,
+                    github_backup_token, github_backup_cron, created_at
+                ) VALUES (1, 'admin', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     default_display,
@@ -749,6 +817,11 @@ class AssistantDB:
                     settings.nightly_reset_cron,
                     settings.agy_model.strip(),
                     settings.gemini_api_key.strip(),
+                    1 if settings.github_backup_enabled else 0,
+                    settings.github_backup_repo.strip(),
+                    (settings.github_backup_branch or "main").strip() or "main",
+                    settings.github_backup_token.strip(),
+                    (settings.github_backup_cron or "30 2 * * *").strip() or "30 2 * * *",
                     self._now_iso(),
                 ),
             )
@@ -771,6 +844,7 @@ class AssistantDB:
                 "morning_briefing_enabled",
                 "nightly_reset_enabled",
                 "totp_enabled",
+                "github_backup_enabled",
             }:
                 filtered[key] = 1 if bool(value) else 0
             elif key == "heartbeat_interval_minutes":

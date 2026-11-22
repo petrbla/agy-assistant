@@ -31,3 +31,86 @@ def test_memory_blocks_path_traversal(tmp_path: Path) -> None:
         mem.write_file("../../etc/passwd", "x")
     with pytest.raises(ValueError):
         mem.write_file("script.py", "print(1)")
+
+
+def test_memory_export_and_import_zip_merge_replace_and_security(tmp_path: Path) -> None:
+    import io
+    import json
+    import zipfile
+
+    src_ws = tmp_path / "src"
+    src_ws.mkdir()
+    (src_ws / "SOUL.md").write_text("# Osobnost", encoding="utf-8")
+    (src_ws / "MEMORY.md").write_text("# Dlouhodobá paměť", encoding="utf-8")
+    (src_ws / "NOTES.txt").write_text("Kořenová poznámka", encoding="utf-8")
+    (src_ws / ".env").write_text("SECRET=neexportovat", encoding="utf-8")
+    (src_ws / "schedule_request.json").write_text("{}", encoding="utf-8")
+    (src_ws / "inbox").mkdir()
+    (src_ws / "inbox" / "tajny.txt").write_text("příloha", encoding="utf-8")
+
+    # Více než 14 denních souborů v memory/ + vnořený skill v .agents/skills/
+    (src_ws / "memory").mkdir()
+    for i in range(18):
+        (src_ws / "memory" / f"2026-11-{i + 1:02d}.md").write_text(
+            f"Den {i + 1}", encoding="utf-8"
+        )
+    skill_dir = src_ws / ".agents" / "skills" / "custom-skill"
+    (skill_dir / "resources").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: custom-skill\n---\n", encoding="utf-8")
+    (skill_dir / "resources" / "notes.yaml").write_text("key: value\n", encoding="utf-8")
+
+    src_mem = WorkspaceMemory(src_ws)
+    zip_bytes, count = src_mem.export_memory_zip(app_version="0.0.14")
+    assert count == 23  # 3 kořenové + 18 v memory/ + 2 ve skillu
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        names = set(zf.namelist())
+        assert "manifest.json" in names
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        assert manifest["format"] == "agy-assistant-memory-v1"
+        assert manifest["file_count"] == 23
+        assert ".env" not in names
+        assert "schedule_request.json" not in names
+        assert "inbox/tajny.txt" not in names
+        assert "memory/2026-11-01.md" in names
+        assert ".agents/skills/custom-skill/resources/notes.yaml" in names
+
+    # Cílový workspace se stávajícím souborem: test merge i replace
+    dst_ws = tmp_path / "dst"
+    dst_ws.mkdir()
+    (dst_ws / "memory").mkdir()
+    (dst_ws / "memory" / "existing.md").write_text("stará poznámka", encoding="utf-8")
+    (dst_ws / ".agents" / "skills" / "old-skill").mkdir(parents=True)
+    (dst_ws / ".agents" / "skills" / "old-skill" / "SKILL.md").write_text("old", encoding="utf-8")
+
+    dst_mem = WorkspaceMemory(dst_ws)
+    merge_res = dst_mem.import_memory_zip(zip_bytes, mode="merge")
+    assert merge_res["imported_count"] == 23
+    assert (dst_ws / "memory" / "existing.md").is_file()
+    assert (dst_ws / ".agents" / "skills" / "old-skill" / "SKILL.md").is_file()
+    assert (dst_ws / "memory" / "2026-11-01.md").read_text(encoding="utf-8") == "Den 1"
+
+    rep_res = dst_mem.import_memory_zip(zip_bytes, mode="replace")
+    assert rep_res["imported_count"] == 23
+    assert not (dst_ws / "memory" / "existing.md").exists()
+    assert not (dst_ws / ".agents" / "skills" / "old-skill" / "SKILL.md").exists()
+    assert (dst_ws / "SOUL.md").read_text(encoding="utf-8") == "# Osobnost"
+    assert (dst_ws / ".agents" / "skills" / "custom-skill" / "SKILL.md").is_file()
+
+    # Bezpečnost: Zip Slip, nepovolená přípona i poškozený ZIP nesmí projít ani zapsat
+    bad_buf = io.BytesIO()
+    with zipfile.ZipFile(bad_buf, "w") as zf:
+        zf.writestr("MEMORY.md", "nesmi se zapsat")
+        zf.writestr("../evil.md", "pwned")
+    with pytest.raises(ValueError):
+        dst_mem.import_memory_zip(bad_buf.getvalue(), mode="merge")
+    assert (dst_ws / "MEMORY.md").read_text(encoding="utf-8") == "# Dlouhodobá paměť"
+
+    bad_ext = io.BytesIO()
+    with zipfile.ZipFile(bad_ext, "w") as zf:
+        zf.writestr("memory/hack.py", "print(1)")
+    with pytest.raises(ValueError):
+        dst_mem.import_memory_zip(bad_ext.getvalue(), mode="merge")
+
+    with pytest.raises(ValueError):
+        dst_mem.import_memory_zip(b"neplatny-zip", mode="merge")

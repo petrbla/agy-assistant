@@ -463,4 +463,59 @@ def test_pty_websockets_auth_and_streaming(tmp_path: Path) -> None:
     assert auth_inputs == ["\r"]
 
 
+def test_memory_export_and_import_api_endpoints(tmp_path: Path) -> None:
+    import io
+    import zipfile
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "SOUL.md").write_text("# Původní duše", encoding="utf-8")
+    (ws / "MEMORY.md").write_text("# Původní paměť", encoding="utf-8")
+    (ws / "memory").mkdir()
+    (ws / "memory" / "2026-11-20.md").write_text("Záznam", encoding="utf-8")
+
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data", web_auth_token="mem-secret")
+    db = AssistantDB(settings.db_path)
+    memory = WorkspaceMemory(ws)
+    runner = AsyncMock()
+    runner.close_all = AsyncMock()
+    app = create_app(settings, db, memory, runner)
+    client = TestClient(app)
+
+    assert client.get("/api/memory/export").status_code == 401
+    assert client.post("/api/memory/import", content=b"123").status_code == 401
+
+    headers = {"Authorization": "Bearer mem-secret"}
+    exp_res = client.get("/api/memory/export", headers=headers)
+    assert exp_res.status_code == 200
+    assert exp_res.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(exp_res.content), "r") as zf:
+        assert "SOUL.md" in zf.namelist()
+        assert "memory/2026-11-20.md" in zf.namelist()
+
+    # Přidání dočasného souboru a obnova v režimu replace
+    (ws / "memory" / "docasny.md").write_text("smazat", encoding="utf-8")
+    (ws / "SOUL.md").write_text("# Změněná duše", encoding="utf-8")
+
+    imp_res = client.post(
+        "/api/memory/import?mode=replace",
+        headers={**headers, "Content-Type": "application/zip"},
+        content=exp_res.content,
+    )
+    assert imp_res.status_code == 200
+    payload = imp_res.json()
+    assert payload["status"] == "ok"
+    assert payload["mode"] == "replace"
+    assert payload["imported_count"] == 3
+    assert (ws / "SOUL.md").read_text(encoding="utf-8") == "# Původní duše"
+    assert not (ws / "memory" / "docasny.md").exists()
+
+    bad_imp = client.post(
+        "/api/memory/import",
+        headers={**headers, "Content-Type": "application/zip"},
+        content=b"not-a-zip",
+    )
+    assert bad_imp.status_code == 400
+
+
 
