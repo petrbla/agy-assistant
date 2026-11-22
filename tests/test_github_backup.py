@@ -308,6 +308,7 @@ def test_plugin_cards_layout_and_connection_state_styles() -> None:
     assert "plugin-card-unconnected" in app_js
     assert "plugin_status_needs_connect" in app_js
     assert "switchSettingsTab" in app_js
+    assert "skipAuthRedirect" in app_js
     assert "mb-auto" not in app_js
     assert "settingsSubnav" in index_html
     assert "tgAdvancedBox" in index_html

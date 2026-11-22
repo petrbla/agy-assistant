@@ -93,6 +93,7 @@
   let activeSettingsSubtab = sessionStorage.getItem("agy_settings_subtab") || "general";
   let ghBackupCollapsedInit = false;
   let mcpCollapsedInit = false;
+  let isBootstrappingAuth = false;
   const chatLogs = { auto: [], pracovni: [], osobni: [] };
 
   function t(key, vars = {}) {
@@ -367,13 +368,16 @@
   }
 
   async function api(url, opts = {}) {
+    const { skipAuthRedirect = false, ...fetchOpts } = opts;
     const res = await fetch(url, {
-      ...opts,
-      headers: { ...getHeaders(), ...(opts.headers || {}) },
+      ...fetchOpts,
+      headers: { ...getHeaders(), ...(fetchOpts.headers || {}) },
     });
     if (res.status === 401) {
       localStorage.removeItem("agy_web_token");
-      await loadAuthAndBootstrap();
+      if (!skipAuthRedirect && !isBootstrappingAuth) {
+        await loadAuthAndBootstrap();
+      }
       throw new Error(t("err_login_required"));
     }
     const text = await res.text();
@@ -661,6 +665,7 @@
   // Auth & Bootstrap
   async function loadAuthAndBootstrap() {
     showAuthErr("");
+    isBootstrappingAuth = true;
     try {
       const st = await fetch("/api/auth/state").then((r) => r.json());
       updateAppVersionBadge(st.app_version);
@@ -679,7 +684,7 @@
         showAuthScreen("initial");
         return;
       }
-      const statusData = await api("/api/status");
+      const statusData = await api("/api/status", { skipAuthRedirect: true });
       lastStatus = statusData;
       if (statusData.language && statusData.language !== currentLang) {
         await applyLanguage(statusData.language, { persistBackend: false });
@@ -706,6 +711,8 @@
       $("statusPill").textContent = t(authScreenStatusKey);
       $("statusPill").className = badgeCls();
       showAuthScreen("login");
+    } finally {
+      isBootstrappingAuth = false;
     }
   }
 
