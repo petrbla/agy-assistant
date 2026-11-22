@@ -69,6 +69,12 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert "appVersionBadge" in home_res.text
     assert "appVerBadge" in home_res.text
     assert "appUpdateBanner" in home_res.text
+    assert "updateAppBannerBtn" in home_res.text
+    assert "updateAppBtn" in home_res.text
+    compose_txt = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "updater:" in compose_txt
+    assert "nickfedor/watchtower" in compose_txt
+    assert "WATCHTOWER_HTTP_API_UPDATE" in compose_txt
     assert "bootstrap@5.3.9/dist/css/bootstrap.min.css" in home_res.text
     assert "bootstrap@5.3.9/dist/js/bootstrap.bundle.min.js" in home_res.text
     assert "bootstrap-icons@1.13.2/font/bootstrap-icons.min.css" in home_res.text
@@ -105,11 +111,13 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     health_res = client.get("/api/health")
     assert health_res.status_code == 200
     assert health_res.json()["version"] == __version__
+    assert isinstance(health_res.json().get("boot_id"), str) and health_res.json()["boot_id"]
     auth_st = client.get("/api/auth/state")
     assert auth_st.status_code == 200
     assert auth_st.json()["app_version"] == __version__
     assert client.get("/api/status").status_code == 401
     assert client.get("/api/app/version").status_code == 401
+    assert client.post("/api/app/update").status_code == 401
 
     ok = client.get("/api/status", headers={"Authorization": "Bearer tajne123"})
     assert ok.status_code == 200
@@ -388,6 +396,7 @@ async def test_app_version_checker_and_api(tmp_path: Path) -> None:
         "app_latest_version": "0.0.7",
         "app_up_to_date": False,
         "app_update_available": True,
+        "app_self_update_enabled": False,
     }
 
     st_res = client.get(
@@ -996,6 +1005,187 @@ def test_agy_quota_api_endpoint(tmp_path: Path) -> None:
     assert body["groups"][0]["buckets"][0]["remaining_percent"] == 85.0
     assert body["groups"][0]["buckets"][1]["remaining_percent"] == 62.0
     runner.get_quota_usage.assert_awaited_once_with(force_refresh=True)
+
+
+def test_app_self_update_api_and_security(tmp_path: Path, monkeypatch) -> None:
+    import io
+    import urllib.error
+    import urllib.request
+    from email.message import Message
+
+    from app import __version__
+    from app.version_check import (
+        AppUpdateTriggerResult,
+        AppUpdater,
+        is_valid_update_url,
+        trigger_app_update_sync,
+    )
+
+    # 1. Validace URL
+    assert is_valid_update_url("") is False
+    assert is_valid_update_url("   ") is False
+    assert is_valid_update_url("file:///etc/passwd") is False
+    assert is_valid_update_url("ftp://updater:8080/v1/update") is False
+    assert is_valid_update_url("http://") is False
+    assert is_valid_update_url("http://updater:8080/v1/update?async=true") is True
+    assert is_valid_update_url("https://portainer.example.com/api/webhooks/123") is True
+
+    # 2. Subprocesy agy nesmí dědit aktualizační tajemství z prostředí
+    monkeypatch.setenv("APP_UPDATE_URL", "http://updater:8080/v1/update?async=true")
+    monkeypatch.setenv("APP_UPDATE_TOKEN", "tajny-updater-token")
+    monkeypatch.setenv("WATCHTOWER_HTTP_API_TOKEN", "tajny-updater-token")
+    env_settings = Settings(workspace_dir=tmp_path / "ws_env", data_dir=tmp_path / "data_env")
+    sub_env = env_settings.subprocess_env()
+    assert "APP_UPDATE_URL" not in sub_env
+    assert "APP_UPDATE_TOKEN" not in sub_env
+    assert "WATCHTOWER_HTTP_API_TOKEN" not in sub_env
+
+    # 3. trigger_app_update_sync přes mock urllib.request.urlopen (202, 401, 429, URLError)
+    captured_reqs: list[urllib.request.Request] = []
+
+    class _FakeResp:
+        def __init__(self, status: int, body: bytes = b"") -> None:
+            self.status = status
+            self._body = body
+
+        def read(self, _n: int = -1) -> bytes:
+            return self._body
+
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    def _mock_urlopen_202(req: urllib.request.Request, timeout: float = 15.0):
+        captured_reqs.append(req)
+        return _FakeResp(202, b'{"accepted":true}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen_202)
+    res_202 = trigger_app_update_sync(
+        "http://updater:8080/v1/update?async=true",
+        token="tajny-updater-token",
+    )
+    assert res_202.triggered is True
+    assert res_202.status_code == 202
+    assert res_202.async_mode is True
+    assert len(captured_reqs) == 1
+    assert captured_reqs[0].get_method() == "POST"
+    assert captured_reqs[0].get_header("Authorization") == "Bearer tajny-updater-token"
+
+    def _mock_urlopen_401(req: urllib.request.Request, timeout: float = 15.0):
+        raise urllib.error.HTTPError(
+            req.full_url, 401, "Unauthorized", Message(), io.BytesIO(b"bad token")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen_401)
+    res_401 = trigger_app_update_sync("http://updater:8080/v1/update", token="spatny")
+    assert res_401.triggered is False
+    assert res_401.status_code == 401
+    assert res_401.already_in_progress is False
+
+    def _mock_urlopen_429(req: urllib.request.Request, timeout: float = 15.0):
+        raise urllib.error.HTTPError(
+            req.full_url, 429, "Too Many Requests", Message(), io.BytesIO(b"busy")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen_429)
+    res_429 = trigger_app_update_sync("http://updater:8080/v1/update", token="ok")
+    assert res_429.triggered is False
+    assert res_429.status_code == 429
+    assert res_429.already_in_progress is True
+
+    def _mock_urlopen_err(_req: urllib.request.Request, timeout: float = 15.0):
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen_err)
+    res_net = trigger_app_update_sync("http://updater:8080/v1/update", token="ok")
+    assert res_net.triggered is False
+    assert res_net.status_code is None
+    assert "updater" in res_net.message.lower()
+
+    # 4. API chování bez nakonfigurovaného updateru -> 503
+    unconf_dir = tmp_path / "unconf"
+    unconf_dir.mkdir(parents=True)
+    monkeypatch.delenv("APP_UPDATE_URL", raising=False)
+    monkeypatch.delenv("APP_UPDATE_TOKEN", raising=False)
+    monkeypatch.delenv("WATCHTOWER_HTTP_API_TOKEN", raising=False)
+    client_unconf = _build_client(unconf_dir, auth_token="web-tajne")
+    hdr_unconf = {"Authorization": "Bearer web-tajne"}
+    assert client_unconf.post("/api/app/update").status_code == 401
+    assert client_unconf.post("/api/app/update", headers=hdr_unconf).status_code == 503
+
+    # 5. API s nakonfigurovaným updaterem -> 200, 409 cooldown, 502 při chybě, bez úniku tokenu
+    conf_ws = tmp_path / "conf_ws"
+    conf_ws.mkdir(parents=True)
+    (conf_ws / "MEMORY.md").write_text("# Paměť", encoding="utf-8")
+    conf_settings = Settings(
+        workspace_dir=conf_ws,
+        data_dir=tmp_path / "conf_data",
+        web_auth_token="web-tajne-2",
+        app_version_check_url="",
+        app_update_url="http://updater:8080/v1/update?async=true",
+        app_update_token="tajny-updater-token",
+    )
+    conf_db = AssistantDB(conf_settings.db_path)
+    conf_mem = WorkspaceMemory(conf_ws)
+    conf_runner = AsyncMock()
+    conf_runner.check_version = AsyncMock(return_value="1.5.14")
+
+    next_result = AppUpdateTriggerResult(
+        triggered=True,
+        status_code=202,
+        message="Aktualizace spuštěna.",
+        async_mode=True,
+    )
+
+    def _fake_trigger(url: str, token: str) -> AppUpdateTriggerResult:
+        assert url == "http://updater:8080/v1/update?async=true"
+        assert token == "tajny-updater-token"
+        return next_result
+
+    updater = AppUpdater(conf_settings, trigger_fn=_fake_trigger, cooldown_seconds=60.0)
+    conf_app = create_app(conf_settings, conf_db, conf_mem, conf_runner, app_updater=updater)
+    conf_client = TestClient(conf_app)
+    hdr_conf = {"Authorization": "Bearer web-tajne-2"}
+
+    assert conf_client.post("/api/app/update").status_code == 401
+
+    st_res = conf_client.get("/api/status", headers=hdr_conf)
+    assert st_res.status_code == 200
+    assert st_res.json()["app_self_update_enabled"] is True
+    assert "app_update_token" not in st_res.json()
+    assert "tajny-updater-token" not in st_res.text
+
+    ver_res = conf_client.get("/api/app/version?refresh=false", headers=hdr_conf)
+    assert ver_res.status_code == 200
+    assert ver_res.json()["app_self_update_enabled"] is True
+    assert "tajny-updater-token" not in ver_res.text
+
+    upd_ok = conf_client.post("/api/app/update", headers=hdr_conf)
+    assert upd_ok.status_code == 200
+    upd_body = upd_ok.json()
+    assert upd_body["status"] == "ok"
+    assert upd_body["triggered"] is True
+    assert upd_body["current_version"] == __version__
+    assert isinstance(upd_body["boot_id"], str) and upd_body["boot_id"]
+    assert upd_body["status_code"] == 202
+    assert upd_body["async_mode"] is True
+
+    # Okamžité opakování narazí na cooldown -> 409
+    upd_dup = conf_client.post("/api/app/update", headers=hdr_conf)
+    assert upd_dup.status_code == 409
+
+    # Chyba updateru po resetu cooldownu -> 502
+    updater._last_triggered_at = None
+    next_result = AppUpdateTriggerResult(
+        triggered=False,
+        status_code=None,
+        message="Aktualizační sidecar updater není dostupný.",
+    )
+    upd_fail = conf_client.post("/api/app/update", headers=hdr_conf)
+    assert upd_fail.status_code == 502
+    assert "updater" in upd_fail.json()["detail"].lower()
 
 
 

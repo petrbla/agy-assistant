@@ -58,20 +58,48 @@ services:
     container_name: asistent
     restart: unless-stopped
     init: true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.scope=asistent"
     environment:
       LANGUAGE: "cs" # nebo "en" pro angličtinu
       TZ: "Europe/Prague"
       TG_TOKEN: "xxx"
       TG_ID: "xxx"
+      APP_UPDATE_URL: "http://updater:8080/v1/update?async=true"
+      APP_UPDATE_TOKEN: "zmente-si-tajny-token"
     volumes:
       - /opt/docker/asistent/home:/home/asistent
     ports:
       - "8080:8080"
     mem_limit: 2g
     cpus: 1.5
+
+  # Volitelný lehký sidecar pro 1-klik aktualizace z Web UI (bez vystavených portů)
+  updater:
+    image: nickfedor/watchtower:latest
+    container_name: asistent-updater
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+      - "com.centurylinklabs.watchtower.scope=asistent"
+    environment:
+      TZ: "Europe/Prague"
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_PERIODIC_POLLS: "false"
+      WATCHTOWER_HTTP_API_TOKEN: "zmente-si-tajny-token"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_SCOPE: "asistent"
+      WATCHTOWER_CLEANUP: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    mem_limit: 128m
+    cpus: 0.25
 ```
 
-*(Alternativně si můžete image sestavit i ručně na serveru: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` a v YAML pak použít `image: asistent:latest` a `pull_policy: never`.)*
+> Díky doprovodnému kontejneru `updater` se při vydání nové verze zobrazí přímo ve Web UI tlačítko **Aktualizovat asistenta** (v horním upozornění i v **Nastavení**). Po kliknutí se stáhne nový image z GHCR a kontejner se sám restartuje bez nutnosti chodit do Portaineru. Hodnoty `APP_UPDATE_TOKEN` a `WATCHTOWER_HTTP_API_TOKEN` se musí shodovat — nastavte si vlastní tajný řetězec.
+
+*(Alternativně si můžete image sestavit i ručně na serveru: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` a v YAML pak použít `image: asistent:latest`, `pull_policy: never` a bez služby `updater`.)*
 
 ### Krok 2: První spuštění
 1. Otevřete `http://<IP-VPS>:8080` a nastavte si e-mail, uživatelské jméno a heslo.

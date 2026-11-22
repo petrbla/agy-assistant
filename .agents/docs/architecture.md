@@ -64,5 +64,6 @@ Telegram (tg:<chat>:<kanál>)   Web UI (web:<kanál>)   Plánovač (cron:*, task
 - **Telegram whitelist:** bot odpoví jen ID z `telegram_allowed_users`.
 - **Web UI:** heslo (PBKDF2-SHA256), volitelné TOTP 2FA se záložními kódy, session tokeny v `auth_sessions`; záložní statický `WEB_AUTH_TOKEN` je při aktivním 2FA zablokovaný.
 - **Souborový systém:** `WorkspaceMemory._resolve_safe()` blokuje path traversal a nepovolené přípony.
-- **Procesy:** `agy` se spouští výhradně přes `create_subprocess_exec` (bez shellu) s timeoutem.
+- **Procesy:** `agy` se spouští výhradně přes `create_subprocess_exec` (bez shellu) s timeoutem a z prostředí subprocesů se odstraňují aktualizační tajemství (`APP_UPDATE_URL`, `APP_UPDATE_TOKEN`, `WATCHTOWER_HTTP_API_TOKEN`).
+- **Aktualizace kontejneru přes Web UI (`POST /api/app/update`):** volitelný sidecar `updater` (`nickfedor/watchtower:latest` v HTTP API režimu na vyžádání, bez vystavených portů a izolovaný pomocí `WATCHTOWER_LABEL_ENABLE=true` + `WATCHTOWER_SCOPE`) přijímá interní POST požadavek chráněný Bearer tokenem `APP_UPDATE_TOKEN`. Kontejner `asistent` tak nikdy nemá přístup k `/var/run/docker.sock`.
 - **Kontejner:** běží pod non-root uživatelem `asistent` (UID 1000) přes `gosu`.

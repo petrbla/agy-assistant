@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     app_version_check_url: str = (
         "https://raw.githubusercontent.com/petrbla/agy-assistant/main/VERSION"
     )
+    # Volitelný aktualizační webhook (např. Watchtower sidecar http://updater:8080/v1/update?async=true)
+    app_update_url: str = ""
+    app_update_token: str = ""
 
     # Plánovač
     tz: str = "Europe/Prague"
@@ -204,4 +207,6 @@ class Settings(BaseSettings):
         env["XDG_CONFIG_HOME"] = str(target_home / ".config")
         env["XDG_DATA_HOME"] = str(target_home / ".local" / "share")
         env["XDG_CACHE_HOME"] = str(target_home / ".cache")
+        for secret_env in ("APP_UPDATE_URL", "APP_UPDATE_TOKEN", "WATCHTOWER_HTTP_API_TOKEN"):
+            env.pop(secret_env, None)
         return env

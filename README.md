@@ -58,20 +58,48 @@ services:
     container_name: asistent
     restart: unless-stopped
     init: true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.scope=asistent"
     environment:
       LANGUAGE: "en" # or "cs" for Czech
       TZ: "Europe/Prague"
       TG_TOKEN: "xxx"
       TG_ID: "xxx"
+      APP_UPDATE_URL: "http://updater:8080/v1/update?async=true"
+      APP_UPDATE_TOKEN: "change-me-updater-token"
     volumes:
       - /opt/docker/asistent/home:/home/asistent
     ports:
       - "8080:8080"
     mem_limit: 2g
     cpus: 1.5
+
+  # Optional lightweight sidecar enabling 1-click updates from Web UI (no exposed ports)
+  updater:
+    image: nickfedor/watchtower:latest
+    container_name: asistent-updater
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+      - "com.centurylinklabs.watchtower.scope=asistent"
+    environment:
+      TZ: "Europe/Prague"
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_PERIODIC_POLLS: "false"
+      WATCHTOWER_HTTP_API_TOKEN: "change-me-updater-token"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_SCOPE: "asistent"
+      WATCHTOWER_CLEANUP: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    mem_limit: 128m
+    cpus: 0.25
 ```
 
-*(Alternatively, build the image manually on your server: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` and use `image: asistent:latest` with `pull_policy: never`.)*
+> With the `updater` sidecar included, whenever a new assistant version is released, an **Update assistant** button appears directly in the Web UI (in the top update banner and under **Settings**) — clicking it pulls the new image and restarts the container without opening Portainer. Make sure `APP_UPDATE_TOKEN` and `WATCHTOWER_HTTP_API_TOKEN` match and use your own secret value.
+
+*(Alternatively, build the image manually on your server: `docker build -t asistent:latest https://github.com/petrbla/agy-assistant.git#main` and use `image: asistent:latest` with `pull_policy: never` and without the `updater` service.)*
 
 ### Step 2: First Launch
 1. Open `http://<VPS-IP>:8080` and create your admin email, username, and password.

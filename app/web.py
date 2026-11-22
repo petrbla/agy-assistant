@@ -34,7 +34,7 @@ from app.memory import WorkspaceMemory
 from app.plugins import PluginManager
 from app.runtime_config import save_runtime_overrides
 from app.scheduler import AssistantScheduler
-from app.version_check import AppVersionChecker
+from app.version_check import AppUpdater, AppVersionChecker
 from app.security import (
     build_otpauth_uri,
     create_2fa_challenge,
@@ -349,6 +349,7 @@ def create_app(
     terminal_manager: AgyTerminalManager | None = None,
     plugin_manager: PluginManager | None = None,
     app_version_checker: AppVersionChecker | None = None,
+    app_updater: AppUpdater | None = None,
     on_settings_updated: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Vytvoří čistou single-user FastAPI aplikaci pro Web UI a REST API."""
@@ -362,6 +363,9 @@ def create_app(
         plugin_manager = PluginManager(settings, db)
     if app_version_checker is None:
         app_version_checker = AppVersionChecker(settings)
+    if app_updater is None:
+        app_updater = AppUpdater(settings)
+    boot_id = secrets.token_hex(6)
     signing_key = load_or_create_signing_key(settings.data_dir)
     if (
         scheduler is not None
@@ -479,7 +483,7 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
+        return {"status": "ok", "version": __version__, "boot_id": boot_id}
 
     @app.get("/api/i18n")
     async def list_i18n_languages() -> dict[str, object]:
@@ -715,6 +719,7 @@ def create_app(
             **_owner_public_dict(owner, settings),
             **ver_info,
             **app_ver_info,
+            "app_self_update_enabled": app_updater.is_configured,
             "telegram_enabled": bool(owner.telegram_bot_token.strip()),
             "allowed_telegram_users_count": len(owner.allowed_telegram_user_ids),
             "web_context_mode": web_ctx,
@@ -1408,7 +1413,33 @@ def create_app(
         refresh: bool = True,
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, object]:
-        return await app_version_checker.get_version_info(force_refresh=refresh)
+        ver_info = await app_version_checker.get_version_info(force_refresh=refresh)
+        return {
+            **ver_info,
+            "app_self_update_enabled": app_updater.is_configured,
+        }
+
+    @app.post("/api/app/update")
+    async def post_app_update(_: OwnerConfig = Depends(require_auth)) -> dict[str, object]:
+        if not app_updater.is_configured:
+            raise HTTPException(
+                status_code=503,
+                detail="Automatická aktualizace z Web UI není nakonfigurována (chybí sidecar updater / APP_UPDATE_URL).",
+            )
+        result = await app_updater.trigger_update()
+        if result.already_in_progress:
+            raise HTTPException(status_code=409, detail=result.message)
+        if not result.triggered:
+            raise HTTPException(status_code=502, detail=result.message)
+        return {
+            "status": "ok",
+            "triggered": True,
+            "current_version": __version__,
+            "boot_id": boot_id,
+            "status_code": result.status_code,
+            "async_mode": result.async_mode,
+            "message": result.message,
+        }
 
     @app.get("/api/agy/version")
     async def get_agy_version(

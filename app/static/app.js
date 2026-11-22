@@ -51,6 +51,7 @@
   let lastStatus = null;
   let lastQuotaData = null;
   let lastAppVerInfo = null;
+  let isAppUpdating = false;
   let lastOauthState = null;
   let authScreenStatusKey = "";
 
@@ -151,23 +152,28 @@
 
   function updateAppVersionBadge(verOrInfo) {
     if (!verOrInfo) return;
+    const prevSelfUpd = Boolean(lastAppVerInfo && lastAppVerInfo.app_self_update_enabled);
     let info;
     if (typeof verOrInfo === "string") {
       info = lastAppVerInfo && lastAppVerInfo.app_version === verOrInfo
         ? { ...lastAppVerInfo }
-        : { app_version: verOrInfo };
+        : { app_version: verOrInfo, app_self_update_enabled: prevSelfUpd };
     } else if (typeof verOrInfo === "object" && verOrInfo.app_version) {
+      const selfUpd = typeof verOrInfo.app_self_update_enabled === "boolean"
+        ? verOrInfo.app_self_update_enabled
+        : prevSelfUpd;
       if ("app_up_to_date" in verOrInfo || "app_latest_version" in verOrInfo) {
         info = {
           app_version: verOrInfo.app_version,
           app_latest_version: verOrInfo.app_latest_version ?? null,
           app_up_to_date: verOrInfo.app_up_to_date ?? null,
           app_update_available: Boolean(verOrInfo.app_update_available),
+          app_self_update_enabled: selfUpd,
         };
       } else {
         info = lastAppVerInfo && lastAppVerInfo.app_version === verOrInfo.app_version
-          ? { ...lastAppVerInfo }
-          : { app_version: verOrInfo.app_version };
+          ? { ...lastAppVerInfo, app_self_update_enabled: selfUpd }
+          : { app_version: verOrInfo.app_version, app_self_update_enabled: selfUpd };
       }
     } else {
       return;
@@ -211,6 +217,12 @@
       }
     }
 
+    if (isAppUpdating) return;
+
+    const showSelfUpdate = Boolean(info.app_self_update_enabled && info.app_update_available);
+    if ($("updateAppBannerBtn")) $("updateAppBannerBtn").classList.toggle("d-none", !showSelfUpdate);
+    if ($("updateAppBtn")) $("updateAppBtn").classList.toggle("d-none", !showSelfUpdate);
+
     const banner = $("appUpdateBanner");
     if (banner) {
       const dismissedVer = sessionStorage.getItem("agy_dismissed_app_ver") || "";
@@ -221,7 +233,8 @@
       );
       banner.classList.toggle("d-none", !showBanner);
       if (showBanner && $("appUpdateBannerText")) {
-        $("appUpdateBannerText").textContent = t("app_update_banner", {
+        const bannerKey = info.app_self_update_enabled ? "app_update_banner_auto" : "app_update_banner";
+        $("appUpdateBannerText").textContent = t(bannerKey, {
           current: info.app_version,
           latest: info.app_latest_version,
         });
@@ -319,6 +332,7 @@
     if (agyLiveTerm) agyLiveTerm.refreshStatusLabel();
     if (pluginConnectTerm) pluginConnectTerm.refreshStatusLabel();
     if (typeof updateAgyTerminalControls === "function") updateAgyTerminalControls(terminalIsRunning);
+    if (isAppUpdating) setAppUpdatingUi(true);
     refreshCollapsibleLabels();
   }
 
@@ -886,8 +900,10 @@
     localStorage.removeItem("agy_web_token");
     sessionStorage.removeItem("agy_onboarding_skipped");
     lastStatus = null;
-    lastAppVerInfo = null;
-    if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("d-none");
+    if (!isAppUpdating) {
+      lastAppVerInfo = null;
+      if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("d-none");
+    }
     await loadAuthAndBootstrap();
   };
 
@@ -2919,12 +2935,161 @@
   };
   if ($("dismissAppUpdateBtn")) {
     $("dismissAppUpdateBtn").onclick = () => {
+      if (isAppUpdating) return;
       if (lastAppVerInfo && lastAppVerInfo.app_latest_version) {
         sessionStorage.setItem("agy_dismissed_app_ver", lastAppVerInfo.app_latest_version);
       }
       if ($("appUpdateBanner")) $("appUpdateBanner").classList.add("d-none");
     };
   }
+
+  function setAppUpdatingUi(updating, statusText = "") {
+    const bannerBtn = $("updateAppBannerBtn");
+    const settingsBtn = $("updateAppBtn");
+    const dismissBtn = $("dismissAppUpdateBtn");
+    const banner = $("appUpdateBanner");
+    const bannerText = $("appUpdateBannerText");
+    const spinnerHtml = `<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>`;
+
+    if (bannerBtn) {
+      bannerBtn.disabled = Boolean(updating);
+      if (updating) {
+        bannerBtn.classList.remove("d-none");
+        bannerBtn.innerHTML = `${spinnerHtml}<span>${escapeHtml(t("btn_updating_app"))}</span>`;
+      } else {
+        bannerBtn.innerHTML = `<i class="bi bi-cloud-arrow-down me-1" aria-hidden="true"></i><span data-i18n="btn_update_app">${escapeHtml(t("btn_update_app"))}</span>`;
+      }
+    }
+    if (settingsBtn) {
+      settingsBtn.disabled = Boolean(updating);
+      if (updating) {
+        settingsBtn.classList.remove("d-none");
+        settingsBtn.innerHTML = `${spinnerHtml}${escapeHtml(t("btn_updating_app"))}`;
+      } else {
+        settingsBtn.textContent = t("btn_update_app");
+      }
+    }
+    if (dismissBtn) dismissBtn.disabled = Boolean(updating);
+
+    if (updating) {
+      if (banner) banner.classList.remove("d-none");
+      if (statusText && bannerText) bannerText.textContent = statusText;
+    } else if (lastAppVerInfo) {
+      updateAppVersionBadge(lastAppVerInfo);
+    }
+  }
+
+  async function pollHealthUntilRestarted(prevBootId, prevVersion, targetVersion) {
+    const deadline = Date.now() + 180000;
+    let sawRestartGap = false;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), 3000) : null;
+      try {
+        const res = await fetch("/api/health", {
+          cache: "no-store",
+          signal: ctrl ? ctrl.signal : undefined,
+        });
+        if (timer) clearTimeout(timer);
+        if (!res.ok) {
+          sawRestartGap = true;
+          setAppUpdatingUi(true, t("app_update_restarting", { latest: targetVersion }));
+          continue;
+        }
+        const data = await res.json().catch(() => null);
+        if (!data || typeof data !== "object") continue;
+        const bootChanged = Boolean(prevBootId && data.boot_id && data.boot_id !== prevBootId);
+        const verChanged = Boolean(prevVersion && data.version && data.version !== prevVersion);
+        if (bootChanged || verChanged) {
+          sessionStorage.removeItem("agy_dismissed_app_ver");
+          toast(t("toast_app_updated", { ver: data.version || targetVersion }), "ok");
+          setTimeout(() => { window.location.reload(); }, 900);
+          return true;
+        }
+        if (sawRestartGap) {
+          setAppUpdatingUi(true, t("app_update_restarting", { latest: targetVersion }));
+        }
+      } catch (_) {
+        if (timer) clearTimeout(timer);
+        sawRestartGap = true;
+        setAppUpdatingUi(true, t("app_update_restarting", { latest: targetVersion }));
+      }
+    }
+    toast(t("toast_app_update_timeout"), "warn");
+    return false;
+  }
+
+  async function triggerAppSelfUpdate() {
+    if (isAppUpdating) return;
+    const targetVer = (lastAppVerInfo && lastAppVerInfo.app_latest_version) || "latest";
+    if (!confirm(t("confirm_app_update", { latest: targetVer }))) return;
+
+    let prevBootId = "";
+    let prevVersion = (lastAppVerInfo && lastAppVerInfo.app_version) || "";
+    try {
+      const hRes = await fetch("/api/health", { cache: "no-store" });
+      if (hRes.ok) {
+        const hData = await hRes.json().catch(() => null);
+        if (hData && typeof hData === "object") {
+          prevBootId = String(hData.boot_id || "");
+          if (hData.version) prevVersion = String(hData.version);
+        }
+      }
+    } catch (_) {}
+
+    isAppUpdating = true;
+    setAppUpdatingUi(true, t("toast_app_updating", { latest: targetVer }));
+    toast(t("toast_app_updating", { latest: targetVer }), "warn");
+
+    let willReload = false;
+    try {
+      const res = await fetch("/api/app/update", {
+        method: "POST",
+        headers: getHeaders(),
+      });
+      if (res.status === 401) {
+        localStorage.removeItem("agy_web_token");
+        await loadAuthAndBootstrap();
+        throw new Error(t("err_login_required"));
+      }
+      const rawText = await res.text();
+      let data = null;
+      try { data = rawText ? JSON.parse(rawText) : null; } catch (_) {}
+
+      if (res.ok) {
+        if (data && typeof data === "object") {
+          if (data.boot_id) prevBootId = String(data.boot_id);
+          if (data.current_version) prevVersion = String(data.current_version);
+        }
+        willReload = await pollHealthUntilRestarted(prevBootId, prevVersion, targetVer);
+        return;
+      }
+
+      if (data && typeof data.detail === "string" && data.detail) {
+        throw new Error(data.detail);
+      }
+      if ([502, 503, 504].includes(res.status)) {
+        willReload = await pollHealthUntilRestarted(prevBootId, prevVersion, targetVer);
+        return;
+      }
+      throw new Error(rawText || `HTTP ${res.status}`);
+    } catch (err) {
+      if (err instanceof TypeError) {
+        willReload = await pollHealthUntilRestarted(prevBootId, prevVersion, targetVer);
+        return;
+      }
+      toast(err.message || "Update failed", "err");
+    } finally {
+      if (!willReload) {
+        isAppUpdating = false;
+        setAppUpdatingUi(false);
+      }
+    }
+  }
+
+  if ($("updateAppBannerBtn")) $("updateAppBannerBtn").onclick = triggerAppSelfUpdate;
+  if ($("updateAppBtn")) $("updateAppBtn").onclick = triggerAppSelfUpdate;
   if ($("appVersionBadge")) {
     $("appVersionBadge").onclick = async () => {
       if (!isAuthenticated || inAgyOnboarding) return;

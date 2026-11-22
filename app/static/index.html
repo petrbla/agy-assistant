@@ -200,7 +200,12 @@
   <main id="appMain" class="container-xl py-4 d-none">
     <div id="appUpdateBanner" class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 d-none">
       <span id="appUpdateBannerText"></span>
-      <button id="dismissAppUpdateBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_close">Close</button>
+      <div class="d-flex align-items-center gap-2 flex-shrink-0">
+        <button id="updateAppBannerBtn" type="button" class="btn btn-primary btn-sm d-none">
+          <i class="bi bi-cloud-arrow-down me-1" aria-hidden="true"></i><span data-i18n="btn_update_app">Update assistant</span>
+        </button>
+        <button id="dismissAppUpdateBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_close">Close</button>
+      </div>
     </div>
 
     <!-- 1. CHAT -->
@@ -626,6 +631,7 @@
               <span id="appVerBadge" class="badge rounded-pill text-bg-secondary d-none"></span>
               <span id="agyVerBadge" class="badge rounded-pill text-bg-secondary" data-i18n="agy_ver_loading">Version…</span>
               <button id="checkVerBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_check_ver">Check version</button>
+              <button id="updateAppBtn" type="button" class="btn btn-primary btn-sm d-none" data-i18n="btn_update_app">Update assistant</button>
               <button id="updateAgyBtn" type="button" class="btn btn-primary btn-sm d-none" data-i18n="btn_update_agy">Update agy</button>
               <button id="logoutAgyBtn" type="button" class="btn btn-outline-danger btn-sm d-none" data-i18n="btn_logout_agy">Sign out of agy</button>
             </div>

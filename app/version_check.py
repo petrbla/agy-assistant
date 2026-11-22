@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -84,3 +87,184 @@ class AppVersionChecker:
             "app_up_to_date": up_to_date,
             "app_update_available": up_to_date is False,
         }
+
+
+def is_valid_update_url(url: str) -> bool:
+    """Ověří, že URL aktualizačního webhooku používá HTTP/HTTPS a má platného hostitele."""
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return False
+    try:
+        parsed = urlparse(cleaned)
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+@dataclass(frozen=True)
+class AppUpdateTriggerResult:
+    """Výsledek pokusu o spuštění aktualizace kontejneru přes externí sidecar / webhook."""
+
+    triggered: bool
+    status_code: int | None
+    message: str
+    already_in_progress: bool = False
+    async_mode: bool = True
+
+
+def trigger_app_update_sync(
+    url: str,
+    token: str = "",
+    timeout: float = 15.0,
+) -> AppUpdateTriggerResult:
+    """Synchronně odešle POST požadavek na aktualizační sidecar (např. Watchtower HTTP API)."""
+    cleaned_url = (url or "").strip()
+    if not is_valid_update_url(cleaned_url):
+        return AppUpdateTriggerResult(
+            triggered=False,
+            status_code=None,
+            message="Neplatná nebo chybějící adresa aktualizační služby (APP_UPDATE_URL).",
+        )
+
+    headers: dict[str, str] = {
+        "User-Agent": f"asistent-antigravity/{__version__}",
+        "Accept": "application/json, text/plain, */*",
+    }
+    cleaned_token = (token or "").strip()
+    if cleaned_token:
+        headers["Authorization"] = f"Bearer {cleaned_token}"
+
+    req = urllib.request.Request(cleaned_url, data=b"", method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            code = int(getattr(resp, "status", None) or resp.getcode() or 200)
+            raw_body = resp.read(2048).decode("utf-8", errors="replace").strip()
+        if code in {200, 201, 202, 204}:
+            async_mode = code == 202
+            msg = (
+                "Aktualizace kontejneru byla spuštěna na pozadí."
+                if async_mode
+                else "Požadavek na aktualizaci byl přijat."
+            )
+            if raw_body.startswith("{"):
+                try:
+                    parsed = json.loads(raw_body)
+                    if isinstance(parsed, dict) and isinstance(parsed.get("summary"), dict):
+                        summary = parsed["summary"]
+                        updated = int(summary.get("updated") or 0)
+                        failed = int(summary.get("failed") or 0)
+                        if failed > 0:
+                            return AppUpdateTriggerResult(
+                                triggered=False,
+                                status_code=code,
+                                message=f"Aktualizace selhala u {failed} kontejneru.",
+                                async_mode=async_mode,
+                            )
+                        msg = (
+                            f"Aktualizace dokončena (aktualizováno kontejnerů: {updated})."
+                            if not async_mode
+                            else msg
+                        )
+                except (ValueError, TypeError):
+                    pass
+            return AppUpdateTriggerResult(
+                triggered=True,
+                status_code=code,
+                message=msg,
+                async_mode=async_mode,
+            )
+        return AppUpdateTriggerResult(
+            triggered=False,
+            status_code=code,
+            message=f"Aktualizační služba vrátila neočekávaný stav HTTP {code}.",
+        )
+    except urllib.error.HTTPError as exc:
+        code = int(getattr(exc, "code", 0) or 0)
+        raw_err = ""
+        try:
+            raw_err = exc.read(512).decode("utf-8", errors="replace").strip()
+        except Exception:
+            raw_err = ""
+        if code in {401, 403}:
+            return AppUpdateTriggerResult(
+                triggered=False,
+                status_code=code,
+                message="Aktualizační služba odmítla autorizaci (zkontrolujte APP_UPDATE_TOKEN).",
+            )
+        if code == 429:
+            return AppUpdateTriggerResult(
+                triggered=False,
+                status_code=code,
+                message="Aktualizace kontejneru již probíhá.",
+                already_in_progress=True,
+            )
+        snippet = " ".join(raw_err.split())[:200]
+        detail = f"Updater vrátil chybu HTTP {code}: {snippet}" if snippet else f"Updater vrátil chybu HTTP {code}."
+        return AppUpdateTriggerResult(
+            triggered=False,
+            status_code=code,
+            message=detail,
+        )
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        reason = getattr(exc, "reason", None) or str(exc)
+        snippet = " ".join(str(reason).split())[:200]
+        return AppUpdateTriggerResult(
+            triggered=False,
+            status_code=None,
+            message=(
+                f"Aktualizační sidecar updater není dostupný: {snippet}"
+                if snippet
+                else "Aktualizační sidecar updater není dostupný."
+            ),
+        )
+
+
+class AppUpdater:
+    """Bezpečný spouštěč aktualizace kontejneru přes Watchtower HTTP API sidecar."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        trigger_fn: Callable[[str, str], AppUpdateTriggerResult] | None = None,
+        cooldown_seconds: float = 15.0,
+    ) -> None:
+        self.settings = settings
+        self._trigger_fn = trigger_fn or trigger_app_update_sync
+        self._cooldown_seconds = max(0.0, float(cooldown_seconds))
+        self._lock = asyncio.Lock()
+        self._last_triggered_at: float | None = None
+
+    @property
+    def is_configured(self) -> bool:
+        """Vrací True, pokud je nakonfigurována platná adresa sidecar updateru."""
+        return is_valid_update_url(self.settings.app_update_url)
+
+    async def trigger_update(self) -> AppUpdateTriggerResult:
+        """Spustí aktualizaci přes nakonfigurovaný webhook s ochranou proti souběžnému volání."""
+        async with self._lock:
+            if not self.is_configured:
+                return AppUpdateTriggerResult(
+                    triggered=False,
+                    status_code=None,
+                    message="Automatická aktualizace z Web UI není nakonfigurována.",
+                )
+            now = time.monotonic()
+            if (
+                self._last_triggered_at is not None
+                and (now - self._last_triggered_at) < self._cooldown_seconds
+            ):
+                return AppUpdateTriggerResult(
+                    triggered=False,
+                    status_code=409,
+                    message="Aktualizace kontejneru již byla spuštěna, vyčkejte na restart.",
+                    already_in_progress=True,
+                )
+            result = await asyncio.to_thread(
+                self._trigger_fn,
+                self.settings.app_update_url.strip(),
+                self.settings.app_update_token.strip(),
+            )
+            if result.triggered:
+                self._last_triggered_at = time.monotonic()
+            return result
