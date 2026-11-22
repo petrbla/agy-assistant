@@ -538,7 +538,18 @@
     "tg_advanced_toggle": "Advanced Telegram options",
     "help_tg_notify": "Leave empty to send briefings, reminders, and alerts to your normal private chat (first allowed ID). Only needed if you want alerts in a Telegram group.",
     "btn_expand": "Expand",
-    "btn_collapse": "Collapse"
+    "btn_collapse": "Collapse",
+    "gh_guide_summary": "Step-by-step setup guide for GitHub backup (2 minutes)",
+    "gh_guide_step1_title": "Create a Private repository on GitHub",
+    "gh_guide_step1_desc": "Pick a name (e.g. assistant-backup), set visibility to Private, and click Create repository. An empty repository is fine — the first backup creates the main branch automatically.",
+    "gh_guide_step1_link": "Open GitHub New Repository",
+    "gh_guide_step2_title": "Create a Fine-grained Personal Access Token (PAT)",
+    "gh_guide_step2_desc": "Give the token a name (e.g. Assistant Backup), pick an Expiration, and under Repository access select “Only select repositories” → choose your new private backup repository.",
+    "gh_guide_step2_link": "Open GitHub Fine-grained Tokens",
+    "gh_guide_step3_title": "Grant Contents: Read and write permission",
+    "gh_guide_step3_desc": "Expand Permissions → Repository permissions, find Contents, and set it to Read and write (Metadata is enabled automatically). Click Generate token and copy the github_pat_… token right away.",
+    "gh_guide_step4_title": "Fill in the form above, save, and test",
+    "gh_guide_step4_desc": "Enter your-user/assistant-backup (or full HTTPS URL) into GitHub repository, paste the token, turn the switch on, click “Save backup settings”, and then “Back up now”."
   },
   "backend": {
     "channel_auto": "Auto",

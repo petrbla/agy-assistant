@@ -538,7 +538,18 @@
     "tg_advanced_toggle": "Zaawansowane opcje Telegrama",
     "help_tg_notify": "Zostaw puste, aby briefingi i powiadomienia trafiały na Twój prywatny czat (pierwsze dozwolone ID). Wypełnij tylko, jeśli chcesz wysyłać alerty do grupy Telegram.",
     "btn_expand": "Rozwiń",
-    "btn_collapse": "Zwiń"
+    "btn_collapse": "Zwiń",
+    "gh_guide_summary": "Instrukcja krok po kroku, jak uruchomić kopię na GitHub (2 minuty)",
+    "gh_guide_step1_title": "Utwórz prywatne (Private) repozytorium na GitHubie",
+    "gh_guide_step1_desc": "Podaj nazwę (np. assistant-backup), wybierz widoczność Private i kliknij Create repository. Repozytorium może pozostać puste — pierwsza kopia sama utworzy gałąź main.",
+    "gh_guide_step1_link": "Otwórz tworzenie repozytorium na GitHubie",
+    "gh_guide_step2_title": "Utwórz token Fine-grained PAT",
+    "gh_guide_step2_desc": "Nazwij token (np. Assistant Backup), ustaw ważność (Expiration), a w sekcji Repository access wybierz „Only select repositories” → wskaż swoje nowe prywatne repozytorium.",
+    "gh_guide_step2_link": "Otwórz tworzenie Fine-grained tokena",
+    "gh_guide_step3_title": "Nadaj uprawnienie Contents: Read and write",
+    "gh_guide_step3_desc": "Rozwiń Permissions → Repository permissions, przy Contents wybierz Read and write (Metadata włączy się automatycznie). Kliknij Generate token i skopiuj klucz github_pat_….",
+    "gh_guide_step4_title": "Wypełnij formularz powyżej, zapisz i przetestuj",
+    "gh_guide_step4_desc": "Wpisz twoj-login/assistant-backup (lub pełny URL HTTPS), wklej token, włącz przełącznik, kliknij „Zapisz kopię”, a następnie „Zrób kopię teraz”."
   },
   "backend": {
     "channel_auto": "Auto",

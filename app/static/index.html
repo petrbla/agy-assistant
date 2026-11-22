@@ -245,15 +245,15 @@
       <div class="row g-3">
         <div class="col-lg-4 col-xl-3">
           <div class="card shadow-sm h-100">
-            <div class="card-header d-flex align-items-start justify-content-between gap-2">
-              <div>
-                <h2 class="h6 fw-bold mb-1" data-i18n="memory_files_title">Memory files</h2>
-                <p class="small text-body-secondary mb-0" data-i18n="memory_files_subtitle">Plain-text notes the assistant uses: personality (SOUL.md), your profile (USER.md), long-term memory (MEMORY.md), and check rules (HEARTBEAT.md).</p>
+            <div class="card-header">
+              <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                <h2 class="h6 fw-bold mb-0" data-i18n="memory_files_title">Memory files</h2>
+                <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                  <button id="refreshFilesBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_refresh">Refresh</button>
+                  <button id="resetWorkspaceBtn" type="button" class="btn btn-outline-danger btn-sm" title="Overwrite default templates" data-i18n="btn_reset" data-i18n-title="btn_reset_title">Reset</button>
+                </div>
               </div>
-              <div class="d-flex align-items-center gap-1 flex-shrink-0">
-                <button id="refreshFilesBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_refresh">Refresh</button>
-                <button id="resetWorkspaceBtn" type="button" class="btn btn-outline-danger btn-sm" title="Overwrite default templates" data-i18n="btn_reset" data-i18n-title="btn_reset_title">Reset</button>
-              </div>
+              <p class="small text-body-secondary mb-0 lh-sm" data-i18n="memory_files_subtitle">Plain-text notes the assistant uses: personality (SOUL.md), your profile (USER.md), long-term memory (MEMORY.md), and check rules (HEARTBEAT.md).</p>
             </div>
             <div class="card-body p-3">
               <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
@@ -843,6 +843,49 @@
               <div class="form-text mb-2" data-i18n="gh_backup_help">Use a private repository and a Fine-grained PAT with Contents: Read and write permission. Passwords, API keys, and OAuth tokens are never included in backups.</div>
               <div id="ghBackupLastInfo" class="small text-body-secondary"></div>
             </form>
+
+            <details id="ghBackupGuideBox" class="help-box oauth-guide-card mt-3">
+              <summary class="fw-semibold small d-flex align-items-center gap-2">
+                <i class="bi bi-book text-primary" aria-hidden="true"></i>
+                <span data-i18n="gh_guide_summary">Step-by-step setup guide for GitHub backup (2 minutes)</span>
+              </summary>
+              <ol class="oauth-guide-steps list-unstyled mb-0 mt-3">
+                <li>
+                  <span class="oauth-step-num">1</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="gh_guide_step1_title">Create a Private repository on GitHub</div>
+                    <div class="small text-body-secondary mb-1" data-i18n="gh_guide_step1_desc">Pick a name (e.g. assistant-backup), set visibility to Private, and click Create repository. An empty repository is fine — the first backup creates the main branch automatically.</div>
+                    <a href="https://github.com/new" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm py-0 px-2">
+                      <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="gh_guide_step1_link">Open GitHub New Repository</span>
+                    </a>
+                  </div>
+                </li>
+                <li>
+                  <span class="oauth-step-num">2</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="gh_guide_step2_title">Create a Fine-grained Personal Access Token (PAT)</div>
+                    <div class="small text-body-secondary mb-1" data-i18n="gh_guide_step2_desc">Give the token a name (e.g. Assistant Backup), pick an Expiration, and under Repository access select “Only select repositories” → choose your new private backup repository.</div>
+                    <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm py-0 px-2">
+                      <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="gh_guide_step2_link">Open GitHub Fine-grained Tokens</span>
+                    </a>
+                  </div>
+                </li>
+                <li>
+                  <span class="oauth-step-num">3</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="gh_guide_step3_title">Grant Contents: Read and write permission</div>
+                    <div class="small text-body-secondary" data-i18n="gh_guide_step3_desc">Expand Permissions → Repository permissions, find Contents, and set it to Read and write (Metadata is enabled automatically). Click Generate token and copy the github_pat_… token right away.</div>
+                  </div>
+                </li>
+                <li>
+                  <span class="oauth-step-num">4</span>
+                  <div>
+                    <div class="fw-semibold small" data-i18n="gh_guide_step4_title">Fill in the form above, save, and test</div>
+                    <div class="small text-body-secondary" data-i18n="gh_guide_step4_desc">Enter your-user/assistant-backup (or full HTTPS URL) into GitHub repository, paste the token, turn the switch on, click “Save backup settings”, and then “Back up now”.</div>
+                  </div>
+                </li>
+              </ol>
+            </details>
           </div>
         </div>
       </div>

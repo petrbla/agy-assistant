@@ -94,7 +94,7 @@ header.navbar {
   --bs-table-striped-bg: transparent;
 }
 
-.card .list-group-item {
+.card .list-group-item:not(.active) {
   background: transparent;
   border-color: var(--glass-border);
   transition: background-color 0.14s ease;
@@ -102,6 +102,14 @@ header.navbar {
 
 .card .list-group-item:hover:not(.active) {
   background: var(--glass-header-bg);
+}
+
+.card .list-group-item.active {
+  background: linear-gradient(135deg, #2563eb, #4f46e5) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  border-radius: 0.6rem;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.28);
 }
 
 .form-control,
@@ -347,6 +355,14 @@ header.navbar {
 .file-list {
   max-height: calc(100vh - 260px);
   overflow-y: auto;
+  padding-top: 2px;
+}
+.file-list .list-group-item {
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.42rem 0.68rem;
+  margin-bottom: 2px;
+  font-size: 0.84rem;
 }
 .memory-card-body {
   min-height: calc(100vh - 205px);

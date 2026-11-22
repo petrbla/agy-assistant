@@ -1969,6 +1969,9 @@
       ghBackupCollapsedInit = true;
       const activeOrConfigured = Boolean(s.github_backup_enabled || (s.github_backup_repo || "").trim());
       setCollapsibleCard("ghBackupBody", "toggleGhBackupBtn", activeOrConfigured);
+      if ($("ghBackupGuideBox")) {
+        $("ghBackupGuideBox").open = !activeOrConfigured && !s.has_github_backup_token;
+      }
     }
   }
 

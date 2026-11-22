@@ -538,7 +538,18 @@
     "tg_advanced_toggle": "Pokročilé možnosti Telegramu",
     "help_tg_notify": "Nechajte prázdne — briefingy, pripomienky aj upozornenia prídu priamo do vášho súkromného chatu (prvé povolené ID). Vypĺňajte len ak chcete posielať hlásenia do Telegram skupiny.",
     "btn_expand": "Rozbaliť",
-    "btn_collapse": "Zbaliť"
+    "btn_collapse": "Zbaliť",
+    "gh_guide_summary": "Podrobný návod krok za krokom, ako nastaviť zálohovanie na GitHub (2 minúty)",
+    "gh_guide_step1_title": "Vytvorte súkromný (Private) repozitár na GitHube",
+    "gh_guide_step1_desc": "Zvoľte názov (napr. asistent-zaloha), vyberte viditeľnosť Private a kliknite na Create repository. Repozitár môže zostať prázdny – prvá záloha vetvu main sama vytvorí.",
+    "gh_guide_step1_link": "Otvoriť vytvorenie repozitára na GitHube",
+    "gh_guide_step2_title": "Vytvorte Fine-grained prístupový token (PAT)",
+    "gh_guide_step2_desc": "Token pomenujte (napr. Asistent záloha), vyberte platnosť (Expiration) a v sekcii Repository access vyberte „Only select repositories“ → zvoľte iba váš nový súkromný repozitár.",
+    "gh_guide_step2_link": "Otvoriť vytvorenie Fine-grained tokenu",
+    "gh_guide_step3_title": "Nastavte oprávnenie Contents: Read and write",
+    "gh_guide_step3_desc": "Rozbaľte Permissions → Repository permissions, pri položke Contents vyberte Read and write (Metadata sa zapne automaticky). Kliknite na Generate token a skopírujte kľúč github_pat_….",
+    "gh_guide_step4_title": "Vyplňte formulár vyššie, uložte a otestujte",
+    "gh_guide_step4_desc": "Do poľa GitHub repozitár zadajte vase-meno/asistent-zaloha (alebo celú HTTPS adresu), vložte token, zapnite prepínač, kliknite na „Uložiť zálohovanie“ a potom na „Zálohovať teraz“."
   },
   "backend": {
     "channel_auto": "Auto",

@@ -312,6 +312,7 @@ def test_plugin_cards_layout_and_connection_state_styles() -> None:
     assert "settingsSubnav" in index_html
     assert "tgAdvancedBox" in index_html
     assert "toggleGhBackupBtn" in index_html
+    assert "ghBackupGuideBox" in index_html
     assert "toggleMcpCardBtn" in index_html
 
 
