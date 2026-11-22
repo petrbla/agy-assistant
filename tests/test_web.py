@@ -770,6 +770,8 @@ def test_terminal_endpoints_and_ws_auth(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_web_chat_slash_commands(tmp_path: Path) -> None:
+    from app.agy_runner import QuotaBucket, QuotaGroup, QuotaSnapshot
+
     ws_dir = tmp_path / "ws"
     ws_dir.mkdir(parents=True, exist_ok=True)
     (ws_dir / "MEMORY.md").write_text("# Dlouhodobá paměť\n- Projekt Alpha", encoding="utf-8")
@@ -793,9 +795,36 @@ def test_web_chat_slash_commands(tmp_path: Path) -> None:
         total_tokens=1200,
     )
 
+    sample_quota = QuotaSnapshot(
+        available=True,
+        groups=(
+            QuotaGroup(
+                name="Gemini Models",
+                buckets=(
+                    QuotaBucket(
+                        id="gemini-weekly",
+                        name="Weekly Limit Remaining",
+                        window="weekly",
+                        remaining_fraction=0.71,
+                        reset_time="2026-11-28T10:48:15Z",
+                    ),
+                    QuotaBucket(
+                        id="gemini-5h",
+                        name="Five Hour Limit Remaining",
+                        window="5h",
+                        remaining_fraction=0.934,
+                        reset_time="2026-11-22T22:32:02Z",
+                    ),
+                ),
+            ),
+        ),
+        fetched_at="2026-11-22T18:42:52Z",
+    )
+
     runner = AsyncMock()
     runner.check_version = AsyncMock(return_value="1.5.14")
     runner.list_models = AsyncMock(return_value=["gemini-4-neon-medium", "gemini-4-neon-high"])
+    runner.get_quota_usage = AsyncMock(return_value=sample_quota)
     runner.run = AsyncMock(
         return_value=AgyResult(
             text="Běžná AI odpověď",
@@ -807,18 +836,22 @@ def test_web_chat_slash_commands(tmp_path: Path) -> None:
     app = create_app(settings, db, WorkspaceMemory(ws_dir), runner, scheduler=None)
     client = TestClient(app)
 
-    # /usage vrátí přehled spotřeby a nesmí volat runner.run
-    usage_res = client.post(
-        "/api/chat",
-        json={"prompt": "/usage", "session_key": "web:auto", "context_mode": "auto"},
-    )
-    assert usage_res.status_code == 200
-    usage_body = usage_res.json()
-    assert usage_body["handled_command"] == "usage"
-    assert usage_body["total_tokens"] == 0
-    assert "gemini-4-neon-medium" in usage_body["text"]
-    assert "conv-web-999" in usage_body["text"]
-    assert "1 200" in usage_body["text"]
+    # /usage i /quota vrátí přehled spotřeby včetně 5h a týdenního limitu a nesmí volat runner.run
+    for cmd_input, expected_cmd in (("/usage", "usage"), ("/quota", "quota")):
+        usage_res = client.post(
+            "/api/chat",
+            json={"prompt": cmd_input, "session_key": "web:auto", "context_mode": "auto"},
+        )
+        assert usage_res.status_code == 200
+        usage_body = usage_res.json()
+        assert usage_body["handled_command"] == expected_cmd
+        assert usage_body["total_tokens"] == 0
+        assert "gemini-4-neon-medium" in usage_body["text"]
+        assert "conv-web-999" in usage_body["text"]
+        assert "1 200" in usage_body["text"]
+        assert "Gemini Models" in usage_body["text"]
+        assert "93.4%" in usage_body["text"]
+        assert "71.0%" in usage_body["text"]
     runner.run.assert_not_called()
 
     # /status, /memory, /help
@@ -906,6 +939,63 @@ def test_web_chat_slash_commands(tmp_path: Path) -> None:
     assert unk_res.status_code == 200
     assert unk_res.json()["text"] == "Běžná AI odpověď"
     assert runner.run.call_count == 2
+
+
+def test_agy_quota_api_endpoint(tmp_path: Path) -> None:
+    from app.agy_runner import QuotaBucket, QuotaGroup, QuotaSnapshot
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings(workspace_dir=ws_dir, data_dir=tmp_path / "data", web_auth_token="tajne-quota")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+
+    sample_quota = QuotaSnapshot(
+        available=True,
+        groups=(
+            QuotaGroup(
+                name="Gemini Models",
+                buckets=(
+                    QuotaBucket(
+                        id="gemini-5h",
+                        name="Five Hour Limit Remaining",
+                        window="5h",
+                        remaining_fraction=0.85,
+                        reset_time="2026-11-22T22:32:02Z",
+                    ),
+                    QuotaBucket(
+                        id="gemini-weekly",
+                        name="Weekly Limit Remaining",
+                        window="weekly",
+                        remaining_fraction=0.62,
+                        reset_time="2026-11-28T10:48:15Z",
+                    ),
+                ),
+            ),
+        ),
+        fetched_at="2026-11-22T18:45:00Z",
+    )
+
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.5.14")
+    runner.list_models = AsyncMock(return_value=[])
+    runner.get_quota_usage = AsyncMock(return_value=sample_quota)
+
+    app = create_app(settings, db, WorkspaceMemory(ws_dir), runner, scheduler=None)
+    client = TestClient(app)
+
+    assert 'id="agyQuotaCard"' in client.get("/").text
+    assert client.get("/api/agy/quota").status_code == 401
+
+    res = client.get("/api/agy/quota?refresh=true", headers={"Authorization": "Bearer tajne-quota"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["available"] is True
+    assert body["fetched_at"] == "2026-11-22T18:45:00Z"
+    assert body["groups"][0]["name"] == "Gemini Models"
+    assert body["groups"][0]["buckets"][0]["remaining_percent"] == 85.0
+    assert body["groups"][0]["buckets"][1]["remaining_percent"] == 62.0
+    runner.get_quota_usage.assert_awaited_once_with(force_refresh=True)
 
 
 

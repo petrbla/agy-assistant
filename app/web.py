@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app import __version__
-from app.agy_runner import AgyRunner, is_version_up_to_date
+from app.agy_runner import AgyRunner, QuotaSnapshot, is_version_up_to_date, quota_snapshot_to_dict
 from app.auth_session import AgyAuthManager, AgyTerminalManager
 from app.chat_commands import execute_web_slash_command
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
@@ -834,6 +834,7 @@ def create_app(
         if isinstance(runner, AgyRunner):
             if "gemini_api_key" in owner_updates:
                 runner.invalidate_models_cache()
+                runner.invalidate_quota_cache()
             if any(
                 k in owner_updates
                 for k in ("agy_model", "gemini_api_key", "default_context_mode", "language")
@@ -1189,6 +1190,7 @@ def create_app(
         prepare_agy_home(settings, db)
         if isinstance(runner, AgyRunner):
             runner.invalidate_models_cache()
+            runner.invalidate_quota_cache()
         state = await auth_manager.start(
             mode=payload.mode,
             cols=payload.cols,
@@ -1239,6 +1241,7 @@ def create_app(
         prepare_agy_home(settings, db)
         if isinstance(runner, AgyRunner):
             runner.invalidate_models_cache()
+            runner.invalidate_quota_cache()
             await runner.close_all()
         return {
             "status": "ok",
@@ -1443,6 +1446,24 @@ def create_app(
         prepare_agy_home(settings, db)
         models = await runner.list_models(force_refresh=refresh)
         return {"current_model": owner.agy_model, "models": models}
+
+    @app.get("/api/agy/quota")
+    async def get_agy_quota(
+        refresh: bool = False,
+        owner: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        ensure_workspace(settings, owner)
+        prepare_agy_home(settings, db)
+        snap = QuotaSnapshot(available=False)
+        get_quota = getattr(runner, "get_quota_usage", None)
+        if callable(get_quota):
+            try:
+                raw_snap = await get_quota(force_refresh=refresh)
+                if isinstance(raw_snap, QuotaSnapshot):
+                    snap = raw_snap
+            except Exception as exc:
+                snap = QuotaSnapshot(available=False, error=str(exc))
+        return quota_snapshot_to_dict(snap)
 
     @app.post("/api/chat")
     async def post_chat(

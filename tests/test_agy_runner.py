@@ -526,4 +526,151 @@ async def test_warm_session_does_not_rerun_oneshot_after_turn_started(tmp_path: 
     assert "connection dropped mid-turn" in (res.error or "")
 
 
+def test_parse_usage_quota_output_json_and_tsv_fallback() -> None:
+    from app.agy_runner import parse_usage_quota_output, quota_snapshot_to_dict
+
+    json_payload = json.dumps(
+        {
+            "conversation_id": "",
+            "status": "SUCCESS",
+            "response": "Gemini Models\tWeekly Limit Remaining\t71%\t2026-11-28T10:48:15Z\n",
+            "duration_seconds": 0,
+            "num_turns": 0,
+            "command": {
+                "name": "usage",
+                "data": {
+                    "description": "Shared limits across groups.",
+                    "groups": [
+                        {
+                            "name": "Gemini Models",
+                            "description": "Gemini models",
+                            "buckets": [
+                                {
+                                    "id": "gemini-weekly",
+                                    "name": "Weekly Limit Remaining",
+                                    "window": "weekly",
+                                    "remaining_fraction": 0.7104,
+                                    "reset_time": "2026-11-28T10:48:15Z",
+                                },
+                                {
+                                    "id": "gemini-5h",
+                                    "name": "Five Hour Limit Remaining",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.9336,
+                                    "reset_time": "2026-11-22T22:32:02Z",
+                                },
+                            ],
+                        },
+                        {
+                            "name": "Claude and GPT models",
+                            "buckets": [
+                                {
+                                    "id": "3p-5h",
+                                    "name": "Five Hour Limit Remaining",
+                                    "window": "5h",
+                                    "remaining_fraction": 1.25,
+                                    "reset_time": "2026-11-22T23:42:52Z",
+                                }
+                            ],
+                        },
+                    ],
+                },
+            },
+        }
+    )
+    snap = parse_usage_quota_output(json_payload, fetched_at="2026-11-22T18:42:52Z")
+    assert snap.available is True
+    assert snap.fetched_at == "2026-11-22T18:42:52Z"
+    assert len(snap.groups) == 2
+    assert snap.groups[0].buckets[0].window == "weekly"
+    assert snap.groups[0].buckets[1].window == "5h"
+    assert snap.groups[1].buckets[0].remaining_fraction == 1.0
+    as_dict = quota_snapshot_to_dict(snap)
+    assert as_dict["groups"][0]["buckets"][1]["remaining_percent"] == 93.4
+
+    # Fallback na response TSV v JSON bez command.data
+    resp_only = json.dumps(
+        {
+            "status": "SUCCESS",
+            "response": (
+                "Gemini Models\tWeekly Limit Remaining\t71%\t2026-11-28T10:48:15Z\n"
+                "Gemini Models\tFive Hour Limit Remaining\t93%\t2026-11-22T22:32:02Z\n"
+            ),
+        }
+    )
+    snap_resp = parse_usage_quota_output(resp_only)
+    assert snap_resp.available is True
+    assert len(snap_resp.groups) == 1
+    assert [b.window for b in snap_resp.groups[0].buckets] == ["weekly", "5h"]
+
+    # Fallback na čistý TSV výstup (s ANSI barvami)
+    raw_tsv = (
+        "\x1b[32mGemini Models\tWeekly Limit Remaining\t71%\t2026-11-28T10:48:15Z\x1b[0m\n"
+        "Claude and GPT models\tFive Hour Limit Remaining\t100%\t2026-11-22T23:42:52Z\n"
+    )
+    snap_tsv = parse_usage_quota_output(raw_tsv)
+    assert snap_tsv.available is True
+    assert len(snap_tsv.groups) == 2
+
+    # Chyba CLI vrátí available=False se zprávou
+    err_json = json.dumps({"status": "ERROR", "error": "authentication required"})
+    snap_err = parse_usage_quota_output(err_json)
+    assert snap_err.available is False
+    assert snap_err.error == "authentication required"
+
+
+async def test_get_quota_usage_executes_agy_and_caches(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    runner = AgyRunner(settings, db)
+
+    payload = json.dumps(
+        {
+            "status": "SUCCESS",
+            "command": {
+                "name": "usage",
+                "data": {
+                    "groups": [
+                        {
+                            "name": "Gemini Models",
+                            "buckets": [
+                                {
+                                    "id": "gemini-5h",
+                                    "name": "Five Hour Limit Remaining",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.9,
+                                    "reset_time": "2026-11-22T22:32:02Z",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+        }
+    ).encode()
+
+    captured_cmds: list[tuple[str, ...]] = []
+
+    async def _fake_exec(*cmd, **kwargs):
+        captured_cmds.append(tuple(str(c) for c in cmd))
+        p = AsyncMock()
+        p.returncode = 0
+        p.communicate = AsyncMock(return_value=(payload, b""))
+        return p
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        s1 = await runner.get_quota_usage()
+        s2 = await runner.get_quota_usage()
+        s3 = await runner.get_quota_usage(force_refresh=True)
+        runner.invalidate_quota_cache()
+        s4 = await runner.get_quota_usage()
+
+    assert s1.available is True and s2.available is True and s3.available is True and s4.available is True
+    assert len(captured_cmds) == 3
+    assert captured_cmds[0] == ("agy", "-p", "/usage", "--output-format", "json")
+
+
 

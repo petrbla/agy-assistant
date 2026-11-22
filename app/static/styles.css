@@ -971,3 +971,13 @@ pre.term.terminal-fallback {
   color: var(--bs-emphasis-color);
   overflow-wrap: anywhere;
 }
+
+/* Antigravity kvóta účtu */
+.quota-group-box {
+  background: var(--glass-bg-subtle);
+  border-color: var(--glass-border) !important;
+}
+.quota-progress {
+  height: 8px;
+  border-radius: 999px;
+}

@@ -20,7 +20,7 @@ from aiogram.types import (
     Message,
 )
 
-from app.agy_runner import AgyRunner
+from app.agy_runner import AgyRunner, QuotaSnapshot
 from app.attachments import (
     build_attachment_prompt,
     build_inbox_path,
@@ -28,6 +28,7 @@ from app.attachments import (
     is_image_filename,
 )
 from app.chat_commands import (
+    build_usage_report,
     fmt_int,
     format_cleanup_summary as render_cleanup_summary,
     format_status_report,
@@ -393,7 +394,13 @@ class TelegramAssistantBot:
     def _format_cleanup_summary(summary: dict[str, object], *, lang: str = "en") -> str:
         return render_cleanup_summary(summary, lang=lang)
 
-    def _format_usage_report(self, message: Message, *, lang: str | None = None) -> str:
+    def _format_usage_report(
+        self,
+        message: Message,
+        *,
+        lang: str | None = None,
+        quota: QuotaSnapshot | None = None,
+    ) -> str:
         active_ctx = self._active_context(message)
         return render_usage_report(
             self.db,
@@ -402,6 +409,7 @@ class TelegramAssistantBot:
             context_mode=active_ctx,
             owner=self._owner(),
             lang=lang if lang is not None else self._lang(),
+            quota=quota,
         )
 
     async def _send_long(self, chat_id: int, text: str) -> None:
@@ -689,10 +697,22 @@ class TelegramAssistantBot:
                 content = t("backend.tg_memory_missing", lang)
             await self._send_long(message.chat.id, content)
 
-        @self.dp.message(Command("usage"))
+        @self.dp.message(Command("usage", "quota"))
         async def cmd_usage(message: Message) -> None:
-            if await self._guard(message):
-                await self._send_long(message.chat.id, self._format_usage_report(message))
+            if not await self._guard(message):
+                return
+            active_ctx = self._active_context(message)
+            report = await build_usage_report(
+                self.db,
+                self.settings,
+                self.runner,
+                session_key=self._chat_session_key(message, active_ctx),
+                context_mode=active_ctx,
+                owner=self._owner(),
+                lang=self._lang(),
+                force_refresh=True,
+            )
+            await self._send_long(message.chat.id, report)
 
         @self.dp.message(Command("uklid", "cleanup"))
         async def cmd_cleanup(message: Message) -> None:

@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from app.agy_runner import AgyRunner, is_version_up_to_date
+from app.agy_runner import AgyRunner, QuotaSnapshot, is_version_up_to_date
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
 from app.db import AssistantDB, OwnerConfig
 from app.i18n import (
@@ -69,6 +70,104 @@ def format_cleanup_summary(summary: dict[str, object], *, lang: str = "en") -> s
     return text
 
 
+def format_quota_bar(fraction: float, width: int = 10) -> str:
+    """Sestaví textový ukazatel zbývající kvóty."""
+    clamped = max(0.0, min(1.0, float(fraction)))
+    filled = min(width, max(0, int(round(clamped * width))))
+    return "█" * filled + "░" * (width - filled)
+
+
+def format_quota_percent(fraction: float) -> str:
+    """Naformátuje zbývající kvótu v procentech (100% / 0% bez desetinné tečky)."""
+    pct = max(0.0, min(100.0, float(fraction) * 100.0))
+    if pct >= 99.95:
+        return "100%"
+    if pct <= 0.05:
+        return "0%"
+    return f"{pct:.1f}%"
+
+
+def format_quota_reset_delta(
+    reset_time: str,
+    *,
+    remaining_fraction: float,
+    lang: str,
+    now: datetime | None = None,
+) -> str:
+    """Naformátuje zbývající čas do obnovy limitu nebo stav plné dostupnosti."""
+    if remaining_fraction >= 0.9999:
+        return t("backend.tg_usage_quota_available", lang)
+    raw = (reset_time or "").strip()
+    if not raw:
+        return ""
+    try:
+        iso = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        reset_dt = datetime.fromisoformat(iso)
+        if reset_dt.tzinfo is None:
+            reset_dt = reset_dt.replace(tzinfo=timezone.utc)
+        ref_now = now if now is not None else datetime.now(timezone.utc)
+        if ref_now.tzinfo is None:
+            ref_now = ref_now.replace(tzinfo=timezone.utc)
+        total_sec = int((reset_dt - ref_now).total_seconds())
+    except Exception:
+        return ""
+    if total_sec <= 60:
+        return t("backend.tg_usage_quota_refreshing", lang)
+    total_min = total_sec // 60
+    days, rem_min = divmod(total_min, 24 * 60)
+    hours, minutes = divmod(rem_min, 60)
+    if days > 0:
+        dur = t("backend.tg_usage_dur_dh", lang, d=days, h=hours)
+    elif hours > 0:
+        dur = t("backend.tg_usage_dur_hm", lang, h=hours, m=minutes)
+    else:
+        dur = t("backend.tg_usage_dur_m", lang, m=max(1, minutes))
+    return t("backend.tg_usage_quota_refresh_in", lang, time=dur)
+
+
+def format_quota_section(
+    quota: QuotaSnapshot | None,
+    *,
+    lang: str,
+    now: datetime | None = None,
+) -> str:
+    """Naformátuje blok živých 5hodinových a týdenních limitů účtu Google Antigravity."""
+    if quota is None or not quota.available or not quota.groups:
+        return t("backend.tg_usage_quota_unavailable", lang)
+
+    order_map = {"5h": 0, "weekly": 1}
+    blocks: list[str] = [t("backend.tg_usage_quota_header", lang)]
+    for group in quota.groups:
+        if not group.buckets:
+            continue
+        lines = [f"**{group.name}**"]
+        sorted_buckets = sorted(
+            group.buckets,
+            key=lambda b: (order_map.get(b.window, 2), b.name),
+        )
+        for b in sorted_buckets:
+            if b.window == "5h":
+                label = t("backend.tg_usage_quota_5h", lang)
+            elif b.window == "weekly":
+                label = t("backend.tg_usage_quota_weekly", lang)
+            else:
+                label = b.name
+            bar = format_quota_bar(b.remaining_fraction)
+            pct = format_quota_percent(b.remaining_fraction)
+            delta = format_quota_reset_delta(
+                b.reset_time,
+                remaining_fraction=b.remaining_fraction,
+                lang=lang,
+                now=now,
+            )
+            reset_suffix = f" ({delta})" if delta else ""
+            lines.append(f"- {label}: `{bar}` **{pct}**{reset_suffix}")
+        blocks.append("\n".join(lines))
+    if len(blocks) <= 1:
+        return t("backend.tg_usage_quota_unavailable", lang)
+    return "\n\n".join(blocks)
+
+
 def format_usage_report(
     db: AssistantDB,
     settings: Settings,
@@ -78,8 +177,10 @@ def format_usage_report(
     owner: OwnerConfig | None = None,
     model_override: str | None = None,
     lang: str | None = None,
+    quota: QuotaSnapshot | None = None,
+    now: datetime | None = None,
 ) -> str:
-    """Sestaví lokalizovaný přehled spotřeby tokenů a délky aktuální konverzace."""
+    """Sestaví lokalizovaný přehled kvóty Antigravity, spotřeby tokenů a délky konverzace."""
     eff_lang = (
         normalize_language(lang)
         if lang is not None
@@ -145,9 +246,44 @@ def format_usage_report(
         model=active_model,
         conv_line=conv_line,
         nightly_line=nightly_line,
+        quota_section=format_quota_section(quota, lang=eff_lang, now=now),
         p24=_period_line(t("backend.tg_usage_24h", eff_lang), 1),
         p7=_period_line(t("backend.tg_usage_7d", eff_lang), 7),
         pall=_period_line(t("backend.tg_usage_all", eff_lang), None),
+    )
+
+
+async def build_usage_report(
+    db: AssistantDB,
+    settings: Settings,
+    runner: Any,
+    *,
+    session_key: str,
+    context_mode: str,
+    owner: OwnerConfig | None = None,
+    model_override: str | None = None,
+    lang: str | None = None,
+    force_refresh: bool = True,
+) -> str:
+    """Načte živou kvótu Antigravity (bez tokenů) a sestaví kompletní přehled `/usage`."""
+    quota: QuotaSnapshot | None = None
+    get_quota = getattr(runner, "get_quota_usage", None)
+    if callable(get_quota):
+        try:
+            raw_quota = await get_quota(force_refresh=force_refresh)
+            if isinstance(raw_quota, QuotaSnapshot):
+                quota = raw_quota
+        except Exception:
+            quota = None
+    return format_usage_report(
+        db,
+        settings,
+        session_key=session_key,
+        context_mode=context_mode,
+        owner=owner,
+        model_override=model_override,
+        lang=lang,
+        quota=quota,
     )
 
 
@@ -241,15 +377,17 @@ async def execute_web_slash_command(
     reply: str | None = None
 
     if not arg:
-        if cmd == "usage":
-            reply = format_usage_report(
+        if cmd in ("usage", "quota"):
+            reply = await build_usage_report(
                 db,
                 settings,
+                runner,
                 session_key=session_key,
                 context_mode=context_mode,
                 owner=owner,
                 model_override=model or None,
                 lang=eff_lang,
+                force_refresh=True,
             )
         elif cmd == "status":
             reply = await format_status_report(

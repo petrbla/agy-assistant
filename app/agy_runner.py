@@ -10,7 +10,7 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _SEMVER_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _DAILY_MEMORY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
+_QUOTA_PERCENT_RE = re.compile(r"^(\d+(?:[.,]\d+)?)\s*%$")
 _AGY_MANIFEST_BASE_URL = (
     "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests"
 )
@@ -97,6 +98,43 @@ class TokenUsage:
     output_tokens: int = 0
     total_tokens: int = 0
     estimated: bool = False
+
+
+@dataclass(frozen=True)
+class QuotaBucket:
+    """Jeden časový limit Antigravity kvóty (např. 5h nebo týdenní okno)."""
+
+    id: str
+    name: str
+    window: str
+    remaining_fraction: float
+    reset_time: str = ""
+    description: str = ""
+
+    @property
+    def remaining_percent(self) -> float:
+        pct = float(self.remaining_fraction) * 100.0
+        return max(0.0, min(100.0, pct))
+
+
+@dataclass(frozen=True)
+class QuotaGroup:
+    """Skupina modelů se sdílenou 5hodinovou a týdenní kvótou Antigravity."""
+
+    name: str
+    description: str = ""
+    buckets: tuple[QuotaBucket, ...] = ()
+
+
+@dataclass(frozen=True)
+class QuotaSnapshot:
+    """Aktuální stav 5hodinových a týdenních limitů Google Antigravity CLI."""
+
+    available: bool
+    groups: tuple[QuotaGroup, ...] = ()
+    description: str = ""
+    error: str | None = None
+    fetched_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -416,6 +454,150 @@ def parse_models_output(raw_stdout: str) -> list[str]:
     return models
 
 
+def _infer_quota_window(window: str, name: str, bucket_id: str) -> str:
+    """Normalizuje identifikátor časového okna kvóty (`5h` / `weekly`)."""
+    raw_w = (window or "").strip().lower()
+    combined = f"{raw_w} {name or ''} {bucket_id or ''}".lower()
+    if raw_w == "5h" or "five hour" in combined or "5-hour" in combined or "5h" in raw_w:
+        return "5h"
+    if raw_w == "weekly" or "weekly" in combined or "week" in combined:
+        return "weekly"
+    return raw_w
+
+
+def _parse_usage_tsv(text: str) -> tuple[QuotaGroup, ...]:
+    """Záložní parser tabulkového TSV výstupu `agy -p /usage`."""
+    groups_map: dict[str, list[QuotaBucket]] = {}
+    for raw_line in text.replace("\r", "\n").splitlines():
+        line = raw_line.strip()
+        if not line or "\t" not in line:
+            continue
+        cols = [c.strip() for c in line.split("\t")]
+        if len(cols) < 3:
+            continue
+        group_name, bucket_name, pct_str = cols[0], cols[1], cols[2]
+        reset_time = cols[3] if len(cols) > 3 else ""
+        match = _QUOTA_PERCENT_RE.fullmatch(pct_str)
+        if not group_name or not bucket_name or match is None:
+            continue
+        pct_val = float(match.group(1).replace(",", "."))
+        fraction = max(0.0, min(1.0, pct_val / 100.0))
+        win = _infer_quota_window("", bucket_name, "")
+        slug = re.sub(r"[^a-z0-9]+", "-", group_name.lower()).strip("-") or "group"
+        bucket = QuotaBucket(
+            id=f"{slug}-{win or 'quota'}",
+            name=bucket_name,
+            window=win,
+            remaining_fraction=fraction,
+            reset_time=reset_time,
+        )
+        groups_map.setdefault(group_name, []).append(bucket)
+    return tuple(QuotaGroup(name=gname, buckets=tuple(bkts)) for gname, bkts in groups_map.items())
+
+
+def parse_usage_quota_output(raw_stdout: str, *, fetched_at: str = "") -> QuotaSnapshot:
+    """Extrahuje živé 5hodinové a týdenní limity z výstupu `agy -p /usage --output-format json`."""
+    cleaned = _ANSI_ESCAPE_RE.sub("", raw_stdout).strip()
+    if not cleaned:
+        return QuotaSnapshot(available=False, fetched_at=fetched_at)
+
+    parsed = _try_parse_json(cleaned)
+    if isinstance(parsed, dict):
+        if str(parsed.get("status") or "").strip().upper() == "ERROR":
+            err_msg = str(parsed.get("error") or "").strip() or None
+            return QuotaSnapshot(available=False, error=err_msg, fetched_at=fetched_at)
+
+        cmd_block = parsed.get("command")
+        if isinstance(cmd_block, dict) and isinstance(cmd_block.get("data"), dict):
+            data = cmd_block["data"]
+            raw_groups = data.get("groups")
+            if isinstance(raw_groups, list):
+                groups: list[QuotaGroup] = []
+                for g in raw_groups:
+                    if not isinstance(g, dict):
+                        continue
+                    g_name = str(g.get("name") or "").strip()
+                    if not g_name:
+                        continue
+                    g_desc = str(g.get("description") or "").strip()
+                    raw_buckets = g.get("buckets")
+                    if not isinstance(raw_buckets, list):
+                        continue
+                    buckets: list[QuotaBucket] = []
+                    for b in raw_buckets:
+                        if not isinstance(b, dict):
+                            continue
+                        frac_raw = b.get("remaining_fraction")
+                        if isinstance(frac_raw, bool) or not isinstance(frac_raw, (int, float)):
+                            continue
+                        frac = max(0.0, min(1.0, float(frac_raw)))
+                        b_id = str(b.get("id") or "").strip()
+                        b_name = str(b.get("name") or "").strip()
+                        win = _infer_quota_window(str(b.get("window") or ""), b_name, b_id)
+                        buckets.append(
+                            QuotaBucket(
+                                id=b_id or f"{g_name}-{win or 'quota'}",
+                                name=b_name or win or "Quota",
+                                window=win,
+                                remaining_fraction=frac,
+                                reset_time=str(b.get("reset_time") or "").strip(),
+                                description=str(b.get("description") or "").strip(),
+                            )
+                        )
+                    if buckets:
+                        groups.append(
+                            QuotaGroup(name=g_name, description=g_desc, buckets=tuple(buckets))
+                        )
+                if groups:
+                    return QuotaSnapshot(
+                        available=True,
+                        groups=tuple(groups),
+                        description=str(data.get("description") or "").strip(),
+                        fetched_at=fetched_at,
+                    )
+
+        resp_text = parsed.get("response")
+        if isinstance(resp_text, str) and resp_text.strip():
+            tsv_groups = _parse_usage_tsv(resp_text)
+            if tsv_groups:
+                return QuotaSnapshot(available=True, groups=tsv_groups, fetched_at=fetched_at)
+        return QuotaSnapshot(available=False, fetched_at=fetched_at)
+
+    tsv_groups = _parse_usage_tsv(cleaned)
+    if tsv_groups:
+        return QuotaSnapshot(available=True, groups=tsv_groups, fetched_at=fetched_at)
+    return QuotaSnapshot(available=False, fetched_at=fetched_at)
+
+
+def quota_snapshot_to_dict(snapshot: QuotaSnapshot) -> dict[str, Any]:
+    """Převede `QuotaSnapshot` do JSON-serializovatelného slovníku pro REST API."""
+    return {
+        "available": bool(snapshot.available),
+        "description": snapshot.description,
+        "error": snapshot.error,
+        "fetched_at": snapshot.fetched_at,
+        "groups": [
+            {
+                "name": grp.name,
+                "description": grp.description,
+                "buckets": [
+                    {
+                        "id": b.id,
+                        "name": b.name,
+                        "window": b.window,
+                        "remaining_fraction": b.remaining_fraction,
+                        "remaining_percent": round(b.remaining_percent, 1),
+                        "reset_time": b.reset_time,
+                        "description": b.description,
+                    }
+                    for b in grp.buckets
+                ],
+            }
+            for grp in snapshot.groups
+        ],
+    }
+
+
 def _try_parse_json(text: str) -> Any:
     try:
         return json.loads(text)
@@ -699,12 +881,16 @@ class AgyRunner:
         self.on_schedule_updated = on_schedule_updated
         self._lock = asyncio.Lock()
         self._models_cache: tuple[float, list[str]] | None = None
+        self._quota_cache: tuple[float, QuotaSnapshot] | None = None
         self._latest_version_cache: tuple[float, str | None] | None = None
         self._warm_procs: dict[str, _WarmAgyProcess] = {}
         self._stream_json_supported: bool = True
 
     def invalidate_models_cache(self) -> None:
         self._models_cache = None
+
+    def invalidate_quota_cache(self) -> None:
+        self._quota_cache = None
 
     async def close_session(self, session_key: str) -> None:
         """Bezpečně ukončí teplý `agy` proces pro konkrétní `session_key`."""
@@ -856,8 +1042,85 @@ class AgyRunner:
         await self.close_all()
         self._latest_version_cache = None
         self.invalidate_models_cache()
+        self.invalidate_quota_cache()
         info = await self.get_version_info(force_refresh=True)
         return {"success": ok, "output": out, **info}
+
+    async def get_quota_usage(
+        self, *, force_refresh: bool = False, timeout: float = 15.0
+    ) -> QuotaSnapshot:
+        """Načte živou 5hodinovou a týdenní kvótu z `agy -p /usage --output-format json` (0 tokenů)."""
+        now = time.monotonic()
+        if not force_refresh and self._quota_cache is not None:
+            cached_at, cached_snap = self._quota_cache
+            ttl = 30.0 if cached_snap.available else 10.0
+            if (now - cached_at) < ttl:
+                return cached_snap
+
+        owner = self.db.get_owner()
+        eff_key = owner.gemini_api_key if owner is not None else self.settings.gemini_api_key
+        env = self.settings.subprocess_env(
+            gemini_api_key=eff_key,
+            home_dir=self.settings.effective_home_dir,
+        )
+        cwd = str(self.settings.workspace_dir) if self.settings.workspace_dir.is_dir() else None
+        fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.settings.agy_bin,
+                "-p",
+                "/usage",
+                "--output-format",
+                "json",
+                cwd=cwd,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout_s = stdout_b.decode("utf-8", errors="replace")
+            stderr_s = stderr_b.decode("utf-8", errors="replace").strip()
+            snap = parse_usage_quota_output(stdout_s, fetched_at=fetched_at)
+            if not snap.available and not snap.error:
+                err_detail = (
+                    stderr_s[:240]
+                    if stderr_s
+                    else (
+                        f"agy skončil s kódem {proc.returncode}"
+                        if proc.returncode not in (0, None)
+                        else None
+                    )
+                )
+                if err_detail:
+                    snap = QuotaSnapshot(
+                        available=False,
+                        groups=snap.groups,
+                        description=snap.description,
+                        error=err_detail,
+                        fetched_at=fetched_at,
+                    )
+        except asyncio.TimeoutError:
+            if proc is not None and proc.returncode is None:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+            snap = QuotaSnapshot(
+                available=False,
+                error="Vypršel časový limit při čtení kvóty agy.",
+                fetched_at=fetched_at,
+            )
+        except (FileNotFoundError, OSError) as exc:
+            snap = QuotaSnapshot(
+                available=False,
+                error=str(exc),
+                fetched_at=fetched_at,
+            )
+
+        self._quota_cache = (time.monotonic(), snap)
+        return snap
 
     async def list_models(self, *, force_refresh: bool = False) -> list[str]:
         now = time.monotonic()
@@ -1187,6 +1450,7 @@ class AgyRunner:
                         total_tokens=usage.total_tokens,
                         tokens_estimated=usage.estimated,
                     )
+                    self.invalidate_quota_cache()
                     return AgyResult(
                         text=text or t("prompts.empty_response", eff_lang),
                         conversation_id=final_conv_id,
@@ -1296,6 +1560,7 @@ class AgyRunner:
                     total_tokens=usage.total_tokens,
                     tokens_estimated=usage.estimated,
                 )
+                self.invalidate_quota_cache()
                 return AgyResult(
                     text=text or t("prompts.empty_response", eff_lang),
                     conversation_id=final_conv_id,

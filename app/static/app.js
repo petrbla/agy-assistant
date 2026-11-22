@@ -49,6 +49,7 @@
   let isAuthenticated = false;
   let inAgyOnboarding = false;
   let lastStatus = null;
+  let lastQuotaData = null;
   let lastAppVerInfo = null;
   let lastOauthState = null;
   let authScreenStatusKey = "";
@@ -349,6 +350,7 @@
       }
       renderChat();
       if (lastOauthState) renderOauthState(lastOauthState);
+      if (lastQuotaData) renderAgyQuota(lastQuotaData);
 
       if (persistBackend && isAuthenticated) {
         await api("/api/settings", {
@@ -1855,7 +1857,118 @@
     return task.cron_expr;
   }
 
-  async function loadOps() {
+  function formatQuotaPctJs(fraction) {
+    const pct = Math.max(0, Math.min(100, Number(fraction || 0) * 100));
+    if (pct >= 99.95) return "100%";
+    if (pct <= 0.05) return "0%";
+    return `${pct.toFixed(1)}%`;
+  }
+
+  function formatQuotaCountdown(resetTime, remainingFraction) {
+    if (Number(remainingFraction || 0) >= 0.9999) {
+      return t("quota_available");
+    }
+    const raw = (resetTime || "").trim();
+    if (!raw) return "";
+    const resetMs = Date.parse(raw);
+    if (!Number.isFinite(resetMs)) return "";
+    const totalSec = Math.floor((resetMs - Date.now()) / 1000);
+    if (totalSec <= 60) return t("quota_refreshing");
+    const totalMin = Math.floor(totalSec / 60);
+    const days = Math.floor(totalMin / (24 * 60));
+    const remMin = totalMin % (24 * 60);
+    const hours = Math.floor(remMin / 60);
+    const minutes = remMin % 60;
+    let dur;
+    if (days > 0) dur = t("quota_dur_dh", { d: days, h: hours });
+    else if (hours > 0) dur = t("quota_dur_hm", { h: hours, m: minutes });
+    else dur = t("quota_dur_m", { m: Math.max(1, minutes) });
+    return t("quota_refresh_in", { time: dur });
+  }
+
+  function renderAgyQuota(data) {
+    const body = $("agyQuotaBody");
+    const updEl = $("agyQuotaUpdated");
+    if (!body) return;
+    if (updEl) {
+      if (data && data.fetched_at) {
+        try {
+          const dt = new Date(data.fetched_at);
+          updEl.textContent = !isNaN(dt)
+            ? dt.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" })
+            : "";
+        } catch (_) {
+          updEl.textContent = "";
+        }
+      } else {
+        updEl.textContent = "";
+      }
+    }
+
+    const groups = data && data.available && Array.isArray(data.groups) ? data.groups : [];
+    if (!groups.length) {
+      body.innerHTML = `<div class="small text-body-secondary">${escapeHtml(t("quota_unavailable"))}</div>`;
+      return;
+    }
+
+    const orderMap = { "5h": 0, weekly: 1 };
+    const cardsHtml = groups.map((grp) => {
+      const buckets = [...(Array.isArray(grp.buckets) ? grp.buckets : [])].sort((a, b) => {
+        const oa = orderMap[a.window] ?? 2;
+        const ob = orderMap[b.window] ?? 2;
+        return oa !== ob ? oa - ob : String(a.name || "").localeCompare(String(b.name || ""));
+      });
+      const rowsHtml = buckets.map((b) => {
+        const frac = Math.max(0, Math.min(1, Number(b.remaining_fraction ?? 0)));
+        const pct = frac * 100;
+        const pctLabel = formatQuotaPctJs(frac);
+        const winLabel = b.window === "5h"
+          ? t("quota_window_5h")
+          : (b.window === "weekly" ? t("quota_window_weekly") : (b.name || ""));
+        const barColor = pct >= 50 ? "bg-success" : (pct >= 20 ? "bg-warning" : "bg-danger");
+        const countdown = formatQuotaCountdown(b.reset_time, frac);
+        return (
+          `<div class="mb-2 last-mb-0">` +
+            `<div class="d-flex align-items-center justify-content-between gap-2 small">` +
+              `<span class="fw-medium">${escapeHtml(winLabel)}</span>` +
+              `<span class="fw-bold font-monospace">${escapeHtml(pctLabel)}</span>` +
+            `</div>` +
+            `<div class="progress quota-progress my-1" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100">` +
+              `<div class="progress-bar ${barColor}" style="width: ${pct.toFixed(1)}%"></div>` +
+            `</div>` +
+            (countdown ? `<div class="small text-body-secondary">${escapeHtml(countdown)}</div>` : "") +
+          `</div>`
+        );
+      }).join("");
+      return (
+        `<div class="col-md-6">` +
+          `<div class="quota-group-box border rounded-3 p-3 h-100">` +
+            `<div class="fw-semibold small mb-2">${escapeHtml(grp.name || "")}</div>` +
+            rowsHtml +
+          `</div>` +
+        `</div>`
+      );
+    }).join("");
+
+    body.innerHTML = `<div class="row g-3">${cardsHtml}</div>`;
+  }
+
+  async function loadAgyQuota(refresh = false) {
+    const btn = $("refreshQuotaBtn");
+    if (btn) btn.disabled = true;
+    try {
+      const data = await api(`/api/agy/quota?refresh=${refresh ? "true" : "false"}`);
+      lastQuotaData = data;
+      renderAgyQuota(data);
+    } catch (_) {
+      renderAgyQuota({ available: false });
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function loadOps({ refreshQuota = false } = {}) {
+    loadAgyQuota(refreshQuota);
     try {
       const [s, runs, u1h, u1, u7, uAll, tasks] = await Promise.all([
         api("/api/status"),
@@ -2008,7 +2121,8 @@
     }
   };
 
-  $("refreshOpsBtn").onclick = loadOps;
+  if ($("refreshQuotaBtn")) $("refreshQuotaBtn").onclick = () => loadAgyQuota(true);
+  $("refreshOpsBtn").onclick = () => loadOps({ refreshQuota: true });
   $("runHeartbeatBtn").onclick = async () => {
     toast(t("toast_hb_running"), "warn");
     const r = await api("/api/heartbeat/run", { method: "POST" });

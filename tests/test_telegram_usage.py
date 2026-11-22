@@ -272,3 +272,114 @@ async def test_telegram_commands_with_lang_placeholder(tmp_path: Path) -> None:
     finally:
         await bot.bot.session.close()
 
+
+async def test_usage_report_with_live_antigravity_quota(tmp_path: Path) -> None:
+    from datetime import datetime, timezone
+
+    from app.agy_runner import QuotaBucket, QuotaGroup, QuotaSnapshot
+    from app.chat_commands import format_usage_report
+
+    settings = Settings(
+        workspace_dir=tmp_path / "ws",
+        data_dir=tmp_path / "data",
+        telegram_bot_token="123456:TESTTOKEN_FOR_UNIT_TESTS_ONLY",
+        telegram_allowed_users="111",
+    )
+    (tmp_path / "ws").mkdir(parents=True, exist_ok=True)
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    db.update_owner(language="cs", agy_model="gemini-4-neon-low")
+
+    snap = QuotaSnapshot(
+        available=True,
+        groups=(
+            QuotaGroup(
+                name="Gemini Models",
+                buckets=(
+                    QuotaBucket(
+                        id="gemini-weekly",
+                        name="Weekly Limit Remaining",
+                        window="weekly",
+                        remaining_fraction=0.7104,
+                        reset_time="2026-11-28T10:48:15Z",
+                    ),
+                    QuotaBucket(
+                        id="gemini-5h",
+                        name="Five Hour Limit Remaining",
+                        window="5h",
+                        remaining_fraction=0.9336,
+                        reset_time="2026-11-22T22:32:02Z",
+                    ),
+                ),
+            ),
+            QuotaGroup(
+                name="Claude and GPT models",
+                buckets=(
+                    QuotaBucket(
+                        id="3p-5h",
+                        name="Five Hour Limit Remaining",
+                        window="5h",
+                        remaining_fraction=1.0,
+                        reset_time="2026-11-22T23:42:52Z",
+                    ),
+                    QuotaBucket(
+                        id="3p-weekly",
+                        name="Weekly Limit Remaining",
+                        window="weekly",
+                        remaining_fraction=1.0,
+                        reset_time="2026-11-29T18:42:52Z",
+                    ),
+                ),
+            ),
+        ),
+        fetched_at="2026-11-22T18:42:52Z",
+    )
+    fixed_now = datetime(2026, 11, 22, 18, 43, 0, tzinfo=timezone.utc)
+    report_cs = format_usage_report(
+        db,
+        settings,
+        session_key="tg:111:auto",
+        context_mode="auto",
+        owner=db.get_owner(),
+        lang="cs",
+        quota=snap,
+        now=fixed_now,
+    )
+    assert "Gemini Models" in report_cs
+    assert "Claude and GPT models" in report_cs
+    assert "5hodinový limit" in report_cs
+    assert "Týdenní limit" in report_cs
+    assert "93.4%" in report_cs
+    assert "71.0%" in report_cs
+    assert "100%" in report_cs
+    assert "obnova za 3 h 49 min" in report_cs
+    assert "obnova za 5 d 16 h" in report_cs
+    assert "plná kvóta k dispozici" in report_cs
+    assert report_cs.index("5hodinový limit") < report_cs.index("Týdenní limit")
+
+    # Ověření Telegram příkazů /usage a /quota včetně asynchronního načtení přes runner.get_quota_usage
+    runner = AsyncMock()
+    runner.get_quota_usage = AsyncMock(return_value=snap)
+    bot = TelegramAssistantBot(settings, db, WorkspaceMemory(tmp_path / "ws"), runner)
+    bot.bot.send_message = AsyncMock()
+    try:
+        handlers = {h.callback.__name__: h.callback for h in bot.dp.message.handlers}
+        assert "cmd_usage" in handlers
+
+        for idx, cmd_text in enumerate(("/usage", "/quota"), start=201):
+            msg = SimpleNamespace(
+                chat=SimpleNamespace(id=111),
+                from_user=SimpleNamespace(id=111),
+                message_id=idx,
+                text=cmd_text,
+            )
+            await handlers["cmd_usage"](msg)
+
+        assert runner.get_quota_usage.await_count == 2
+        assert bot.bot.send_message.await_count == 2
+        sent_html = str(bot.bot.send_message.await_args.kwargs.get("text") or "")
+        assert "93.4%" in sent_html
+        assert "71.0%" in sent_html
+    finally:
+        await bot.bot.session.close()
+
