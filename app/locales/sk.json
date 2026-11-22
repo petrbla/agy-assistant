@@ -483,7 +483,8 @@
     "mem_tb_quote": "Citácia",
     "mem_tb_code": "Kód",
     "mem_tb_link": "Odkaz",
-    "mem_preview_empty": "Vyberte súbor v ľavom paneli pre zobrazenie alebo úpravu."
+    "mem_preview_empty": "Vyberte súbor v ľavom paneli pre zobrazenie alebo úpravu.",
+    "perms_state_partial": "Čiastočne povolené"
   },
   "backend": {
     "channel_auto": "Auto",

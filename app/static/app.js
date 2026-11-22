@@ -2971,44 +2971,38 @@
           acctHead.append(metaBox, acctActions);
           box.appendChild(acctHead);
 
+          const acctTools = Array.isArray(acct.tools) ? acct.tools : [];
           const appendPermRow = (parentEl, spec) => {
             const row = document.createElement("div");
-            row.className = "form-check form-switch d-flex justify-content-between align-items-center gap-2 ps-0 mb-0";
-            const swId = `perm_${p.name}_${acct.id}_${spec.key}`;
-            const lbl = document.createElement("label");
-            lbl.className = "form-check-label small flex-grow-1 mb-0";
-            lbl.htmlFor = swId;
+            row.className = "d-flex justify-content-between align-items-center gap-2";
+            const lbl = document.createElement("span");
+            lbl.className = "small text-body flex-grow-1";
             lbl.textContent = t(spec.label_key);
-            const cb = document.createElement("input");
-            cb.className = "form-check-input m-0 flex-shrink-0";
-            cb.type = "checkbox";
-            cb.role = "switch";
-            cb.id = swId;
-            cb.checked = Boolean((acct.permissions || {})[spec.key]);
-            cb.onchange = async () => {
-              const prev = !cb.checked;
-              const updatedPerms = { ...(acct.permissions || {}), [spec.key]: cb.checked };
-              try {
-                const res = await api(`/api/plugins/${encodeURIComponent(p.name)}/accounts/${acct.id}`, {
-                  method: "PUT",
-                  body: JSON.stringify({ permissions: updatedPerms }),
-                });
-                if (res && res.account) {
-                  Object.assign(acct, res.account);
-                } else {
-                  acct.permissions = updatedPerms;
-                }
-                const sumSpan = box.querySelector(`[data-acct-summary-for="${acct.id}"]`);
-                if (sumSpan && Array.isArray(acct.tools) && acct.tools.length) {
-                  sumSpan.textContent = t("perms_summary_counts", countToolModes(acct.tools));
-                }
-                toast(t("toast_plugin_perms_saved", { name: p.display_name || p.name }));
-              } catch (err) {
-                cb.checked = prev;
-                toast(err.message, "err");
+
+            const badge = document.createElement("span");
+            const grpTools = acctTools.filter((item) => item.summary_key === spec.key);
+            if (grpTools.length > 0) {
+              const counts = countToolModes(grpTools);
+              badge.title = t("perms_summary_counts", counts);
+              if (counts.allow === grpTools.length) {
+                badge.className = badgeCls("ok");
+                badge.textContent = t("perms_mode_allow");
+              } else if (counts.block === grpTools.length) {
+                badge.className = badgeCls("err");
+                badge.textContent = t("perms_mode_block");
+              } else if (counts.ask === grpTools.length) {
+                badge.className = badgeCls("warn");
+                badge.textContent = t("perms_mode_ask");
+              } else {
+                badge.className = badgeCls("warn");
+                badge.textContent = t("perms_state_partial");
               }
-            };
-            row.append(lbl, cb);
+            } else {
+              const on = Boolean((acct.permissions || {})[spec.key]);
+              badge.className = on ? badgeCls("ok") : badgeCls("err");
+              badge.textContent = t(on ? "perms_mode_allow" : "perms_mode_block");
+            }
+            row.append(lbl, badge);
             parentEl.appendChild(row);
           };
 
@@ -3020,7 +3014,6 @@
             basicSpecs.forEach((sp) => appendPermRow(box, sp));
           }
 
-          const acctTools = Array.isArray(acct.tools) ? acct.tools : [];
           const footerRow = document.createElement("div");
           footerRow.className = "d-flex align-items-center justify-content-between flex-wrap gap-2 mt-1";
 

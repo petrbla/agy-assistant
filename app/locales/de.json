@@ -483,7 +483,8 @@
     "mem_tb_quote": "Zitat",
     "mem_tb_code": "Code",
     "mem_tb_link": "Link",
-    "mem_preview_empty": "Wähle links eine Datei zum Ansehen oder Bearbeiten aus."
+    "mem_preview_empty": "Wähle links eine Datei zum Ansehen oder Bearbeiten aus.",
+    "perms_state_partial": "Teilweise erlaubt"
   },
   "backend": {
     "channel_auto": "Auto",

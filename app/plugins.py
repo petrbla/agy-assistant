@@ -49,6 +49,29 @@ _CONNECT_KEYS: dict[str, str] = {
     "ctrl_c": "\x03",
 }
 
+_TERMINAL_AUTO_RESPONSE_RE = re.compile(
+    r"^(?:"
+    r"\x1b\[[IO]"  # Focus In / Focus Out (DECSET 1004)
+    r"|\x1b\[\??\d+;\d+R"  # Cursor Position Report (CPR / DECXCPR)
+    r"|\x1b\[\??\d+(?:;\d+)*n"  # Device Status Report (DSR)
+    r"|\x1b\[[?>=]?\d*(?:;\d*)*c"  # Device Attributes (DA1 / DA2 / DA3)
+    r"|\x1b\[\??\d+;\d+\$y"  # Mode Report (DECRPM)
+    r"|\x1b\[\?\d+u"  # Kitty keyboard protocol query reply
+    r"|\x1b\[(?:4|6|8);\d+;\d+t"  # XTWINOPS reply
+    r"|\x1b\[<\d+;\d+;\d+[Mm]"  # SGR mouse motion / wheel / click
+    r"|\x1b\][0-9]+;[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)"  # OSC color/title replies (OSC 10/11/12...)
+    r"|\x1bP[^\x1b]*\x1b\\"  # DCS replies (XTVERSION, DECRQSS, XTGETTCAP)
+    r"|\x1b_[^\x1b]*\x1b\\"  # APC replies
+    r")+$"
+)
+
+
+def is_terminal_auto_response(data: str) -> bool:
+    """Vrátí True, pokud vstup z xterm.js obsahuje výhradně automatické odpovědi terminálu."""
+    if not data:
+        return False
+    return bool(_TERMINAL_AUTO_RESPONSE_RE.fullmatch(data))
+
 FEATURED_PLUGIN_NAMES: tuple[str, ...] = ("gmail", "gcalendar", "gdrive")
 _GOOGLE_CLI_PLUGINS: tuple[str, ...] = (
     "gmail",
@@ -2303,8 +2326,10 @@ class PluginManager:
         self.db = db
         self._connect_state = PluginConnectState()
         self._raw_output = ""
+        self._raw_total_len: int = 0
         self._proc: subprocess.Popen[bytes] | None = None
         self._master_fd: int | None = None
+        self._pty_size: tuple[int, int] = (0, 0)
         self._reader_task: asyncio.Task[None] | None = None
         self._nav_task: asyncio.Task[None] | None = None
         self._connect_subscribers: set[asyncio.Queue[str | None]] = set()
@@ -3031,10 +3056,11 @@ class PluginManager:
                 queue.put_nowait(data)
 
     def write_connect_raw(self, data: str) -> None:
-        """Zapíše surové znaky z webového terminálu do PTY a předá ovládání uživateli."""
+        """Zapíše surové znaky z webového terminálu do PTY (uživatelský vstup převezme ovládání)."""
         if not data or not self._connect_state.running or self._master_fd is None:
             return
-        self._manual_override = True
+        if not is_terminal_auto_response(data):
+            self._manual_override = True
         with contextlib.suppress(OSError):
             os.write(self._master_fd, data.encode("utf-8"))
 
@@ -3042,6 +3068,9 @@ class PluginManager:
         """Upraví velikost PTY okna podle rozměrů xterm.js v modalu."""
         eff_cols = max(40, min(int(cols), 300))
         eff_rows = max(12, min(int(rows), 100))
+        if (eff_cols, eff_rows) == self._pty_size:
+            return
+        self._pty_size = (eff_cols, eff_rows)
         if self._master_fd is not None and fcntl is not None and termios is not None:
             with contextlib.suppress(OSError):
                 fcntl.ioctl(
@@ -3181,6 +3210,8 @@ class PluginManager:
         self._proc = proc
         self._master_fd = master_fd
         self._raw_output = ""
+        self._raw_total_len = 0
+        self._pty_size = (eff_cols, eff_rows)
         self._connect_state = PluginConnectState(
             running=True,
             plugin_name=safe_name,
@@ -3217,6 +3248,7 @@ class PluginManager:
                 raw_text = chunk.decode("utf-8", errors="replace")
                 self._broadcast_connect(raw_text)
                 self._raw_output = (self._raw_output + raw_text)[-48000:]
+                self._raw_total_len += len(raw_text)
                 cleaned = clean_terminal_output(self._raw_output)[-16000:]
                 self._connect_state.output = cleaned
                 urls = extract_urls(cleaned)
@@ -3279,25 +3311,67 @@ class PluginManager:
     ) -> None:
         """Automaticky projde případného průvodce, otevře `/plugin`, vybere plugin a spustí OAuth."""
 
+        def _raw_cursor() -> int:
+            return self._raw_total_len if self._raw_total_len > 0 else len(self._raw_output)
+
         def _recent_lower(mark: int) -> str:
+            if self._raw_total_len > 0:
+                delta = self._raw_total_len - mark
+                if delta <= 0 or not self._raw_output:
+                    return ""
+                tail = self._raw_output[-min(delta, len(self._raw_output)) :]
+                return clean_terminal_output(tail).lower()
             if mark <= 0 and not self._raw_output and self._connect_state.output:
                 return self._connect_state.output.lower()
             if mark > len(self._raw_output):
                 return self._connect_state.output.lower()
             return clean_terminal_output(self._raw_output[mark:]).lower()
 
+        _tui_ready_markers = (
+            "for shortcuts",
+            "auto mode",
+            "shift+tab",
+            "plan mode",
+            "ask mode",
+            "choose your color scheme",
+            "[next]",
+            "[done]",
+            "terms of service",
+            "antigravity.google/terms",
+            "trust this",
+            "do you trust",
+            "trust workspace",
+            "press enter",
+            "accept and continue",
+            "installed",
+            "discover",
+            "marketplace:",
+            "sign in",
+            "sign-in:",
+            "ready >",
+        )
+
         try:
-            # 1. Počkej, až TUI naběhne (první výstup + krátká prodleva nebo max 8 s)
-            for _ in range(40):
+            # 1. Počkej, až se v TUI vykreslí připravená obrazovka nebo průvodce (ne jen první ANSI bajty)
+            visible_ticks = 0
+            for _ in range(50):
                 if (
                     not self._connect_state.running
                     or self._master_fd is None
                     or self._manual_override
                 ):
                     return
-                if self._connect_state.output.strip() or self._raw_output.strip():
-                    await asyncio.sleep(1.2)
+                vis = (
+                    self._connect_state.output or clean_terminal_output(self._raw_output)
+                ).lower()
+                if any(tok in vis for tok in _tui_ready_markers):
+                    await asyncio.sleep(0.5)
                     break
+                if len(vis.strip()) >= 20:
+                    visible_ticks += 1
+                    if visible_ticks >= 12:
+                        await asyncio.sleep(0.5)
+                        break
                 await asyncio.sleep(0.2)
             else:
                 await asyncio.sleep(0.5)
@@ -3343,20 +3417,20 @@ class PluginManager:
                     )
                 )
                 if is_step1_color:
-                    screen_mark = len(self._raw_output)
+                    screen_mark = _raw_cursor()
                     self._write_pty("\r" if next_attempts == 0 else "\t\r")
                     next_attempts += 1
                     await asyncio.sleep(1.3)
                     continue
                 if is_step2_done:
-                    screen_mark = len(self._raw_output)
+                    screen_mark = _raw_cursor()
                     seq = ("\r", "\x1b[C\r", "\t\r")[min(done_attempts, 2)]
                     self._write_pty(seq)
                     done_attempts += 1
                     await asyncio.sleep(1.3)
                     continue
                 if is_simple_prompt:
-                    screen_mark = len(self._raw_output)
+                    screen_mark = _raw_cursor()
                     self._write_pty("\r")
                     await asyncio.sleep(1.2)
                     continue
@@ -3368,10 +3442,10 @@ class PluginManager:
                 or self._manual_override
             ):
                 return
-            plugin_mark = len(self._raw_output)
+            plugin_mark = _raw_cursor()
             self._write_pty("/plugin\r")
 
-            # 2. Vyčkej na obrazovku Správce pluginů
+            # 2. Vyčkej na obrazovku Správce pluginů (pozor na autocomplete řádek "Manage plugins")
             for step in range(40):
                 if (
                     not self._connect_state.running
@@ -3380,10 +3454,31 @@ class PluginManager:
                 ):
                     return
                 low = _recent_lower(plugin_mark)
-                if "installed" in low or "discover" in low or "plugins" in low:
+                if "installed" in low or "discover" in low or "marketplaces" in low:
                     break
-                if step == 15:
+                if step == 8 and "/plugin" in low:
+                    self._write_pty("\r")
+                elif step == 18:
+                    self._write_pty("\x1b")
+                    await asyncio.sleep(0.2)
+                    if (
+                        not self._connect_state.running
+                        or self._connect_state.auth_url
+                        or self._manual_override
+                    ):
+                        return
+                    self._write_pty("\x15")
+                    await asyncio.sleep(0.1)
+                    if (
+                        not self._connect_state.running
+                        or self._connect_state.auth_url
+                        or self._manual_override
+                    ):
+                        return
+                    plugin_mark = _raw_cursor()
                     self._write_pty("/plugin\r")
+                elif step == 28 and "/plugin" in low:
+                    self._write_pty("\r")
                 await asyncio.sleep(0.2)
 
             if (
@@ -3393,7 +3488,7 @@ class PluginManager:
             ):
                 return
             await asyncio.sleep(0.5)
-            detail_mark = len(self._raw_output)
+            detail_mark = _raw_cursor()
             # Napiš název pluginu pro odfiltrování v záložce Installed a rozbal detail
             self._write_pty(plugin_name)
             await asyncio.sleep(0.6)
@@ -3472,6 +3567,7 @@ class PluginManager:
                 self._write_pty("y")
                 await asyncio.sleep(1.5)
                 self._raw_output = ""
+                self._raw_total_len = 0
                 self._connect_state.output = ""
                 if (
                     not self._connect_state.running
@@ -3525,6 +3621,7 @@ class PluginManager:
             raise ValueError(f"Nepodporovaná klávesa: {key!r}")
         if not self._connect_state.running or self._master_fd is None:
             raise RuntimeError("Relace připojování pluginu právě neběží.")
+        self._manual_override = True
         os.write(self._master_fd, seq.encode("utf-8"))
         await asyncio.sleep(0.35)
         return self.get_connect_state()
@@ -3533,6 +3630,7 @@ class PluginManager:
         """Pošle textový vstup (např. autorizační kód nebo volbu) do PTY relace."""
         if not self._connect_state.running or self._master_fd is None:
             raise RuntimeError("Relace připojování pluginu právě neběží.")
+        self._manual_override = True
         payload = (value.rstrip("\r\n") + "\r").encode("utf-8")
         os.write(self._master_fd, payload)
         await asyncio.sleep(0.5)
@@ -3610,5 +3708,7 @@ class PluginManager:
         self._reader_task = None
         self._nav_task = None
         self._raw_output = ""
+        self._raw_total_len = 0
+        self._pty_size = (0, 0)
         self._connect_state.running = False
         self._broadcast_connect(None)

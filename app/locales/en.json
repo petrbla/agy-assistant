@@ -483,7 +483,8 @@
     "mem_tb_quote": "Quote",
     "mem_tb_code": "Code",
     "mem_tb_link": "Link",
-    "mem_preview_empty": "Select a file from the left panel to view or edit it."
+    "mem_preview_empty": "Select a file from the left panel to view or edit it.",
+    "perms_state_partial": "Partially allowed"
   },
   "backend": {
     "channel_auto": "Auto",

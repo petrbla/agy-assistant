@@ -445,13 +445,39 @@ def ensure_profile_home_seeded(settings: Settings, profile_key: str) -> Path:
         with contextlib.suppress(OSError):
             os.symlink(main_plugins, prof_plugins, target_is_directory=True)
 
-    # Sdílej globální config.json (zapnuté pluginy a userSettings) pokud v profilu ještě není
+    # Sdílej globální config.json (zapnuté pluginy a userSettings) pokud v profilu ještě není,
+    # případně doplň nově nainstalované pluginy do již existujícího profilového config.json
     main_cfg = main_home / ".gemini" / "config" / "config.json"
     prof_cfg = prof_home / ".gemini" / "config" / "config.json"
-    if main_cfg.is_file() and not main_cfg.is_symlink() and not prof_cfg.exists():
-        prof_cfg.parent.mkdir(parents=True, exist_ok=True)
-        with contextlib.suppress(OSError):
-            shutil.copy2(main_cfg, prof_cfg)
+    if main_cfg.is_file() and not main_cfg.is_symlink():
+        if not prof_cfg.exists():
+            prof_cfg.parent.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                shutil.copy2(main_cfg, prof_cfg)
+        elif prof_cfg.is_file() and not prof_cfg.is_symlink():
+            try:
+                main_data = json.loads(main_cfg.read_text(encoding="utf-8"))
+                prof_data = json.loads(prof_cfg.read_text(encoding="utf-8"))
+                if isinstance(main_data, dict) and isinstance(prof_data, dict):
+                    main_plugins = main_data.get("plugins")
+                    if isinstance(main_plugins, dict):
+                        prof_plugins = prof_data.get("plugins")
+                        if not isinstance(prof_plugins, dict):
+                            prof_plugins = {}
+                        changed = False
+                        merged_plugins = dict(prof_plugins)
+                        for pk, pv in main_plugins.items():
+                            if pk not in merged_plugins:
+                                merged_plugins[pk] = pv
+                                changed = True
+                        if changed or not isinstance(prof_data.get("plugins"), dict):
+                            prof_data["plugins"] = merged_plugins
+                            prof_cfg.write_text(
+                                json.dumps(prof_data, indent=2, ensure_ascii=False) + "\n",
+                                encoding="utf-8",
+                            )
+            except (OSError, json.JSONDecodeError):
+                pass
 
     # Zkopíruj hlavní OAuth soubory a onboarding/TOS stav agy napříč známými CLI složkami
     # (bez tokenů pluginů v mcp_oauth_tokens.json, aby měl každý účet izolované OAuth)

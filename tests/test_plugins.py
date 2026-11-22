@@ -27,6 +27,7 @@ from app.plugins import (
     forward_localhost_callback_sync,
     get_profile_home_dir,
     is_mcp_config_required_error,
+    is_terminal_auto_response,
     normalize_plugin_permissions,
     should_set_agy_unattended,
     validate_localhost_callback_url,
@@ -1251,9 +1252,13 @@ def test_ensure_profile_home_seeded_copies_main_oauth_and_state_without_plugin_t
     )
 
     # Simulace neúspěšného předchozího spuštění profilu bez platného OAuth
+    # a dřívějšího config.json bez záznamu pro nověji nainstalovaný plugin `gmail`
     stale_prof = main_home / "profiles" / "pracovni" / ".gemini" / "antigravity-cli"
     stale_prof.mkdir(parents=True, exist_ok=True)
     (stale_prof / "jetski_state.pbtxt").write_text("# empty state\n", encoding="utf-8")
+    stale_prof_cfg = main_home / "profiles" / "pracovni" / ".gemini" / "config"
+    stale_prof_cfg.mkdir(parents=True, exist_ok=True)
+    (stale_prof_cfg / "config.json").write_text('{"plugins": {}}\n', encoding="utf-8")
 
     s = Settings(workspace_dir=tmp_path / "ws", data_dir=tmp_path / "data", home_dir=main_home)
     prof_home = ensure_profile_home_seeded(s, "pracovni")
@@ -1261,7 +1266,10 @@ def test_ensure_profile_home_seeded_copies_main_oauth_and_state_without_plugin_t
     assert "sample-refresh-token" in (
         prof_home / ".gemini" / "antigravity-cli" / "jetski_state.pbtxt"
     ).read_text(encoding="utf-8")
-    assert (prof_home / ".gemini" / "config" / "config.json").is_file()
+    prof_cfg_data = json.loads(
+        (prof_home / ".gemini" / "config" / "config.json").read_text(encoding="utf-8")
+    )
+    assert prof_cfg_data["plugins"]["gmail"]["enabled"] is True
     seeded_settings = json.loads(
         (prof_home / ".gemini" / "antigravity-cli" / "settings.json").read_text(encoding="utf-8")
     )
@@ -1328,6 +1336,131 @@ async def test_auto_navigate_passes_agy_onboarding_wizard_to_gmail_signin(
     await pm._auto_navigate_to_signin("gmail", force_reconnect=True, profile_key="pracovni")
 
     assert sent[:4] == ["\r", "\r", "/plugin\r", "gmail"]
+    assert "accounts.google.com/o/oauth2/v2/auth" in pm._connect_state.auth_url
+
+
+async def test_terminal_auto_responses_do_not_abort_auto_navigate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.plugins as plugins_mod
+
+    for auto_seq in (
+        "\x1b[I",
+        "\x1b[O",
+        "\x1b[1;1R",
+        "\x1b[?24;80R",
+        "\x1b[0n",
+        "\x1b[?6n",
+        "\x1b[?1;2c",
+        "\x1b[>0;276;0c",
+        "\x1b[?2026;2$y",
+        "\x1b[?0u",
+        "\x1b[4;600;800t",
+        "\x1b[<35;42;12M",
+        "\x1b[<0;10;5m",
+        "\x1b]11;rgb:0b0b/1212/2020\x1b\\",
+        "\x1b]10;rgb:e2e2/e8e8/f0f0\x07",
+        "\x1bP>|xterm.js(5.5.0)\x1b\\",
+        "\x1b_G1\x1b\\",
+        "\x1b[I\x1b]11;rgb:0b0b/1212/2020\x1b\\\x1b[?1;2c\x1b[1;1R",
+    ):
+        assert is_terminal_auto_response(auto_seq) is True, f"Mělo být rozpoznáno: {auto_seq!r}"
+
+    for user_seq in (
+        "",
+        "\r",
+        "\t",
+        "\x1b",
+        " ",
+        "\x03",
+        "a",
+        "gmail",
+        "\x1b[A",
+        "\x1b[B",
+        "/plugin\r",
+        "a\x1b[I",
+        "\x1b[I\r",
+    ):
+        assert is_terminal_auto_response(user_seq) is False, f"Nesmí být rozpoznáno jako auto-odpověď: {user_seq!r}"
+
+    s = Settings(workspace_dir=tmp_path / "ws", data_dir=tmp_path / "data", home_dir=tmp_path / "home")
+    db = AssistantDB(s.db_path)
+    pm = PluginManager(s, db)
+
+    written_pty: list[tuple[int, bytes]] = []
+    monkeypatch.setattr(plugins_mod.os, "write", lambda fd, data: written_pty.append((fd, data)) or len(data))
+
+    pm._master_fd = 99
+    pm._connect_state = PluginConnectState(running=True, plugin_name="gmail")
+    pm._manual_override = False
+
+    # Automatická odpověď terminálu se předá agy do PTY, ale nezruší _auto_navigate_to_signin
+    pm.write_connect_raw("\x1b[I\x1b]11;rgb:0b0b/1212/2020\x1b\\\x1b[?1;2c")
+    assert len(written_pty) == 1
+    assert pm._manual_override is False
+
+    # Skutečný stisk šipky od uživatele převezme ovládání
+    pm.write_connect_raw("\x1b[B")
+    assert len(written_pty) == 2
+    assert pm._manual_override is True
+
+    # Simulace kompletní automatické navigace od uvítací obrazovky agy 1.5.14 přes autocomplete `/plugin`
+    async def _fast_sleep(_sec: float) -> None:
+        return None
+
+    monkeypatch.setattr(plugins_mod.asyncio, "sleep", _fast_sleep)
+
+    pm._manual_override = False
+    pm._raw_output = (
+        "Antigravity CLI 1.5.14\n"
+        "Introducing Gemini 4 Neon\n"
+        "> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n"
+        "? for shortcuts\n"
+    )
+    pm._raw_total_len = len(pm._raw_output)
+    pm._connect_state = PluginConnectState(running=True, plugin_name="gmail")
+
+    # Vstup z xterm.js focus/DA/OSC během startu nesmí navigaci přerušit
+    pm.write_connect_raw("\x1b[I\x1b]11;rgb:0b0b/1212/2020\x1b\\\x1b[?1;2c")
+
+    sent: list[str] = []
+    stage = 0
+
+    def _fake_write_nav(data: str) -> None:
+        nonlocal stage
+        sent.append(data)
+        chunk = ""
+        if stage == 0 and data == "/plugin\r":
+            stage = 1
+            # První Enter jen otevře autocomplete menu obsahující slovo "plugins" (nesmí falešně ukončit krok 2!)
+            chunk = "> /plugin   Manage plugins\n"
+        elif stage == 1 and data == "\r":
+            stage = 2
+            chunk = "Plugins manager: Installed  Discover\n"
+        elif stage == 2 and data == "gmail":
+            stage = 3
+            chunk = "> gmail\n"
+        elif stage == 3 and data == "\r":
+            stage = 4
+            chunk = "Marketplace: antigravity-plugins-official\nSign-in: Not signed in\nSign in\n"
+        elif stage == 4 and data == "\r":
+            stage = 5
+            oauth = (
+                "https://accounts.google.com/o/oauth2/v2/auth?client_id=c1"
+                "&redirect_uri=http%3A%2F%2F127.0.0.1%3A44535%2Fcallback&state=S1"
+            )
+            chunk = f"Open browser: {oauth}\n"
+            pm._connect_state.auth_url = oauth
+        if chunk:
+            pm._raw_output = (pm._raw_output + chunk)[-48000:]
+            pm._raw_total_len += len(chunk)
+            pm._connect_state.output = pm._raw_output
+
+    pm._write_pty = _fake_write_nav  # type: ignore[method-assign]
+    await pm._auto_navigate_to_signin("gmail", force_reconnect=True, profile_key="pracovni")
+
+    assert pm._manual_override is False
+    assert sent[:4] == ["/plugin\r", "\r", "gmail", "\r"]
     assert "accounts.google.com/o/oauth2/v2/auth" in pm._connect_state.auth_url
 
 
