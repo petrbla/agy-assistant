@@ -316,7 +316,7 @@ def create_app(
             await on_settings_updated()
 
     def _sync_all_plugin_contexts() -> None:
-        for ctx in ("auto", "pracovni", "osobni"):
+        for ctx in ("pracovni", "osobni", "auto"):
             prepare_agy_home(settings, db, context_mode=ctx)
 
     def _extract_bearer(authorization: str | None, x_auth_token: str | None) -> str:
