@@ -3253,6 +3253,18 @@
     return out;
   }
 
+  function sanitizeMcpServerName(raw) {
+    return String(raw || "")
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^[-_]+|[-_]+$/g, "")
+      .slice(0, 64)
+      .replace(/[-_]+$/g, "");
+  }
+
   function parseMcpJsonConfig(rawText) {
     let text = String(rawText || "").trim();
     if (!text) throw new Error(t("mcp_import_json_empty"));
@@ -3286,6 +3298,7 @@
       srvName = String(entries[0][0] || "").trim();
       cfg = entries[0][1];
     }
+    srvName = sanitizeMcpServerName(srvName);
 
     const headers = {};
     let authToken = "";
@@ -3835,12 +3848,22 @@
     } catch (_) {}
   }
 
+  if ($("mcpName")) {
+    $("mcpName").addEventListener("blur", () => {
+      const cleaned = sanitizeMcpServerName($("mcpName").value);
+      if (cleaned) $("mcpName").value = cleaned;
+    });
+  }
+
   $("mcpForm").onsubmit = async (e) => {
     e.preventDefault();
     const tr = $("mcpTransport").value;
     const savedEditId = editingMcpId;
+    const rawName = $("mcpName").value.trim();
+    const cleanName = sanitizeMcpServerName(rawName) || rawName;
+    if ($("mcpName")) $("mcpName").value = cleanName;
     const body = {
-      name: $("mcpName").value.trim(),
+      name: cleanName,
       scope: $("mcpScope").value,
       transport: tr,
       enabled: $("mcpEnabled").checked,

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 import shlex
 import shutil
 import sqlite3
 import sys
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -18,6 +20,25 @@ from app.config import Settings, normalize_language, parse_telegram_ids, resolve
 from app.i18n import t
 
 VALID_TASK_ACTION_TYPES = ("message", "agent", "script")
+_MCP_INVALID_CHARS_RE = re.compile(r"[^A-Za-z0-9_-]+")
+_MCP_MULTI_DASH_RE = re.compile(r"-{2,}")
+
+
+def sanitize_mcp_server_name(raw_name: str, *, allow_fallback: bool = False) -> str:
+    """Převede název MCP serveru na bezpečný identifikátor bez mezer a diakritiky pro `agy` CLI."""
+    raw = (raw_name or "").strip()
+    ascii_val = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    cleaned = _MCP_INVALID_CHARS_RE.sub("-", ascii_val)
+    cleaned = _MCP_MULTI_DASH_RE.sub("-", cleaned).strip("-_")
+    if len(cleaned) > 64:
+        cleaned = cleaned[:64].rstrip("-_")
+    if not cleaned:
+        if allow_fallback:
+            return "mcp-server"
+        raise ValueError(
+            "Název MCP serveru musí obsahovat alespoň jedno písmeno nebo číslici (bez mezer)."
+        )
+    return cleaned
 
 
 def parse_script_command(raw_command: str) -> list[str]:
@@ -440,6 +461,7 @@ class AssistantDB:
             self._ensure_column(conn, "plugin_accounts", "tool_permissions_json", "TEXT NOT NULL DEFAULT '{}'")
             self._migrate_plugin_configs_to_accounts(conn)
             self._migrate_from_legacy_multiuser(conn)
+            self._sanitize_existing_mcp_names(conn)
             self._normalize_legacy_context_modes(conn)
             self._ensure_column(conn, "runs", "input_tokens", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "runs", "output_tokens", "INTEGER NOT NULL DEFAULT 0")
@@ -627,6 +649,30 @@ class AssistantDB:
         # 6) Odstranění zastaralých multi-user tabulek
         conn.execute("DROP TABLE IF EXISTS invites")
         conn.execute("DROP TABLE IF EXISTS users")
+
+    @staticmethod
+    def _sanitize_existing_mcp_names(conn: sqlite3.Connection) -> None:
+        """Jednorázově očistí existující názvy MCP serverů (odstraní mezery a nepovolené znaky pro `agy`)."""
+        rows = conn.execute("SELECT id, name FROM mcp_servers ORDER BY id ASC").fetchall()
+        if not rows:
+            return
+        used_names: set[str] = {str(row["name"] or "") for row in rows}
+        for row in rows:
+            srv_id = int(row["id"])
+            old_name = str(row["name"] or "")
+            base_name = sanitize_mcp_server_name(old_name, allow_fallback=True)
+            if base_name == old_name:
+                continue
+            used_names.discard(old_name)
+            candidate = base_name
+            if candidate in used_names:
+                candidate = f"{base_name[:56].rstrip('-_')}-{srv_id}"
+            suffix = 2
+            while candidate in used_names:
+                candidate = f"{base_name[:56].rstrip('-_')}-{suffix}"
+                suffix += 1
+            conn.execute("UPDATE mcp_servers SET name = ? WHERE id = ?", (candidate, srv_id))
+            used_names.add(candidate)
 
     @staticmethod
     def _normalize_legacy_context_modes(conn: sqlite3.Connection) -> None:
@@ -1051,9 +1097,7 @@ class AssistantDB:
         env_json: str = "{}",
         enabled: bool = True,
     ) -> McpServerRecord:
-        clean_name = name.strip()
-        if not clean_name:
-            raise ValueError("Název MCP serveru nesmí být prázdný.")
+        clean_name = sanitize_mcp_server_name(name)
         clean_scope = scope if scope in ("all", "pracovni", "osobni") else "all"
         clean_transport = "stdio" if transport == "stdio" else "http"
 

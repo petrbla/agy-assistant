@@ -227,3 +227,54 @@ def test_has_agy_oauth_ignores_cli_runtime_files_and_detects_tokens(tmp_path: Pa
     assert has_agy_oauth(settings) is True
     clear_agy_oauth(settings)
     assert has_agy_oauth(settings) is False
+
+
+def test_mcp_server_name_sanitization_and_legacy_db_migration(tmp_path: Path) -> None:
+    import pytest
+    from app.db import sanitize_mcp_server_name
+    from app.user_env import build_mcp_config_dict
+
+    assert sanitize_mcp_server_name("noco db fedia") == "noco-db-fedia"
+    assert sanitize_mcp_server_name("  NocoDB__nocopetr  ") == "NocoDB__nocopetr"
+    assert sanitize_mcp_server_name("Můj   Server (2)!") == "Muj-Server-2"
+    assert sanitize_mcp_server_name("n8n-prace") == "n8n-prace"
+    with pytest.raises(ValueError):
+        sanitize_mcp_server_name("   ---   ")
+
+    # Starší DB se záznamy obsahujícími mezery + kolizní název se při startu bezpečně přejmenují
+    db_path = tmp_path / "data" / "assistant.db"
+    db_path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE mcp_servers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            scope TEXT NOT NULL DEFAULT 'all',
+            transport TEXT NOT NULL DEFAULT 'http',
+            url TEXT NOT NULL DEFAULT '',
+            auth_token TEXT NOT NULL DEFAULT '',
+            headers_json TEXT NOT NULL DEFAULT '{}',
+            command TEXT NOT NULL DEFAULT '',
+            args_json TEXT NOT NULL DEFAULT '[]',
+            env_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO mcp_servers (name, url, created_at)
+        VALUES ('noco db', 'https://a.example.invalid/mcp', '2026-01-01T00:00:00Z');
+        INSERT INTO mcp_servers (name, url, created_at)
+        VALUES ('noco-db', 'https://b.example.invalid/mcp', '2026-01-01T00:00:00Z');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = AssistantDB(db_path)
+    servers = {s.id: s for s in db.list_mcp_servers()}
+    assert servers[1].name == "noco-db-1"
+    assert servers[2].name == "noco-db"
+
+    cfg = build_mcp_config_dict(list(servers.values()), context_mode="auto")
+    assert set(cfg["mcpServers"].keys()) == {"noco-db-1", "noco-db"}
+    assert all(" " not in key for key in cfg["mcpServers"])

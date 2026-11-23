@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from app.config import Settings, normalize_chat_channel
-from app.db import AssistantDB, McpServerRecord, OwnerConfig
+from app.db import AssistantDB, McpServerRecord, OwnerConfig, sanitize_mcp_server_name
 from app.memory import WorkspaceMemory
 from app.plugins import (
     MANAGED_PLUGIN_DENY_PREFIXES,
     compute_plugin_deny_rules,
     detect_installed_plugins_from_disk,
     get_profile_home_dir,
+    parse_tool_permissions_raw,
     sanitize_profile_key,
     select_active_accounts_for_context,
 )
@@ -219,15 +220,15 @@ def build_mcp_config_dict(
     for srv in servers:
         if not srv.enabled or not _mcp_matches_channel(srv.scope, channel):
             continue
+        entry: dict[str, Any]
         if srv.transport == "stdio" and srv.command.strip():
-            entry: dict[str, Any] = {
+            entry = {
                 "command": srv.command.strip(),
                 "args": _safe_json_loads(srv.args_json, []),
             }
             env = _safe_json_loads(srv.env_json, {})
             if env:
                 entry["env"] = env
-            mcp_servers[srv.name] = entry
         elif srv.url.strip():
             entry = {"url": srv.url.strip()}
             headers: dict[str, str] = {
@@ -237,7 +238,24 @@ def build_mcp_config_dict(
                 headers["Authorization"] = f"Bearer {srv.auth_token.strip()}"
             if headers:
                 entry["headers"] = headers
-            mcp_servers[srv.name] = entry
+        else:
+            continue
+
+        blocked_tools = sorted(
+            tool_key
+            for tool_key, mode in parse_tool_permissions_raw(srv.tool_permissions_json).items()
+            if mode == "block"
+        )
+        if blocked_tools:
+            entry["disabledTools"] = blocked_tools
+
+        base_key = sanitize_mcp_server_name(srv.name, allow_fallback=True)
+        server_key = base_key
+        suffix = 2
+        while server_key in mcp_servers:
+            server_key = f"{base_key}-{suffix}"
+            suffix += 1
+        mcp_servers[server_key] = entry
     return {"mcpServers": mcp_servers}
 
 

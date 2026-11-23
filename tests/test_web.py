@@ -1545,6 +1545,7 @@ def test_mcp_token_reveal_and_connection_status_checks(tmp_path: Path, monkeypat
 
 
 def test_standalone_mcp_card_tool_discovery_and_permissions(tmp_path: Path, monkeypatch) -> None:
+    import json
     import app.plugins as plugins_mod
     from app.plugins import build_plugin_permissions_prompt_hint
 
@@ -1564,7 +1565,7 @@ def test_standalone_mcp_card_tool_discovery_and_permissions(tmp_path: Path, monk
     client = TestClient(app)
     hdr = {"Authorization": "Bearer standalone-tajne"}
 
-    # 1. Přidání samostatného MCP serveru s mezerami v názvu a vlastní hlavičkou
+    # 1. Přidání samostatného MCP serveru s mezerami v názvu -> automatická sanitizace pro `agy`
     created = client.post(
         "/api/mcp",
         headers=hdr,
@@ -1578,16 +1579,30 @@ def test_standalone_mcp_card_tool_discovery_and_permissions(tmp_path: Path, monk
         },
     )
     assert created.status_code == 200
+    assert created.json()["name"] == "noco-db-demo"
     srv_id = created.json()["id"]
 
     # Server musí být hned vidět v /api/plugins jako samostatná karta `mcp-{id}`
     plugins_res = client.get("/api/plugins", headers=hdr)
     assert plugins_res.status_code == 200
     standalone_card = next(p for p in plugins_res.json()["plugins"] if p["name"] == f"mcp-{srv_id}")
-    assert standalone_card["display_name"] == "noco db demo"
+    assert standalone_card["display_name"] == "noco-db-demo"
     assert standalone_card["standalone_mcp"] is True
     assert standalone_card["connected"] is True
     assert standalone_card["custom_mcp"]["has_headers"] is True
+
+    # Prázdný/symbolový název MCP serveru musí vrátit HTTP 400
+    bad_name_res = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "   ---   ",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://nocodb-demo.example.invalid/mcp",
+        },
+    )
+    assert bad_name_res.status_code == 400
 
     # 2. Mock JSON-RPC tools/list -> kontrola stavu rovnou uloží nástroje do cache
     def _fake_post_jsonrpc(url: str, payload: dict, **kwargs):
@@ -1640,8 +1655,17 @@ def test_standalone_mcp_card_tool_discovery_and_permissions(tmp_path: Path, monk
     hint = build_plugin_permissions_prompt_hint(
         set(), {}, mcp_servers=db.list_mcp_servers(), context_mode="auto"
     )
-    assert "mcp:noco db demo" in hint
+    assert "mcp:noco-db-demo" in hint
     assert "BLOCKED_TOOLS(delete_record)" in hint
+
+    mcp_cfg = json.loads(
+        (settings.effective_home_dir / ".gemini" / "config" / "mcp_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "noco-db-demo" in mcp_cfg["mcpServers"]
+    assert "noco db demo" not in mcp_cfg["mcpServers"]
+    assert mcp_cfg["mcpServers"]["noco-db-demo"]["disabledTools"] == ["delete_record"]
 
     # 4. Ruční discover i smazání přes `mcp-{srv_id}` endpointy fungují
     disc_res = client.post(f"/api/plugins/mcp-{srv_id}/tools/discover", headers=hdr)

@@ -21,7 +21,13 @@ from app.agy_runner import AgyRunner, QuotaSnapshot, is_version_up_to_date, quot
 from app.auth_session import AgyAuthManager, AgyTerminalManager
 from app.chat_commands import execute_web_slash_command
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
-from app.db import AssistantDB, McpServerRecord, OwnerConfig, parse_script_command
+from app.db import (
+    AssistantDB,
+    McpServerRecord,
+    OwnerConfig,
+    parse_script_command,
+    sanitize_mcp_server_name,
+)
 from app.github_backup import (
     build_scheduler_backup_payload,
     normalize_github_repo_url,
@@ -863,7 +869,10 @@ def create_app(
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, object]:
         existing_srv: McpServerRecord | None = None
-        clean_name = payload.name.strip()
+        try:
+            clean_name = sanitize_mcp_server_name(payload.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         for item in db.list_mcp_servers():
             if payload.id is not None and item.id == payload.id:
                 existing_srv = item
