@@ -1297,6 +1297,162 @@ def test_mcp_edit_preserves_token_headers_and_validates_duplicate_name(tmp_path:
     assert res_dup.status_code == 400
 
 
+def test_mcp_token_reveal_and_connection_status_checks(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import app.plugins as plugins_mod
+
+    ws_dir = tmp_path / "ws_mcp_status"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings(
+        workspace_dir=ws_dir,
+        data_dir=tmp_path / "data_mcp_status",
+        web_auth_token="mcp-status-tajne",
+    )
+    db = AssistantDB(settings.db_path)
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.5.14")
+    runner.close_all = AsyncMock()
+
+    app = create_app(settings, db, WorkspaceMemory(ws_dir), runner)
+    client = TestClient(app)
+    hdr = {"Authorization": "Bearer mcp-status-tajne"}
+
+    # Web UI musí obsahovat tlačítko zobrazení tokenu a ověření připojení MCP serverů
+    html_res = client.get("/")
+    assert html_res.status_code == 200
+    assert 'id="toggleMcpTokenBtn"' in html_res.text
+    assert 'id="checkMcpStatusBtn"' in html_res.text
+
+    # 1. Vytvoření testovacích MCP serverů (HTTP aktivní, HTTP s chybou autorizace, HTTP vypnutý, stdio OK, stdio neexistující)
+    s_http_ok = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "http-ok",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://ok.example.invalid/mcp",
+            "auth_token": "secret-tok-123",
+            "enabled": True,
+        },
+    ).json()["id"]
+    s_http_err = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "http-err",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://fail.example.invalid/mcp",
+            "auth_token": "secret-tok-456",
+            "enabled": True,
+        },
+    ).json()["id"]
+    s_http_off = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "http-off",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://off.example.invalid/mcp",
+            "enabled": False,
+        },
+    ).json()["id"]
+    s_stdio_ok = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "stdio-ok",
+            "scope": "all",
+            "transport": "stdio",
+            "command": sys.executable,
+            "args": ["-V"],
+            "enabled": True,
+        },
+    ).json()["id"]
+    s_stdio_bad = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "stdio-bad",
+            "scope": "all",
+            "transport": "stdio",
+            "command": "neexistujici-mcp-binarka-xyz",
+            "args": [],
+            "enabled": True,
+        },
+    ).json()["id"]
+
+    # 2. Endpoint pro zobrazení Bearer tokenu vyžaduje auth, veřejný výpis token nevrací
+    list_res = client.get("/api/mcp", headers=hdr)
+    assert list_res.status_code == 200
+    assert "secret-tok-123" not in list_res.text
+    assert next(i for i in list_res.json() if i["id"] == s_http_ok)["has_auth_token"] is True
+
+    assert client.get(f"/api/mcp/{s_http_ok}/token").status_code == 401
+    assert client.get("/api/mcp/999999/token", headers=hdr).status_code == 404
+    tok_res = client.get(f"/api/mcp/{s_http_ok}/token", headers=hdr)
+    assert tok_res.status_code == 200
+    assert tok_res.json() == {
+        "id": s_http_ok,
+        "has_auth_token": True,
+        "auth_token": "secret-tok-123",
+    }
+
+    # 3. Endpointy stavu připojení vyžadují auth a kontrolují HTTP / stdio / vypnuto (mock JSON-RPC)
+    assert client.get("/api/mcp/status").status_code == 401
+    assert client.post(f"/api/mcp/{s_http_ok}/check").status_code == 401
+    assert client.post("/api/mcp/999999/check", headers=hdr).status_code == 404
+
+    def _fake_post_jsonrpc(url: str, payload: dict, **kwargs):
+        method = payload.get("method")
+        if "fail.example.invalid" in url:
+            raise RuntimeError("MCP server odmítl autorizaci (HTTP 401) pro secret-tok-456")
+        if method == "initialize":
+            return 200, "sid-1", {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-03-26"}}
+        if method == "notifications/initialized":
+            return 202, "sid-1", {}
+        if method == "tools/list":
+            return 200, "sid-1", {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"tools": [{"name": "t1"}, {"name": "t2"}]},
+            }
+        raise AssertionError(f"Neočekávaná MCP metoda: {method}")
+
+    monkeypatch.setattr(plugins_mod, "_post_mcp_jsonrpc_sync", _fake_post_jsonrpc)
+
+    status_res = client.get("/api/mcp/status", headers=hdr)
+    assert status_res.status_code == 200
+    by_id = {item["id"]: item for item in status_res.json()["items"]}
+
+    assert by_id[s_http_ok]["status"] == "connected"
+    assert by_id[s_http_ok]["connected"] is True
+    assert by_id[s_http_ok]["tools_count"] == 2
+    assert isinstance(by_id[s_http_ok]["latency_ms"], int)
+
+    assert by_id[s_http_err]["status"] == "error"
+    assert by_id[s_http_err]["connected"] is False
+    assert "401" in by_id[s_http_err]["error"]
+    assert "secret-tok-456" not in by_id[s_http_err]["error"]
+
+    assert by_id[s_http_off]["status"] == "disabled"
+    assert by_id[s_http_off]["connected"] is False
+
+    assert by_id[s_stdio_ok]["status"] == "connected"
+    assert by_id[s_stdio_ok]["connected"] is True
+
+    assert by_id[s_stdio_bad]["status"] == "error"
+    assert by_id[s_stdio_bad]["connected"] is False
+
+    single_res = client.post(f"/api/mcp/{s_http_ok}/check", headers=hdr)
+    assert single_res.status_code == 200
+    assert single_res.json()["connected"] is True
+    assert single_res.json()["tools_count"] == 2
+
+
+
 
 
 

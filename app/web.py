@@ -31,7 +31,7 @@ from app.github_backup import (
 )
 from app.i18n import get_ui_bundle, list_available_languages, t
 from app.memory import WorkspaceMemory
-from app.plugins import PluginManager
+from app.plugins import PluginManager, check_mcp_server_status
 from app.runtime_config import save_runtime_overrides
 from app.scheduler import AssistantScheduler
 from app.version_check import AppUpdater, AppVersionChecker
@@ -910,6 +910,40 @@ def create_app(
         if isinstance(runner, AgyRunner):
             await runner.close_all()
         return _mcp_public_dict(saved)
+
+    @app.get("/api/mcp/status")
+    async def check_all_mcp_statuses(
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        servers = db.list_mcp_servers()
+        items = list(
+            await asyncio.gather(*(check_mcp_server_status(s, timeout=5.0) for s in servers))
+        )
+        return {"items": items}
+
+    @app.get("/api/mcp/{server_id}/token")
+    async def get_mcp_server_token(
+        server_id: int,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        srv = db.get_mcp_server(server_id)
+        if srv is None:
+            raise HTTPException(status_code=404, detail="MCP server nebyl nalezen.")
+        return {
+            "id": srv.id,
+            "has_auth_token": bool(srv.auth_token.strip()),
+            "auth_token": srv.auth_token,
+        }
+
+    @app.post("/api/mcp/{server_id}/check")
+    async def check_single_mcp_status(
+        server_id: int,
+        _: OwnerConfig = Depends(require_auth),
+    ) -> dict[str, object]:
+        srv = db.get_mcp_server(server_id)
+        if srv is None:
+            raise HTTPException(status_code=404, detail="MCP server nebyl nalezen.")
+        return await check_mcp_server_status(srv, timeout=5.0)
 
     @app.patch("/api/mcp/{server_id}")
     async def patch_mcp_server(

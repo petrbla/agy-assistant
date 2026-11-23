@@ -11,6 +11,7 @@ import shutil
 import signal
 import struct
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -1981,6 +1982,189 @@ def discover_http_mcp_tools_sync(
         desc = " ".join(str(item.get("description") or "").split())[:300]
         out.append({"key": tname, "title": title, "description": desc, "group": group})
     return out
+
+
+def _sanitize_mcp_error(message: str, auth_token: str = "") -> str:
+    """Vyčistí chybovou hlášku MCP serveru a odstraní případný Bearer token."""
+    cleaned = " ".join((message or "").split())
+    tok = (auth_token or "").strip()
+    if tok and tok in cleaned:
+        cleaned = cleaned.replace(tok, "***")
+    if len(cleaned) > 220:
+        return cleaned[:217] + "…"
+    return cleaned
+
+
+def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) -> dict[str, Any]:
+    """Ověří stav připojení jednoho MCP serveru (HTTP JSON-RPC probe nebo dostupnost stdio příkazu)."""
+    base: dict[str, Any] = {
+        "id": srv.id,
+        "name": srv.name,
+        "enabled": bool(srv.enabled),
+        "transport": srv.transport,
+        "connected": False,
+        "status": "disabled",
+        "tools_count": None,
+        "latency_ms": None,
+        "error": "",
+    }
+    if not srv.enabled:
+        return base
+
+    if srv.transport == "stdio":
+        cmd = (srv.command or "").strip()
+        if not cmd:
+            return {**base, "status": "error", "error": "Chybí příkaz (stdio)."}
+        has_sep = os.path.sep in cmd or (os.path.altsep is not None and os.path.altsep in cmd)
+        found = bool(shutil.which(cmd)) or (has_sep and Path(cmd).is_file())
+        if found:
+            return {**base, "connected": True, "status": "connected", "latency_ms": 0}
+        return {
+            **base,
+            "status": "error",
+            "error": _sanitize_mcp_error(f"Příkaz „{cmd}“ nebyl nalezen.", srv.auth_token),
+        }
+
+    try:
+        clean_url = validate_custom_mcp_url(srv.url)
+    except ValueError as exc:
+        return {**base, "status": "error", "error": _sanitize_mcp_error(str(exc), srv.auth_token)}
+
+    headers: dict[str, str] = {}
+    try:
+        parsed_headers = json.loads(srv.headers_json or "{}")
+        if isinstance(parsed_headers, dict):
+            headers = {
+                str(k): str(v)
+                for k, v in parsed_headers.items()
+                if isinstance(k, str) and isinstance(v, str)
+            }
+    except json.JSONDecodeError:
+        headers = {}
+
+    started = time.monotonic()
+
+    def _elapsed_ms() -> int:
+        return max(0, int((time.monotonic() - started) * 1000))
+
+    try:
+        init_status, sid, init_res = _post_mcp_jsonrpc_sync(
+            clean_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "asistent-antigravity", "version": "1.0"},
+                },
+            },
+            auth_token=srv.auth_token,
+            headers=headers,
+            timeout=timeout,
+        )
+    except RuntimeError as exc:
+        return {
+            **base,
+            "status": "error",
+            "latency_ms": _elapsed_ms(),
+            "error": _sanitize_mcp_error(str(exc), srv.auth_token),
+        }
+
+    if 200 <= init_status < 300 and isinstance(init_res.get("result"), dict):
+        with contextlib.suppress(RuntimeError):
+            _post_mcp_jsonrpc_sync(
+                clean_url,
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                auth_token=srv.auth_token,
+                headers=headers,
+                session_id=sid,
+                timeout=min(timeout, 2.0),
+            )
+        try:
+            _list_status, _sid, list_res = _post_mcp_jsonrpc_sync(
+                clean_url,
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                auth_token=srv.auth_token,
+                headers=headers,
+                session_id=sid,
+                timeout=timeout,
+            )
+            tools_count: int | None = None
+            if isinstance(list_res.get("result"), dict) and isinstance(
+                list_res["result"].get("tools"), list
+            ):
+                tools_count = len(list_res["result"]["tools"])
+            return {
+                **base,
+                "connected": True,
+                "status": "connected",
+                "tools_count": tools_count,
+                "latency_ms": _elapsed_ms(),
+            }
+        except RuntimeError as exc:
+            err_msg = str(exc)
+            if "401" in err_msg or "403" in err_msg:
+                return {
+                    **base,
+                    "status": "error",
+                    "latency_ms": _elapsed_ms(),
+                    "error": _sanitize_mcp_error(err_msg, srv.auth_token),
+                }
+            return {
+                **base,
+                "connected": True,
+                "status": "connected",
+                "tools_count": None,
+                "latency_ms": _elapsed_ms(),
+            }
+
+    try:
+        list_status, _sid, list_res = _post_mcp_jsonrpc_sync(
+            clean_url,
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            auth_token=srv.auth_token,
+            headers=headers,
+            session_id=sid,
+            timeout=timeout,
+        )
+    except RuntimeError as exc:
+        return {
+            **base,
+            "status": "error",
+            "latency_ms": _elapsed_ms(),
+            "error": _sanitize_mcp_error(str(exc), srv.auth_token),
+        }
+
+    if 200 <= list_status < 300 and isinstance(list_res.get("result"), dict):
+        batch = list_res["result"].get("tools")
+        tools_count = len(batch) if isinstance(batch, list) else None
+        return {
+            **base,
+            "connected": True,
+            "status": "connected",
+            "tools_count": tools_count,
+            "latency_ms": _elapsed_ms(),
+        }
+
+    err_obj = list_res.get("error") if isinstance(list_res.get("error"), dict) else init_res.get("error")
+    err_detail = ""
+    if isinstance(err_obj, dict):
+        err_detail = str(err_obj.get("message") or err_obj)
+    if not err_detail:
+        err_detail = f"HTTP {list_status}"
+    return {
+        **base,
+        "status": "error",
+        "latency_ms": _elapsed_ms(),
+        "error": _sanitize_mcp_error(err_detail, srv.auth_token),
+    }
+
+
+async def check_mcp_server_status(srv: McpServerRecord, *, timeout: float = 5.0) -> dict[str, Any]:
+    """Asynchronní wrapper pro ověření stavu připojení MCP serveru bez blokování event loopu."""
+    return await asyncio.to_thread(check_mcp_server_status_sync, srv, timeout=timeout)
 
 
 def build_mcp_tools_payload(srv: McpServerRecord) -> tuple[list[dict[str, Any]], dict[str, str]]:

@@ -123,10 +123,16 @@
   let activeConnectPlugin = null;
   let activeSettingsSubtab = sessionStorage.getItem("agy_settings_subtab") || "general";
   let ghBackupCollapsedInit = false;
+  const MCP_TOKEN_MASK = "••••••••••••";
   let mcpCollapsedInit = false;
   let editingMcpId = null;
   let editingMcpName = "";
   let editingMcpHasToken = false;
+  let mcpTokenDirty = false;
+  let mcpTokenLoaded = false;
+  const mcpStatusCache = new Map();
+  let mcpStatusReqSeq = 0;
+  let lastMcpItems = [];
   let isBootstrappingAuth = false;
   const chatLogs = { auto: [], pracovni: [], osobni: [] };
 
@@ -337,6 +343,8 @@
     if (typeof updateAgyTerminalControls === "function") updateAgyTerminalControls(terminalIsRunning);
     if (isAppUpdating) setAppUpdatingUi(true);
     if (typeof syncMcpEditBanner === "function") syncMcpEditBanner();
+    if (typeof syncMcpTokenVisibilityUi === "function") syncMcpTokenVisibilityUi();
+    if (typeof rerenderMcpStatuses === "function") rerenderMcpStatuses();
     refreshCollapsibleLabels();
   }
 
@@ -3189,15 +3197,113 @@
     }
   }
 
+  function syncMcpTokenVisibilityUi() {
+    const inp = $("mcpToken");
+    const btn = $("toggleMcpTokenBtn");
+    const clearChk = $("mcpClearTokenChk");
+    const isCleared = Boolean(clearChk && clearChk.checked);
+    if (isCleared && inp && inp.type === "text") {
+      inp.type = "password";
+    }
+    if (inp) inp.disabled = isCleared;
+    if (!btn) return;
+    btn.disabled = isCleared;
+    const isVisible = Boolean(inp && inp.type === "text");
+    const label = isVisible ? t("mcp_token_hide") : t("mcp_token_show");
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.innerHTML = `<i class="bi ${isVisible ? "bi-eye-slash" : "bi-eye"}" aria-hidden="true"></i>`;
+  }
+
+  function clearMaskedMcpTokenIfNeeded() {
+    const inp = $("mcpToken");
+    if (!inp) return;
+    if (
+      editingMcpId !== null
+      && editingMcpHasToken
+      && !mcpTokenDirty
+      && !mcpTokenLoaded
+      && inp.value === MCP_TOKEN_MASK
+    ) {
+      inp.value = "";
+      mcpTokenDirty = true;
+    }
+  }
+
+  if ($("mcpToken")) {
+    $("mcpToken").addEventListener("keydown", (e) => {
+      const inp = $("mcpToken");
+      if (
+        editingMcpId !== null
+        && editingMcpHasToken
+        && !mcpTokenDirty
+        && !mcpTokenLoaded
+        && inp
+        && inp.value === MCP_TOKEN_MASK
+      ) {
+        if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          clearMaskedMcpTokenIfNeeded();
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          clearMaskedMcpTokenIfNeeded();
+        }
+      }
+    });
+    $("mcpToken").addEventListener("paste", () => {
+      clearMaskedMcpTokenIfNeeded();
+    });
+    $("mcpToken").addEventListener("input", () => {
+      mcpTokenDirty = true;
+    });
+  }
+
+  if ($("mcpClearTokenChk")) {
+    $("mcpClearTokenChk").addEventListener("change", syncMcpTokenVisibilityUi);
+  }
+
+  if ($("toggleMcpTokenBtn")) {
+    $("toggleMcpTokenBtn").onclick = async () => {
+      const inp = $("mcpToken");
+      const btn = $("toggleMcpTokenBtn");
+      if (!inp || !btn) return;
+      if (inp.type === "text") {
+        inp.type = "password";
+        syncMcpTokenVisibilityUi();
+        return;
+      }
+      if (editingMcpId !== null && editingMcpHasToken && !mcpTokenDirty && !mcpTokenLoaded) {
+        btn.disabled = true;
+        try {
+          const data = await api(`/api/mcp/${editingMcpId}/token`);
+          inp.value = data.auth_token || "";
+          mcpTokenLoaded = true;
+        } catch (err) {
+          toast(err.message, "err");
+          syncMcpTokenVisibilityUi();
+          return;
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      inp.type = "text";
+      syncMcpTokenVisibilityUi();
+    };
+  }
+
   function resetMcpForm() {
     editingMcpId = null;
     editingMcpName = "";
     editingMcpHasToken = false;
+    mcpTokenDirty = false;
+    mcpTokenLoaded = false;
     if ($("mcpName")) $("mcpName").value = "";
     if ($("mcpScope")) $("mcpScope").value = "all";
     if ($("mcpTransport")) $("mcpTransport").value = "http";
     if ($("mcpUrl")) $("mcpUrl").value = "";
-    if ($("mcpToken")) $("mcpToken").value = "";
+    if ($("mcpToken")) {
+      $("mcpToken").type = "password";
+      $("mcpToken").value = "";
+    }
     if ($("mcpCommand")) $("mcpCommand").value = "";
     if ($("mcpArgs")) $("mcpArgs").value = "";
     if ($("mcpEnabled")) $("mcpEnabled").checked = true;
@@ -3209,6 +3315,7 @@
     }
     syncMcpTransportUi();
     syncMcpEditBanner();
+    syncMcpTokenVisibilityUi();
   }
 
   function startEditMcp(srv) {
@@ -3216,6 +3323,8 @@
     editingMcpId = srv.id;
     editingMcpName = srv.name || "";
     editingMcpHasToken = Boolean(srv.has_auth_token);
+    mcpTokenDirty = false;
+    mcpTokenLoaded = false;
     if ($("mcpName")) $("mcpName").value = srv.name || "";
     if ($("mcpScope")) {
       $("mcpScope").value = ["pracovni", "osobni"].includes(srv.scope) ? srv.scope : "all";
@@ -3224,7 +3333,10 @@
       $("mcpTransport").value = srv.transport === "stdio" ? "stdio" : "http";
     }
     if ($("mcpUrl")) $("mcpUrl").value = srv.url || "";
-    if ($("mcpToken")) $("mcpToken").value = "";
+    if ($("mcpToken")) {
+      $("mcpToken").type = "password";
+      $("mcpToken").value = editingMcpHasToken ? MCP_TOKEN_MASK : "";
+    }
     if ($("mcpCommand")) $("mcpCommand").value = srv.command || "";
     if ($("mcpArgs")) {
       $("mcpArgs").value = Array.isArray(srv.args) && srv.args.length
@@ -3236,6 +3348,7 @@
     setCollapsibleCard("mcpCardBody", "toggleMcpCardBtn", true);
     syncMcpTransportUi();
     syncMcpEditBanner();
+    syncMcpTokenVisibilityUi();
     if ($("mcpBody")) {
       $("mcpBody").querySelectorAll("tr").forEach((row) => {
         row.classList.toggle("table-active", Number(row.dataset.mcpId) === Number(srv.id));
@@ -3249,6 +3362,89 @@
 
   if ($("cancelMcpEditBtn")) $("cancelMcpEditBtn").onclick = resetMcpForm;
   if ($("cancelMcpEditTopBtn")) $("cancelMcpEditTopBtn").onclick = resetMcpForm;
+
+  function renderMcpStatusCell(cell, srv, statusInfo, isChecking = false) {
+    if (!cell || !srv) return;
+    cell.innerHTML = "";
+    if (srv.enabled === false) {
+      cell.innerHTML = `<span class="badge rounded-pill text-bg-secondary">${escapeHtml(t("mcp_status_disabled"))}</span>`;
+      return;
+    }
+    if (isChecking) {
+      cell.innerHTML = `<span class="badge rounded-pill text-bg-secondary"><span class="spinner-border spinner-border-sm me-1" style="width:.65rem;height:.65rem;" aria-hidden="true"></span>${escapeHtml(t("mcp_status_checking"))}</span>`;
+      return;
+    }
+    if (!statusInfo) {
+      cell.innerHTML = `<span class="badge rounded-pill text-bg-secondary">${escapeHtml(t("mcp_status_unknown"))}</span>`;
+      return;
+    }
+    if (statusInfo.connected) {
+      const label = typeof statusInfo.tools_count === "number"
+        ? t("mcp_status_connected_tools", { count: statusInfo.tools_count })
+        : t("mcp_status_connected");
+      const titleText = typeof statusInfo.latency_ms === "number"
+        ? `${label} · ${statusInfo.latency_ms} ms`
+        : label;
+      cell.innerHTML = `<span class="badge rounded-pill text-bg-success" title="${escapeHtml(titleText)}">${escapeHtml(label)}</span>`;
+      return;
+    }
+    const errText = statusInfo.error ? String(statusInfo.error) : "";
+    const titleAttr = errText ? ` title="${escapeHtml(errText)}"` : "";
+    let html = `<span class="badge rounded-pill text-bg-danger"${titleAttr}>${escapeHtml(t("mcp_status_disconnected"))}</span>`;
+    if (errText) {
+      html += `<div class="small text-danger text-truncate mt-1" style="max-width:220px" title="${escapeHtml(errText)}">${escapeHtml(errText)}</div>`;
+    }
+    cell.innerHTML = html;
+  }
+
+  function rerenderMcpStatuses(forceChecking = false) {
+    const tb = $("mcpBody");
+    if (!tb || !lastMcpItems.length) return;
+    lastMcpItems.forEach((srv) => {
+      const row = tb.querySelector(`tr[data-mcp-id="${srv.id}"]`);
+      const cell = row ? row.querySelector(".mcp-status-cell") : null;
+      if (cell) {
+        renderMcpStatusCell(cell, srv, mcpStatusCache.get(srv.id), forceChecking && srv.enabled !== false);
+      }
+    });
+  }
+
+  async function refreshMcpStatuses(forceCheckingBadge = false) {
+    const seq = ++mcpStatusReqSeq;
+    const btn = $("checkMcpStatusBtn");
+    if (!lastMcpItems.length) {
+      if (btn) btn.disabled = false;
+      return;
+    }
+    if (btn) btn.disabled = true;
+    if (forceCheckingBadge) {
+      rerenderMcpStatuses(true);
+    }
+    try {
+      const res = await api("/api/mcp/status");
+      if (seq !== mcpStatusReqSeq) return;
+      const items = Array.isArray(res && res.items) ? res.items : [];
+      items.forEach((st) => {
+        if (st && st.id != null) {
+          mcpStatusCache.set(st.id, st);
+        }
+      });
+      rerenderMcpStatuses(false);
+    } catch (err) {
+      if (seq === mcpStatusReqSeq) {
+        rerenderMcpStatuses(false);
+        if (forceCheckingBadge) toast(err.message, "err");
+      }
+    } finally {
+      if (seq === mcpStatusReqSeq && btn) {
+        btn.disabled = false;
+      }
+    }
+  }
+
+  if ($("checkMcpStatusBtn")) {
+    $("checkMcpStatusBtn").onclick = () => refreshMcpStatuses(true);
+  }
 
   function createInlineScopeSelect(currentScope, onChange) {
     const sel = document.createElement("select");
@@ -3287,6 +3483,7 @@
   async function loadMcp() {
     try {
       const items = await api("/api/mcp");
+      lastMcpItems = items;
       if ($("mcpCountBadge")) $("mcpCountBadge").textContent = String(items.length);
       if (!mcpCollapsedInit) {
         mcpCollapsedInit = true;
@@ -3300,10 +3497,7 @@
         if (editingMcpId === srv.id) tr.classList.add("table-active");
         const target = srv.transport === "stdio" ? `${srv.command} ${(srv.args || []).join(" ")}` : srv.url;
         const nameTd = document.createElement("td");
-        const disabledBadge = srv.enabled === false
-          ? ` <span class="badge rounded-pill text-bg-secondary ms-1">${escapeHtml(t("mcp_status_disabled"))}</span>`
-          : "";
-        nameTd.innerHTML = `<strong>${escapeHtml(srv.name)}</strong>${disabledBadge}`;
+        nameTd.innerHTML = `<strong>${escapeHtml(srv.name)}</strong>`;
         const scopeTd = document.createElement("td");
         scopeTd.appendChild(
           createInlineScopeSelect(srv.scope, async (nextScope) => {
@@ -3319,6 +3513,14 @@
         const targetTd = document.createElement("td");
         targetTd.className = "font-monospace";
         targetTd.textContent = target;
+        const statusTd = document.createElement("td");
+        statusTd.className = "mcp-status-cell text-nowrap";
+        renderMcpStatusCell(
+          statusTd,
+          srv,
+          mcpStatusCache.get(srv.id),
+          srv.enabled !== false && !mcpStatusCache.has(srv.id)
+        );
         const td = document.createElement("td");
         td.className = "text-nowrap";
         const actionsWrap = document.createElement("div");
@@ -3334,6 +3536,7 @@
         del.textContent = t("btn_delete");
         del.onclick = async () => {
           await api(`/api/mcp/${srv.id}`, { method: "DELETE" });
+          mcpStatusCache.delete(srv.id);
           if (editingMcpId === srv.id) resetMcpForm();
           toast(t("toast_mcp_deleted"));
           loadMcp();
@@ -3341,23 +3544,27 @@
         };
         actionsWrap.append(editBtn, del);
         td.appendChild(actionsWrap);
-        tr.append(nameTd, scopeTd, targetTd, td);
+        tr.append(nameTd, scopeTd, targetTd, statusTd, td);
         tb.appendChild(tr);
       });
+      if (items.length) {
+        refreshMcpStatuses(false);
+      }
     } catch (_) {}
   }
 
   $("mcpForm").onsubmit = async (e) => {
     e.preventDefault();
     const tr = $("mcpTransport").value;
+    const savedEditId = editingMcpId;
     const body = {
       name: $("mcpName").value.trim(),
       scope: $("mcpScope").value,
       transport: tr,
       enabled: $("mcpEnabled").checked,
     };
-    if (editingMcpId !== null) {
-      body.id = editingMcpId;
+    if (savedEditId !== null) {
+      body.id = savedEditId;
     }
     try {
       if (tr === "stdio") {
@@ -3369,11 +3576,19 @@
         const tok = $("mcpToken").value.trim();
         if ($("mcpClearTokenChk") && $("mcpClearTokenChk").checked) {
           body.clear_auth_token = true;
-        } else if (tok) {
+        } else if (savedEditId === null) {
+          if (tok) body.auth_token = tok;
+        } else if (mcpTokenDirty && tok && tok !== MCP_TOKEN_MASK) {
           body.auth_token = tok;
         }
       }
-      await api("/api/mcp", { method: "POST", body: JSON.stringify(body) });
+      const savedSrv = await api("/api/mcp", { method: "POST", body: JSON.stringify(body) });
+      if (savedSrv && savedSrv.id != null) {
+        mcpStatusCache.delete(savedSrv.id);
+      }
+      if (savedEditId !== null) {
+        mcpStatusCache.delete(savedEditId);
+      }
       resetMcpForm();
       toast(t("toast_mcp_saved"));
       await loadMcp();
