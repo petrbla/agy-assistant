@@ -31,7 +31,7 @@ from app.github_backup import (
 )
 from app.i18n import get_ui_bundle, list_available_languages, t
 from app.memory import WorkspaceMemory
-from app.plugins import PluginManager, check_mcp_server_status
+from app.plugins import PluginManager, build_mcp_tools_payload, check_mcp_server_status
 from app.runtime_config import save_runtime_overrides
 from app.scheduler import AssistantScheduler
 from app.version_check import AppUpdater, AppVersionChecker
@@ -324,6 +324,7 @@ def _mcp_public_dict(srv: McpServerRecord) -> dict[str, object]:
         env = json.loads(srv.env_json)
     except json.JSONDecodeError:
         env = {}
+    tools_list, _ = build_mcp_tools_payload(srv)
     return {
         "id": srv.id,
         "name": srv.name,
@@ -336,6 +337,7 @@ def _mcp_public_dict(srv: McpServerRecord) -> dict[str, object]:
         "args": args if isinstance(args, list) else [],
         "env": env if isinstance(env, dict) else {},
         "enabled": srv.enabled,
+        "tools_count": len(tools_list),
         "created_at": srv.created_at,
     }
 
@@ -921,14 +923,30 @@ def create_app(
             await runner.close_all()
         return _mcp_public_dict(saved)
 
+    def _finalize_mcp_status_probe(
+        srv: McpServerRecord, status_dict: dict[str, Any]
+    ) -> dict[str, Any]:
+        discovered = status_dict.pop("_discovered_tools", None)
+        cache_updated = False
+        if status_dict.get("connected") and isinstance(discovered, list) and discovered:
+            new_json = json.dumps(discovered, ensure_ascii=False)
+            if (srv.cached_tools_json or "[]") != new_json:
+                db.update_mcp_server_tools(srv.id, cached_tools_json=new_json)
+                cache_updated = True
+        status_dict["tools_cache_updated"] = cache_updated
+        return status_dict
+
     @app.get("/api/mcp/status")
     async def check_all_mcp_statuses(
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, object]:
         servers = db.list_mcp_servers()
-        items = list(
+        results = list(
             await asyncio.gather(*(check_mcp_server_status(s, timeout=5.0) for s in servers))
         )
+        items = [
+            _finalize_mcp_status_probe(srv, res) for srv, res in zip(servers, results)
+        ]
         return {"items": items}
 
     @app.get("/api/mcp/{server_id}/token")
@@ -953,7 +971,8 @@ def create_app(
         srv = db.get_mcp_server(server_id)
         if srv is None:
             raise HTTPException(status_code=404, detail="MCP server nebyl nalezen.")
-        return await check_mcp_server_status(srv, timeout=5.0)
+        res = await check_mcp_server_status(srv, timeout=5.0)
+        return _finalize_mcp_status_probe(srv, res)
 
     @app.patch("/api/mcp/{server_id}")
     async def patch_mcp_server(

@@ -3656,12 +3656,27 @@
       const res = await api("/api/mcp/status");
       if (seq !== mcpStatusReqSeq) return;
       const items = Array.isArray(res && res.items) ? res.items : [];
+      let anyCacheUpdated = false;
       items.forEach((st) => {
         if (st && st.id != null) {
           mcpStatusCache.set(st.id, st);
+          if (st.tools_cache_updated) anyCacheUpdated = true;
+          if (typeof st.tools_count === "number") {
+            const matchSrv = lastMcpItems.find((item) => item.id === st.id);
+            if (matchSrv) matchSrv.tools_count = st.tools_count;
+            const permsBtn = $("mcpBody")?.querySelector(`[data-mcp-perms-for="${st.id}"]`);
+            if (permsBtn) {
+              permsBtn.textContent = st.tools_count > 0
+                ? `${t("btn_mcp_permissions")} (${st.tools_count})`
+                : t("btn_mcp_permissions");
+            }
+          }
         }
       });
       rerenderMcpStatuses(false);
+      if (anyCacheUpdated) {
+        loadPlugins();
+      }
     } catch (err) {
       if (seq === mcpStatusReqSeq) {
         rerenderMcpStatuses(false);
@@ -3712,6 +3727,13 @@
     return sel;
   }
 
+  function resolveMcpPluginName(serverId) {
+    const found = pluginsCatalog.find(
+      (p) => p && p.custom_mcp && Number(p.custom_mcp.id) === Number(serverId)
+    );
+    return found ? found.name : `mcp-${serverId}`;
+  }
+
   async function loadMcp() {
     try {
       const items = await api("/api/mcp");
@@ -3757,6 +3779,16 @@
         td.className = "text-nowrap";
         const actionsWrap = document.createElement("div");
         actionsWrap.className = "d-flex align-items-center gap-1";
+        const permsBtn = document.createElement("button");
+        permsBtn.type = "button";
+        permsBtn.className = "btn btn-outline-primary btn-sm";
+        permsBtn.dataset.mcpPermsFor = String(srv.id);
+        permsBtn.textContent = srv.tools_count > 0
+          ? `${t("btn_mcp_permissions")} (${srv.tools_count})`
+          : t("btn_mcp_permissions");
+        permsBtn.onclick = () => {
+          navigateTo(pluginPermsUrl(resolveMcpPluginName(srv.id), { mcpMode: true }));
+        };
         const editBtn = document.createElement("button");
         editBtn.type = "button";
         editBtn.className = "btn btn-outline-secondary btn-sm";
@@ -3774,7 +3806,7 @@
           loadMcp();
           loadPlugins();
         };
-        actionsWrap.append(editBtn, del);
+        actionsWrap.append(permsBtn, editBtn, del);
         td.appendChild(actionsWrap);
         tr.append(nameTd, scopeTd, targetTd, statusTd, td);
         tb.appendChild(tr);
@@ -3865,7 +3897,14 @@
   }
 
   function hasCustomMcp(p) {
-    return Boolean(p && (p.custom_url_connected || (p.custom_mcp && p.custom_mcp.url)));
+    return Boolean(
+      p
+      && (
+        p.custom_url_connected
+        || p.standalone_mcp
+        || (p.custom_mcp && (p.custom_mcp.url || p.custom_mcp.target))
+      )
+    );
   }
 
   function pluginSortRank(p) {
@@ -3943,7 +3982,11 @@
       );
       const isDisabled = Boolean(p.installed && !p.enabled);
       const isCustomPaused = Boolean(
-        !isConnected && !p.installed && p.custom_mcp && p.custom_mcp.url && p.custom_mcp.enabled === false
+        !isConnected
+        && !p.installed
+        && p.custom_mcp
+        && (p.custom_mcp.url || p.custom_mcp.target || p.standalone_mcp)
+        && p.custom_mcp.enabled === false
       );
 
       const card = document.createElement("div");
@@ -4052,35 +4095,54 @@
       };
 
       if (!p.installed) {
-        if (p.supports_custom_url) {
-          appendCustomUrlButton(true);
-        }
-        if (p.supports_oauth) {
+        if (p.standalone_mcp) {
           actions.appendChild(
             makeBtn(
-              escapeHtml(t("plugin_btn_connect")),
-              p.supports_custom_url ? "" : "btn-primary",
-              () => openPluginConnectModal(p, { forceReconnect: false })
+              escapeHtml(t("btn_edit")),
+              "",
+              async () => {
+                const targetId = p.mcp_server_id || (p.custom_mcp && p.custom_mcp.id);
+                const srv = lastMcpItems.find((item) => item.id === targetId);
+                if (srv) {
+                  startEditMcp(srv);
+                } else if ($("mcpCard")) {
+                  setCollapsibleCard("mcpCardBody", "toggleMcpCardBtn", true);
+                  $("mcpCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }
+              }
+            )
+          );
+        } else {
+          if (p.supports_custom_url) {
+            appendCustomUrlButton(true);
+          }
+          if (p.supports_oauth) {
+            actions.appendChild(
+              makeBtn(
+                escapeHtml(t("plugin_btn_connect")),
+                p.supports_custom_url ? "" : "btn-primary",
+                () => openPluginConnectModal(p, { forceReconnect: false })
+              )
+            );
+          }
+          actions.appendChild(
+            makeBtn(
+              escapeHtml(t("plugin_btn_install")),
+              p.supports_oauth || p.supports_custom_url ? "" : "btn-primary",
+              async () => {
+                try {
+                  toast(t("toast_plugin_installing", { name: p.display_name || p.name }), "warn");
+                  await api("/api/plugins/install", {
+                    method: "POST",
+                    body: JSON.stringify({ target: p.install_target || p.name }),
+                  });
+                  toast(t("toast_plugin_installed", { name: p.display_name || p.name }));
+                  await loadPlugins();
+                } catch (err) { toast(err.message, "err"); }
+              }
             )
           );
         }
-        actions.appendChild(
-          makeBtn(
-            escapeHtml(t("plugin_btn_install")),
-            p.supports_oauth || p.supports_custom_url ? "" : "btn-primary",
-            async () => {
-              try {
-                toast(t("toast_plugin_installing", { name: p.display_name || p.name }), "warn");
-                await api("/api/plugins/install", {
-                  method: "POST",
-                  body: JSON.stringify({ target: p.install_target || p.name }),
-                });
-                toast(t("toast_plugin_installed", { name: p.display_name || p.name }));
-                await loadPlugins();
-              } catch (err) { toast(err.message, "err"); }
-            }
-          )
-        );
       } else {
         if (p.supports_custom_url) {
           appendCustomUrlButton(false);
@@ -4128,8 +4190,8 @@
 
       cardBody.append(head, desc, actions);
 
-      // Uložená vlastní MCP URL instance
-      if (p.custom_mcp && p.custom_mcp.url) {
+      // Uložená vlastní MCP URL / server instance
+      if (p.custom_mcp && (p.custom_mcp.url || p.custom_mcp.target || p.standalone_mcp)) {
         const urlBox = document.createElement("div");
         urlBox.className = "p-2 rounded border bg-body-tertiary d-flex flex-column gap-1 mt-1";
 
@@ -4166,6 +4228,13 @@
           urlBadges.appendChild(tokPill);
         }
 
+        if (p.custom_mcp.has_headers) {
+          const hdrPill = document.createElement("span");
+          hdrPill.className = badgeCls("primary");
+          hdrPill.textContent = t("plugin_custom_url_headers_set");
+          urlBadges.appendChild(hdrPill);
+        }
+
         const rmUrlBtn = document.createElement("button");
         rmUrlBtn.type = "button";
         rmUrlBtn.className = "btn btn-sm btn-outline-danger btn-icon-sm flex-shrink-0";
@@ -4192,7 +4261,7 @@
 
         const urlVal = document.createElement("div");
         urlVal.className = "small font-monospace text-body-secondary text-break";
-        urlVal.textContent = p.custom_mcp.url;
+        urlVal.textContent = p.custom_mcp.url || p.custom_mcp.target || "";
 
         const mcpTools = Array.isArray(p.custom_mcp.tools) ? p.custom_mcp.tools : [];
         const urlFoot = document.createElement("div");
@@ -5070,7 +5139,7 @@
     if ($("permsModalSubtitle")) {
       $("permsModalSubtitle").textContent = useMcp
         ? [
-            (plugin.custom_mcp && plugin.custom_mcp.url) || "",
+            (plugin.custom_mcp && (plugin.custom_mcp.url || plugin.custom_mcp.target)) || "",
             plugin.custom_mcp ? scopeLabel(plugin.custom_mcp.scope) : "",
           ].filter(Boolean).join(" · ")
         : [
@@ -5080,8 +5149,11 @@
           ].filter(Boolean).join(" · ");
     }
 
+    const canDiscoverMcp = useMcp && Boolean(
+      plugin.custom_mcp && plugin.custom_mcp.transport !== "stdio" && plugin.custom_mcp.url
+    );
     if ($("permsSearchInput")) $("permsSearchInput").value = "";
-    if ($("permsDiscoverBtn")) $("permsDiscoverBtn").classList.toggle("d-none", !useMcp);
+    if ($("permsDiscoverBtn")) $("permsDiscoverBtn").classList.toggle("d-none", !canDiscoverMcp);
 
     const showMcpSettings = useMcp && Boolean(plugin.custom_mcp);
     const showAccountSection = !useMcp && Boolean(account);
@@ -5120,7 +5192,7 @@
     setPermsGroupCollapsed("write", false);
     renderPermsModalTools();
 
-    if (useMcp && permsModalState.tools.length === 0) {
+    if (canDiscoverMcp && permsModalState.tools.length === 0) {
       discoverMcpToolsInModal({ quietEmpty: true });
     }
   }

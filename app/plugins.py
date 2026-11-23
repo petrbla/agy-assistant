@@ -1891,6 +1891,27 @@ def _post_mcp_jsonrpc_sync(
         raise RuntimeError(f"Chyba komunikace s MCP serverem: {exc}") from exc
 
 
+def _format_discovered_mcp_tools(raw_tools: list[Any]) -> list[dict[str, str]]:
+    """Sjednotí a zařadí nástroje z MCP `tools/list` (`readonly`/`write`) pro uložení do cache."""
+    out: list[dict[str, str]] = []
+    seen_names: set[str] = set()
+    for item in raw_tools:
+        if not isinstance(item, dict):
+            continue
+        tname = str(item.get("name") or "").strip()
+        if not tname or tname in seen_names:
+            continue
+        seen_names.add(tname)
+        ann = item.get("annotations") if isinstance(item.get("annotations"), dict) else None
+        group = classify_mcp_tool_group(tname, ann)
+        title = str(item.get("title") or tname).strip()[:120]
+        desc = " ".join(str(item.get("description") or "").split())[:300]
+        out.append({"key": tname, "title": title, "description": desc, "group": group})
+        if len(out) >= 200:
+            break
+    return out
+
+
 def discover_http_mcp_tools_sync(
     url: str,
     *,
@@ -1973,15 +1994,7 @@ def discover_http_mcp_tools_sync(
             break
         cursor = next_cursor.strip()
 
-    out: list[dict[str, str]] = []
-    for item in raw_tools:
-        tname = str(item.get("name") or "").strip()
-        ann = item.get("annotations") if isinstance(item.get("annotations"), dict) else None
-        group = classify_mcp_tool_group(tname, ann)
-        title = str(item.get("title") or tname).strip()[:120]
-        desc = " ".join(str(item.get("description") or "").split())[:300]
-        out.append({"key": tname, "title": title, "description": desc, "group": group})
-    return out
+    return _format_discovered_mcp_tools(raw_tools)
 
 
 def _sanitize_mcp_error(
@@ -2101,17 +2114,22 @@ def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) 
                 timeout=timeout,
             )
             tools_count: int | None = None
+            discovered_tools: list[dict[str, str]] | None = None
             if isinstance(list_res.get("result"), dict) and isinstance(
                 list_res["result"].get("tools"), list
             ):
-                tools_count = len(list_res["result"]["tools"])
-            return {
+                discovered_tools = _format_discovered_mcp_tools(list_res["result"]["tools"])
+                tools_count = len(discovered_tools)
+            res: dict[str, Any] = {
                 **base,
                 "connected": True,
                 "status": "connected",
                 "tools_count": tools_count,
                 "latency_ms": _elapsed_ms(),
             }
+            if discovered_tools is not None:
+                res["_discovered_tools"] = discovered_tools
+            return res
         except RuntimeError as exc:
             err_msg = str(exc)
             if "401" in err_msg or "403" in err_msg:
@@ -2148,14 +2166,18 @@ def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) 
 
     if 200 <= list_status < 300 and isinstance(list_res.get("result"), dict):
         batch = list_res["result"].get("tools")
-        tools_count = len(batch) if isinstance(batch, list) else None
-        return {
+        discovered_tools = _format_discovered_mcp_tools(batch) if isinstance(batch, list) else None
+        tools_count = len(discovered_tools) if discovered_tools is not None else None
+        res_fb: dict[str, Any] = {
             **base,
             "connected": True,
             "status": "connected",
             "tools_count": tools_count,
             "latency_ms": _elapsed_ms(),
         }
+        if discovered_tools is not None:
+            res_fb["_discovered_tools"] = discovered_tools
+        return res_fb
 
     err_obj = list_res.get("error") if isinstance(list_res.get("error"), dict) else init_res.get("error")
     err_detail = ""
@@ -2840,22 +2862,62 @@ class PluginManager:
         servers: list[McpServerRecord] | None = None,
     ) -> McpServerRecord | None:
         safe_name = validate_plugin_name(plugin_name).lower()
+        standalone_match = re.fullmatch(r"mcp-(\d+)", safe_name)
+        if standalone_match:
+            target_id = int(standalone_match.group(1))
+            if servers is not None:
+                return next((s for s in servers if s.id == target_id), None)
+            return self.db.get_mcp_server(target_id)
         mcp_name = self._custom_mcp_server_name(safe_name)
         rows = servers if servers is not None else self.db.list_mcp_servers()
         by_name = {srv.name.strip().lower(): srv for srv in rows if srv.transport == "http"}
         return by_name.get(mcp_name) or by_name.get(safe_name)
 
     @staticmethod
+    def _guess_mcp_logo_url(srv: McpServerRecord) -> str:
+        """Odhadne volitelné logo pro samostatný MCP server podle jeho názvu nebo URL."""
+        hay = f"{srv.name} {srv.url}".lower()
+        for token, logo in (
+            ("nocodb", "https://cdn.simpleicons.org/nocodb"),
+            ("n8n", "https://cdn.simpleicons.org/n8n"),
+            ("postgres", "https://cdn.simpleicons.org/postgresql"),
+            ("homeassistant", "https://cdn.simpleicons.org/homeassistant"),
+            ("home-assistant", "https://cdn.simpleicons.org/homeassistant"),
+            ("github", "https://cdn.simpleicons.org/github"),
+        ):
+            if token in hay:
+                return logo
+        return ""
+
+    @staticmethod
     def _custom_mcp_public_dict(srv: McpServerRecord | None) -> dict[str, Any] | None:
         if srv is None:
             return None
+        try:
+            parsed_headers = json.loads(srv.headers_json or "{}")
+            has_headers = isinstance(parsed_headers, dict) and bool(parsed_headers)
+        except json.JSONDecodeError:
+            has_headers = False
+        try:
+            parsed_args = json.loads(srv.args_json or "[]")
+            args_list = [str(a) for a in parsed_args] if isinstance(parsed_args, list) else []
+        except json.JSONDecodeError:
+            args_list = []
+        target = (
+            srv.url.strip()
+            if srv.transport == "http"
+            else " ".join(part for part in (srv.command.strip(), *args_list) if part)
+        )
         tools_list, tool_perms = build_mcp_tools_payload(srv)
         return {
             "id": srv.id,
             "name": srv.name,
+            "transport": srv.transport,
             "url": srv.url,
+            "target": target,
             "scope": srv.scope,
             "has_auth_token": bool(srv.auth_token.strip()),
+            "has_headers": has_headers,
             "enabled": bool(srv.enabled),
             "tools": tools_list,
             "tool_permissions": tool_perms,
@@ -2907,7 +2969,7 @@ class PluginManager:
         """Načte a uloží seznam nástrojů z připojeného HTTP MCP serveru daného pluginu."""
         safe_name = validate_plugin_name(plugin_name).lower()
         srv = self._find_custom_mcp_server(safe_name)
-        if srv is None or not srv.url.strip():
+        if srv is None or srv.transport != "http" or not srv.url.strip():
             raise ValueError(f"Plugin '{safe_name}' nemá nakonfigurovanou vlastní HTTP MCP URL.")
         try:
             headers_raw = json.loads(srv.headers_json or "{}")
@@ -2956,6 +3018,7 @@ class PluginManager:
 
         plugins_out: list[dict[str, Any]] = []
         seen: set[str] = set()
+        matched_mcp_ids: set[int] = set()
 
         def _is_connected(name_low: str, inst_info: dict[str, Any] | None, disk_info: dict[str, Any] | None) -> bool:
             rec = db_configs.get(name_low)
@@ -3034,6 +3097,8 @@ class PluginManager:
             custom_srv = (
                 self._find_custom_mcp_server(low, mcp_servers) if item.supports_custom_url else None
             )
+            if custom_srv is not None:
+                matched_mcp_ids.add(custom_srv.id)
             custom_mcp_dict = self._custom_mcp_public_dict(custom_srv)
             custom_url_conn = bool(
                 custom_mcp_dict and custom_mcp_dict["enabled"] and custom_mcp_dict["url"]
@@ -3084,6 +3149,8 @@ class PluginManager:
             supports_oauth = bool(inst.get("has_auth_json") or has_mcp)
             accts_out, any_conn, first_label = _build_accounts_payload(low, inst, disk)
             custom_srv = self._find_custom_mcp_server(low, mcp_servers)
+            if custom_srv is not None:
+                matched_mcp_ids.add(custom_srv.id)
             custom_mcp_dict = self._custom_mcp_public_dict(custom_srv)
             custom_url_conn = bool(
                 custom_mcp_dict and custom_mcp_dict["enabled"] and custom_mcp_dict["url"]
@@ -3116,6 +3183,45 @@ class PluginManager:
                     "permissions": {},
                     "tools_count": len((custom_mcp_dict or {}).get("tools") or []),
                     "custom": True,
+                }
+            )
+
+        for srv in mcp_servers:
+            if srv.id in matched_mcp_ids:
+                continue
+            custom_mcp_dict = self._custom_mcp_public_dict(srv)
+            has_target = bool(srv.url.strip() if srv.transport == "http" else srv.command.strip())
+            mcp_connected = bool(srv.enabled and has_target)
+            plugins_out.append(
+                {
+                    "name": f"mcp-{srv.id}",
+                    "display_name": srv.name,
+                    "install_target": "",
+                    "marketplace": "HTTP MCP" if srv.transport == "http" else "stdio MCP",
+                    "category": "custom",
+                    "featured": False,
+                    "icon": "🔌",
+                    "logo_url": self._guess_mcp_logo_url(srv),
+                    "desc_key": "plugin_desc_standalone_mcp",
+                    "description": "",
+                    "supports_oauth": False,
+                    "supports_custom_url": False,
+                    "custom_url_placeholder": "",
+                    "custom_mcp": custom_mcp_dict,
+                    "custom_url_connected": mcp_connected,
+                    "installed": False,
+                    "enabled": bool(srv.enabled),
+                    "version": "",
+                    "connected": mcp_connected,
+                    "connected_at": "",
+                    "account_label": "",
+                    "accounts": [],
+                    "permissions_schema": [],
+                    "permissions": {},
+                    "tools_count": len((custom_mcp_dict or {}).get("tools") or []),
+                    "custom": True,
+                    "standalone_mcp": True,
+                    "mcp_server_id": srv.id,
                 }
             )
 

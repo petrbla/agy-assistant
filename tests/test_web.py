@@ -1544,6 +1544,117 @@ def test_mcp_token_reveal_and_connection_status_checks(tmp_path: Path, monkeypat
     assert cleared_hdr.json()["headers"] == {}
 
 
+def test_standalone_mcp_card_tool_discovery_and_permissions(tmp_path: Path, monkeypatch) -> None:
+    import app.plugins as plugins_mod
+    from app.plugins import build_plugin_permissions_prompt_hint
+
+    ws_dir = tmp_path / "ws_standalone_mcp"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings(
+        workspace_dir=ws_dir,
+        data_dir=tmp_path / "data_standalone_mcp",
+        web_auth_token="standalone-tajne",
+    )
+    db = AssistantDB(settings.db_path)
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.5.14")
+    runner.close_all = AsyncMock()
+
+    app = create_app(settings, db, WorkspaceMemory(ws_dir), runner)
+    client = TestClient(app)
+    hdr = {"Authorization": "Bearer standalone-tajne"}
+
+    # 1. Přidání samostatného MCP serveru s mezerami v názvu a vlastní hlavičkou
+    created = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "noco db demo",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://nocodb-demo.example.invalid/mcp",
+            "headers": {"x-api-key": "demo-noco-key-123"},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    srv_id = created.json()["id"]
+
+    # Server musí být hned vidět v /api/plugins jako samostatná karta `mcp-{id}`
+    plugins_res = client.get("/api/plugins", headers=hdr)
+    assert plugins_res.status_code == 200
+    standalone_card = next(p for p in plugins_res.json()["plugins"] if p["name"] == f"mcp-{srv_id}")
+    assert standalone_card["display_name"] == "noco db demo"
+    assert standalone_card["standalone_mcp"] is True
+    assert standalone_card["connected"] is True
+    assert standalone_card["custom_mcp"]["has_headers"] is True
+
+    # 2. Mock JSON-RPC tools/list -> kontrola stavu rovnou uloží nástroje do cache
+    def _fake_post_jsonrpc(url: str, payload: dict, **kwargs):
+        method = payload.get("method")
+        if method == "initialize":
+            return 200, "sid-demo", {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-03-26"}}
+        if method == "notifications/initialized":
+            return 202, "sid-demo", {}
+        if method == "tools/list":
+            return 200, "sid-demo", {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "tools": [
+                        {"name": "list_records", "title": "List Records", "description": "Read rows"},
+                        {"name": "delete_record", "title": "Delete Record", "description": "Delete a row"},
+                    ]
+                },
+            }
+        raise AssertionError(f"Neočekávaná MCP metoda: {method}")
+
+    monkeypatch.setattr(plugins_mod, "_post_mcp_jsonrpc_sync", _fake_post_jsonrpc)
+
+    status_res = client.get("/api/mcp/status", headers=hdr)
+    assert status_res.status_code == 200
+    st_item = next(i for i in status_res.json()["items"] if i["id"] == srv_id)
+    assert st_item["connected"] is True
+    assert st_item["tools_count"] == 2
+    assert st_item["tools_cache_updated"] is True
+    assert "_discovered_tools" not in st_item
+
+    # Karta v /api/plugins i výpis /api/mcp teď ukazují 2 nástroje a výchozí oprávnění
+    plugins_after = client.get("/api/plugins", headers=hdr).json()["plugins"]
+    card_after = next(p for p in plugins_after if p["name"] == f"mcp-{srv_id}")
+    assert card_after["tools_count"] == 2
+    tools_by_key = {t["key"]: t for t in card_after["custom_mcp"]["tools"]}
+    assert tools_by_key["list_records"]["mode"] == "allow"
+    assert tools_by_key["delete_record"]["mode"] == "ask"
+
+    # 3. Uložení 3-stavových oprávnění pro `mcp-{srv_id}` a kontrola prompt hintu
+    upd_perms = client.put(
+        f"/api/plugins/mcp-{srv_id}/tool-permissions",
+        headers=hdr,
+        json={"tool_permissions": {"list_records": "allow", "delete_record": "block"}},
+    )
+    assert upd_perms.status_code == 200
+    upd_tools = {t["key"]: t for t in upd_perms.json()["custom_mcp"]["tools"]}
+    assert upd_tools["delete_record"]["mode"] == "block"
+
+    hint = build_plugin_permissions_prompt_hint(
+        set(), {}, mcp_servers=db.list_mcp_servers(), context_mode="auto"
+    )
+    assert "mcp:noco db demo" in hint
+    assert "BLOCKED_TOOLS(delete_record)" in hint
+
+    # 4. Ruční discover i smazání přes `mcp-{srv_id}` endpointy fungují
+    disc_res = client.post(f"/api/plugins/mcp-{srv_id}/tools/discover", headers=hdr)
+    assert disc_res.status_code == 200
+    assert disc_res.json()["count"] == 2
+
+    del_res = client.delete(f"/api/plugins/mcp-{srv_id}/custom-url", headers=hdr)
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted"] is True
+    assert all(item["id"] != srv_id for item in client.get("/api/mcp", headers=hdr).json())
+
+
+
 
 
 
