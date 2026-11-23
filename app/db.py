@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
+import shlex
+import shutil
 import sqlite3
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -12,6 +16,36 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings, normalize_language, parse_telegram_ids, resolve_notify_chat_id
 from app.i18n import t
+
+VALID_TASK_ACTION_TYPES = ("message", "agent", "script")
+
+
+def parse_script_command(raw_command: str) -> list[str]:
+    """Rozparsuje příkaz naplánovaného skriptu do seznamu argumentů bez použití shellu."""
+    cleaned = (raw_command or "").strip()
+    if not cleaned:
+        raise ValueError("Příkaz skriptu nesmí být prázdný.")
+
+    posix_mode = os.name != "nt"
+    tokens = shlex.split(cleaned, posix=posix_mode)
+    if not posix_mode:
+        stripped_tokens: list[str] = []
+        for tok in tokens:
+            if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ('"', "'"):
+                stripped_tokens.append(tok[1:-1])
+            else:
+                stripped_tokens.append(tok)
+        tokens = stripped_tokens
+
+    if not tokens or not tokens[0]:
+        raise ValueError("Příkaz skriptu nesmí být prázdný.")
+
+    if tokens[0].lower().endswith(".py"):
+        tokens = [sys.executable, *tokens]
+    elif tokens[0] in ("python", "python3") and shutil.which(tokens[0]) is None:
+        tokens[0] = sys.executable
+
+    return tokens
 
 OWNER_UPDATABLE_FIELDS = frozenset(
     {
@@ -205,7 +239,7 @@ class ScheduledTaskRecord:
     schedule_type: str  # 'cron' | 'once'
     cron_expr: str
     run_at: str
-    action_type: str  # 'message' | 'agent'
+    action_type: str  # 'message' | 'agent' | 'script'
     enabled: bool
     last_run_at: str | None
     created_at: str
@@ -1454,7 +1488,7 @@ class AssistantDB:
         if not clean_prompt:
             raise ValueError("Text/prompt úlohy nesmí být prázdný.")
         clean_type = "once" if schedule_type == "once" else "cron"
-        clean_action = "agent" if action_type == "agent" else "message"
+        clean_action = action_type if action_type in VALID_TASK_ACTION_TYPES else "message"
 
         with self._connect() as conn:
             conn.execute(
@@ -1782,7 +1816,7 @@ class AssistantDB:
                 COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0) AS success_runs,
                 COALESCE(SUM(CASE WHEN source = 'web' THEN 1 ELSE 0 END), 0) AS web_runs,
                 COALESCE(SUM(CASE WHEN source = 'telegram' THEN 1 ELSE 0 END), 0) AS telegram_runs,
-                COALESCE(SUM(CASE WHEN source IN ('heartbeat', 'briefing', 'nightly_reset', 'task') THEN 1 ELSE 0 END), 0) AS cron_runs,
+                COALESCE(SUM(CASE WHEN source IN ('heartbeat', 'briefing', 'nightly_reset', 'task', 'script') THEN 1 ELSE 0 END), 0) AS cron_runs,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,

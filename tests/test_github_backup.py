@@ -378,3 +378,37 @@ def test_scheduler_backup_restore_and_zip_validation(tmp_path: Path) -> None:
         zf.writestr("scheduler.json", "{neplatny-json")
     with pytest.raises(ValueError):
         mem.import_memory_zip(bad_json_zip.getvalue(), mode="merge")
+
+    # Záloha a obnova úlohy typu "script" + odmítnutí nevalidního příkazu skriptu
+    script_payload = {
+        "tasks": [
+            {
+                "name": "Skript záloha",
+                "prompt": "python3 scripts/demo.py",
+                "schedule_type": "cron",
+                "cron_expr": "0 * * * *",
+                "action_type": "script",
+                "enabled": True,
+            }
+        ]
+    }
+    res_script = restore_scheduler_backup_payload(db, script_payload, mode="replace")
+    assert res_script["imported_tasks_count"] == 1
+    restored = db.list_scheduled_tasks()
+    assert len(restored) == 1
+    assert restored[0].action_type == "script"
+    assert restored[0].prompt == "python3 scripts/demo.py"
+
+    bad_script_payload = {
+        "tasks": [
+            {
+                "name": "Špatný skript",
+                "prompt": 'python3 "neuzavrene',
+                "schedule_type": "cron",
+                "cron_expr": "0 * * * *",
+                "action_type": "script",
+            }
+        ]
+    }
+    with pytest.raises(ValueError):
+        restore_scheduler_backup_payload(db, bad_script_payload, mode="merge")

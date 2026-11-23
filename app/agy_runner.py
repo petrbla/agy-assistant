@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import ContextMode, Settings, normalize_language
-from app.db import AssistantDB
+from app.db import VALID_TASK_ACTION_TYPES, AssistantDB, parse_script_command
 from app.i18n import get_context_hint, get_language_hint, t
 from app.plugins import (
     build_plugin_permissions_prompt_hint,
@@ -679,7 +679,8 @@ def has_schedule_instructions(workspace_dir: Path | None) -> bool:
     if not agents_md.is_file():
         return True
     try:
-        return "add_tasks" in agents_md.read_text(encoding="utf-8")
+        content = agents_md.read_text(encoding="utf-8")
+        return "add_tasks" in content and '"script"' in content
     except OSError:
         return True
 
@@ -1217,7 +1218,14 @@ class AgyRunner:
                 if not name or not task_prompt:
                     continue
                 sched_type = "once" if item.get("schedule_type") == "once" else "cron"
-                action_type = "agent" if item.get("action_type") == "agent" else "message"
+                raw_action = str(item.get("action_type") or "message").strip().lower()
+                action_type = raw_action if raw_action in VALID_TASK_ACTION_TYPES else "message"
+                if action_type == "script":
+                    try:
+                        parse_script_command(task_prompt)
+                    except ValueError as exc:
+                        logger.warning("Neplatný příkaz skriptu úlohy '%s': %s", name, exc)
+                        continue
                 cron_val = str(item.get("cron_expr") or "").strip()
                 run_at_val = str(item.get("run_at") or "").strip()
                 if sched_type == "cron":

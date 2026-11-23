@@ -473,9 +473,10 @@
             </select>
             <input id="taskCron" type="text" class="form-control form-control-sm font-monospace" style="max-width:140px;" placeholder="0 12 * * *" />
             <input id="taskRunAt" type="datetime-local" class="form-control form-control-sm d-none" style="max-width:200px;" />
-            <select id="taskActionType" class="form-select form-select-sm" style="max-width:175px;">
+            <select id="taskActionType" class="form-select form-select-sm" style="max-width:195px;">
               <option value="message" data-i18n="action_message">Send message (0 tok.)</option>
               <option value="agent" data-i18n="action_agent">Run AI assistant</option>
+              <option value="script" data-i18n="action_script">Run script (0 tok.)</option>
             </select>
             <input id="taskPrompt" type="text" class="form-control form-control-sm flex-grow-1" style="min-width:180px;" required placeholder="Reminder message or task for AI…" data-i18n-placeholder="task_prompt_placeholder" />
             <button type="submit" class="btn btn-primary btn-sm" data-i18n="btn_add">Add</button>

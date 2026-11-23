@@ -64,7 +64,7 @@ Cuentas con tres tareas del sistema gestionadas por el planificador del orquesta
      }
      ```
      - `schedule_type`: `"cron"` (`cron_expr` recurrente de 5 campos, p. ej. `"0 12 * * *"`) o `"once"` (una sola vez en `run_at` con formato `"YYYY-MM-DDTHH:MM:SS"` en la zona horaria del usuario, p. ej. `"2026-12-12T08:00:00"`).
-     - `action_type`: `"message"` (envía el texto de `prompt` directo a Telegram consumiendo 0 tokens de IA) o `"agent"` (ejecuta al asistente de IA con `prompt` a esa hora y envía el resultado).
+     - `action_type`: `"message"` (envía el texto de `prompt` directo a Telegram consumiendo 0 tokens de IA), `"agent"` (ejecuta al asistente de IA con `prompt` a esa hora y envía el resultado) o `"script"` (ejecuta un comando/script local directamente en la raíz del workspace sin IA, p. ej. `python3 /home/asistent/workspace/scripts/job.py`, guarda la salida en el historial y avisa por Telegram si falla; persiste en SQLite tras reinicios y actualizaciones sin necesitar `setsid` ni cron del sistema).
   3. **Eliminar una tarea propia:** usa `{"remove_tasks": ["Almuerzo"]}`.
 - El orquestador lee automáticamente `schedule_request.json` justo después de tu respuesta, actualiza el planificador y borra el archivo.
 

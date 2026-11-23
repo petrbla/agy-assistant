@@ -64,7 +64,7 @@ Dir stehen drei vom Scheduler des Orchestrators verwaltete Systemaufgaben zur Ve
      }
      ```
      - `schedule_type`: `"cron"` (wiederkehrender 5-Felder-`cron_expr`, z. B. `"0 12 * * *"`) oder `"once"` (einmalig zu `run_at` im Format `"YYYY-MM-DDTHH:MM:SS"` in der Zeitzone des Nutzers, z. B. `"2026-12-12T08:00:00"`).
-     - `action_type`: `"message"` (sendet den Text aus `prompt` direkt an Telegram mit 0 KI-Tokens) oder `"agent"` (führt den KI-Assistenten mit `prompt` zu diesem Zeitpunkt aus und sendet das Ergebnis).
+     - `action_type`: `"message"` (sendet den Text aus `prompt` direkt an Telegram mit 0 KI-Tokens), `"agent"` (führt den KI-Assistenten mit `prompt` zu diesem Zeitpunkt aus und sendet das Ergebnis) oder `"script"` (führt einen lokalen Befehl/ein Skript direkt im Workspace-Stammverzeichnis ohne KI aus, z. B. `python3 /home/asistent/workspace/scripts/job.py`, protokolliert die Ausgabe im Ausführungsverlauf und benachrichtigt Telegram bei Fehlern; in SQLite gespeichert und überdauert Neustarts sowie Updates, sodass weder `setsid` noch System-Cron nötig sind).
   3. **Entfernen einer eigenen Aufgabe:** verwende `{"remove_tasks": ["Mittagessen"]}`.
 - Der Orchestrator liest `schedule_request.json` direkt nach deiner Antwort automatisch ein, aktualisiert den Scheduler und löscht die Datei anschließend.
 

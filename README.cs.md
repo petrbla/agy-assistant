@@ -8,9 +8,9 @@ Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalš
 
 ## Co umí
 
-- **Dvojjazyčné rozhraní (`en` / `cs`) s jazykovými soubory (`app/locales/*.json`):** výchozí jazyk je angličtina, přepnutí do češtiny jedním klikem v horní liště (`EN / CS`), v Nastavení, přes Telegram (`/lang cs`) nebo proměnnou `LANGUAGE=cs`. Přidání dalšího jazyka vyžaduje pouze přidání nového JSON souboru do `app/locales/`.
-- **Telegram bot (`aiogram`):** ovládání z mobilu i PC s whitelistem povolených Telegram ID, samoopravným pollingem (30s watchdog), podporou příloh (fotky, PDF, Excel, Word, audio) a příkazy `/auto`, `/pracovni` (`/work`), `/osobni` (`/personal`), `/kontext` (`/context`), `/model`, `/lang`, `/new`, `/uklid` (`/cleanup`), `/usage`, `/memory`, `/heartbeat`, `/briefing`, `/status`.
-- **Moderní Web UI & REST API (`FastAPI`):** dashboard na portu `8080` (tmavý i světlý režim, bez npm buildu) se záložkami **Chat**, **Paměť**, **Plánovač & Historie** a **Nastavení**. Přihlášení heslem + volitelné **2FA (TOTP)**.
+- **Vícejazyčné rozhraní (`en`, `cs`, `de`, `sk`, `es`, `pl`) s jazykovými soubory (`app/locales/*.json`):** výchozí jazyk je angličtina, přepnutí přes výběr v horní liště, Nastavení, příkaz `/lang <kód>` (Telegram i webový chat) nebo proměnnou prostředí `LANGUAGE` (včetně příslušných šablon `workspace_template*`). Přidání dalšího jazyka vyžaduje pouze přidání nového JSON souboru do `app/locales/`.
+- **Telegram bot (`aiogram`) & lomítkové příkazy ve webovém chatu:** ovládání z mobilu i PC s whitelistem povolených Telegram ID, samoopravným pollingem (30s watchdog), podporou příloh (fotky, PDF, Excel, Word, audio) a sdílenými příkazy (`/auto`, `/pracovni` (`/work`), `/osobni` (`/personal`), `/kontext` (`/context`), `/model`, `/lang`, `/new`, `/uklid` (`/cleanup`), `/usage` / `/quota` se zobrazením živého 5hodinového a týdenního limitu Antigravity, `/memory`, `/heartbeat`, `/briefing`, `/status`) funkčními v Telegramu i přímo ve Web UI chatu.
+- **Moderní Web UI & REST API (`FastAPI`):** Liquid Glass rozhraní na portu `8080` (tmavý i světlý režim, bez npm buildu) se záložkami **Chat**, **Paměť**, **Plánovač & Historie** a **Nastavení** (rozděleno na *Obecné & Telegram*, *Integrace & MCP*, *Automatizace & Zálohy* a *Účet & Zabezpečení*), živý interaktivní terminál `agy`, přehled 5h/týdenní kvóty, 1-klik aktualizace `agy` CLI i celého kontejneru (přes sidecar `updater`) a přihlášení heslem + volitelné **2FA (TOTP)**.
 - **Rychlé odpovědi:** trvale spuštěný („teplý“) proces `agy --input-format stream-json --output-format stream-json`, přednačtení paměti při startu konverzace a automatický fallback na jednorázové `agy -p`.
 - **Trvalá souborová paměť (`workspace/`):**
   - `AGENTS.md` – operační manuál a pravidla oddělení **pracovní** vs. **osobní** agendy
@@ -18,17 +18,22 @@ Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalš
   - `USER.md` – profil a preference uživatele
   - `MEMORY.md` + `memory/*.md` – dlouhodobá, tematická a denní paměť
   - `HEARTBEAT.md` – kontrolní seznam pro pravidelné probuzení na pozadí
-- **Plánovač (`APScheduler`):** tichý *Heartbeat*, *Ranní briefing*, **noční úklid paměti a reset konverzace** (výchozí `00:15`) a vlastní opakované i jednorázové úlohy (proběhlé jednorázové úlohy se samy mažou).
-- **MCP servery:** spravované ve Web UI a filtrované podle oblasti chatu (`Všechny` / `Pracovní` / `Osobní`).
+- **Plánovač (`APScheduler`):**
+  - **Systémové úlohy:** tichý *Heartbeat*, *Ranní briefing*, *Noční úklid paměti a reset konverzace* (výchozí `00:15`), *Úklid při nečinnosti* (`idle_reset`), automatické promazávání starých denních poznámek a volitelná *Denní záloha na GitHub*.
+  - **Vlastní úlohy (`cron` i `once`):** tři režimy — **Poslat zprávu** (`message`, 0 tokenů AI), **Spustit AI asistenta** (`agent`) nebo **Spustit skript / příkaz** (`script`, 0 tokenů AI; spustí lokální příkaz bezpečně bez shellu ve `workspace/` se správným `HOME`, `PATH` a `TZ`, výstup uloží do historie běhů, při úspěchu běží tiše a při chybě pošle upozornění na Telegram). Vše je uloženo v SQLite a přežije restart i aktualizaci kontejneru bez potřeby cronu na hostiteli nebo `setsid`.
+- **Integrace, pluginy a MCP servery:**
+  - **Antigravity pluginy:** správa oficiálních i partnerských pluginů (Gmail, Google Kalendář, Google Disk, Docs, Sheets, Slides, Notion, n8n, ClickUp, Linear, Figma, Stripe aj.) s interaktivním OAuth přihlášením ve Web UI, podporou **více účtů na jeden plugin** oddělených podle oblasti (`Všechny` / `Pracovní` / `Osobní`), **3-stavovým oprávněním nástrojů** (*Povoleno* / *Vyžaduje potvrzení* / *Zakázáno*) a vlastními textovými pravidly.
+  - **Vlastní MCP servery:** Streamable HTTP i stdio servery s úpravou ve Web UI, vlastními HTTP hlavičkami (např. `x-api-key`), 1-klik importem JSON konfigurace, živým testem připojení i načtením nástrojů a 3-stavovým řízením jejich oprávnění.
+- **Zálohování a přenositelnost:** export/import paměti, skillů i plánovače do ZIP archivu a volitelná automatická denní sanitizovaná záloha celého agenta (bez hesel, klíčů a tokenů) do soukromého GitHub repozitáře.
 
 ## Struktura projektu
 
-- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `auth_session.py`, `security.py`, `attachments.py`, `version_check.py`)
-- `app/locales/` – jazykové JSON soubory (`en.json`, `cs.json`)
+- `app/` – Python orchestrátor (`main.py`, `agy_runner.py`, `telegram_bot.py`, `chat_commands.py`, `web.py`, `scheduler.py`, `memory.py`, `db.py`, `config.py`, `i18n.py`, `runtime_config.py`, `user_env.py`, `plugins.py`, `github_backup.py`, `auth_session.py`, `security.py`, `attachments.py`, `version_check.py`)
+- `app/locales/` – jazykové JSON soubory (`en.json`, `cs.json`, `de.json`, `sk.json`, `es.json`, `pl.json`)
 - `app/static/` – Web UI (`index.html`, `styles.css`, `app.js`)
 - `workspace_template/` – výchozí anglické šablony paměti a skillů (při prvním startu se zkopírují do `workspace/`)
-- `workspace_template_cs/` – české šablony paměti a skillů použité při `LANGUAGE=cs`
-- `Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh` – kontejnerizace pro VPS
+- `workspace_template_{cs,de,sk,es,pl}/` – lokalizované šablony paměti a skillů podle `LANGUAGE`
+- `Dockerfile`, `docker/`, `docker-compose.yml`, `docker-compose.build.yml`, `docker-entrypoint.sh`, `VERSION` – kontejnerizace pro VPS a 1-klik aktualizace
 - `tests/` – automatické testy (`pytest`)
 
 ---
@@ -36,10 +41,11 @@ Projekt je navržený jako **single-user**: 1 kontejner = 1 uživatel. Pro dalš
 ## Přepínání jazyka a přidání nového jazyka
 
 - **Výchozí jazyk:** `en` (Angličtina).
-- **Ve Web UI:** klikněte na `EN` / `CS` v horní liště (před i po přihlášení) nebo změňte pole v **Nastavení → Jazyk**.
-- **V Telegramu:** napište `/lang cs` nebo `/lang en`.
-- **Při startu kontejneru:** přidejte proměnnou prostředí `LANGUAGE=cs`, čímž se automaticky nasadí české šablony paměti i české rozhraní.
-- **Vlastní překlad / další jazyk:** zkopírujte `app/locales/en.json` např. na `app/locales/de.json`, upravte hlavičku `_meta` (`code`, `name`, `short`, `date_locale`) a přeložte texty. Nový jazyk se sám objeví ve Web UI i v `/lang`.
+- **Dostupné jazyky:** `en`, `cs`, `de`, `sk`, `es`, `pl`.
+- **Ve Web UI:** vyberte jazyk v horní liště (před i po přihlášení) nebo v **Nastavení → Obecné & Telegram**.
+- **V Telegramu nebo Web Chatu:** napište `/lang cs`, `/lang en`, `/lang de`, `/lang sk`, `/lang es` nebo `/lang pl`.
+- **Při startu kontejneru:** přidejte proměnnou prostředí `LANGUAGE=cs` (nebo jiný podporovaný kód), čímž se automaticky nasadí příslušné šablony paměti i rozhraní.
+- **Vlastní překlad / další jazyk:** zkopírujte `app/locales/en.json` např. na `app/locales/fr.json`, upravte hlavičku `_meta` (`code`, `name`, `short`, `date_locale`) a přeložte texty. Nový jazyk se sám objeví ve Web UI i v `/lang`.
 
 ---
 
@@ -62,7 +68,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.centurylinklabs.watchtower.scope=asistent"
     environment:
-      LANGUAGE: "cs" # nebo "en" pro angličtinu
+      LANGUAGE: "cs" # podporované: en, cs, de, sk, es, pl
       TZ: "Europe/Prague"
       TG_TOKEN: "xxx"
       TG_ID: "xxx"
@@ -103,8 +109,8 @@ services:
 
 ### Krok 2: První spuštění
 1. Otevřete `http://<IP-VPS>:8080` a nastavte si e-mail, uživatelské jméno a heslo.
-2. V **Nastavení → Antigravity CLI & Přihlášení** klikněte na **Spustit OAuth přihlášení (agy)**, otevřete vypsanou URL a vložte ověřovací kód. *(Alternativně lze vložit vlastní Gemini API klíč.)*
-3. V **Nastavení → Zabezpečení účtu** si doporučeně zapněte **2FA**.
+2. V **Nastavení → Obecné & Telegram → Antigravity CLI & Přihlášení** klikněte na **Spustit OAuth přihlášení (agy)**, otevřete vypsanou URL a vložte ověřovací kód. *(Alternativně lze vložit vlastní Gemini API klíč.)*
+3. V **Nastavení → Účet & Zabezpečení** si doporučeně zapněte **2FA**.
 
 > Pro vystavení do internetu doporučujeme před kontejner reverzní proxy s HTTPS (Caddy, Nginx Proxy Manager, Traefik).
 
@@ -127,12 +133,13 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 ---
 
-## Napojení MCP serverů
+## Integrace, MCP servery a plánované skripty
 
-1. **Doporučeno:** přidat servery ve Web UI v **Nastavení → MCP servery** a u každého zvolit oblast (`Všechny`, `Pracovní`, `Osobní`).
-2. Volitelně vyplnit `MCP_WORK_*` / `MCP_PERSONAL_*` (nebo `MCP_PRACE_*` / `MCP_OSOBNI_*`) v `.env` ještě před prvním spuštěním – `docker-entrypoint.sh` z nich jednorázově vygeneruje `~/.gemini/config/mcp_config.json`.
+1. **Integrace a pluginy (doporučeno):** v **Nastavení → Integrace & MCP** můžete připojit Google Workspace i další partnerské pluginy, spravovat u nich více účtů podle oblasti (`Všechny`, `Pracovní`, `Osobní`) a nastavit jemná oprávnění nástrojů.
+2. **Vlastní MCP servery:** přidejte Streamable HTTP nebo stdio server v **Nastavení → Integrace & MCP** (případně vložte celý JSON blok tlačítkem **Vložit z JSON konfigurace** — URL, vlastní HTTP hlavičky i typ připojení se vyplní automaticky), ověřte připojení a nastavte oprávnění jednotlivých nástrojů. Volitelně lze před prvním spuštěním vyplnit `MCP_WORK_*` / `MCP_PERSONAL_*` (nebo `MCP_PRACE_*` / `MCP_OSOBNI_*`) v `.env`.
+3. **Plánování lokálních skriptů (`script`):** v záložce **Plánovač & Historie** (nebo z chatu přes `schedule_request.json`) zvolte **Spustit skript (0 tok.)**, zadejte např. cron `0 * * * *` a příkaz `python3 /home/asistent/workspace/scripts/job.py`. Skript běží uvnitř kontejneru se správným `HOME`, `PATH` a `TZ`, ukládá výstup do historie běhů, při chybě upozorní na Telegram a díky SQLite přežije restart i aktualizaci kontejneru bez cronu na hostiteli.
 
-Pravidla oddělení pracovních a osobních nástrojů jsou v `workspace_template_cs/AGENTS.md`. V Telegramu se oblast přepíná příkazy `/pracovni` (`/work`), `/osobni` (`/personal`) nebo `/auto`.
+Pravidla oddělení pracovních a osobních nástrojů jsou v `workspace_template_cs/AGENTS.md` (příp. `workspace_template_<lang>/AGENTS.md`). V Telegramu i webovém chatu se oblast přepíná příkazy `/pracovni` (`/work`), `/osobni` (`/personal`) nebo `/auto`.
 
 ## Vývoj a testy
 

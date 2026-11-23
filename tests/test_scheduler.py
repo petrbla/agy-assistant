@@ -341,3 +341,172 @@ async def test_nightly_reset_prunes_old_daily_memory_files(tmp_path: Path) -> No
     assert (mem_dir / today_name).is_file()
     assert (mem_dir / "rozdelane.md").is_file()
     assert (ws / "MEMORY.md").is_file()
+
+
+def test_parse_script_command_valid_and_invalid() -> None:
+    import sys
+    import pytest
+    from app.db import parse_script_command
+
+    argv = parse_script_command('python3 "/home/asistent/workspace/scripts/my job.py" --flag 1')
+    assert len(argv) == 4
+    assert argv[1:] == ["/home/asistent/workspace/scripts/my job.py", "--flag", "1"]
+
+    py_only = parse_script_command("scripts/job.py --check")
+    assert py_only == [sys.executable, "scripts/job.py", "--check"]
+
+    with pytest.raises(ValueError):
+        parse_script_command("   ")
+    with pytest.raises(ValueError):
+        parse_script_command('python3 "unterminated')
+
+
+async def test_script_task_success_silent_and_logged(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    monkeypatch.setenv("APP_UPDATE_TOKEN", "secret-update-token")
+    monkeypatch.setenv("APP_UPDATE_URL", "http://updater:8080/v1/update")
+
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data", language="cs")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    task = db.upsert_scheduled_task(
+        name="Hodinový skript",
+        prompt="python3 scripts/demo_job.py --mode fast",
+        schedule_type="cron",
+        cron_expr="0 * * * *",
+        action_type="script",
+    )
+
+    runner = AsyncMock()
+    notifier = AsyncMock()
+    scheduler = AssistantScheduler(settings, runner, notifier=notifier, db=db)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        proc = AsyncMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"Log zapsan\n", b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        res = await scheduler.run_custom_task(task_id=task.id, notify=True)
+
+    assert res.success is True
+    assert res.text == "Log zapsan"
+    notifier.assert_not_awaited()
+    runner.run.assert_not_awaited()
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["cwd"] == str(ws)
+    env = kwargs["env"]
+    assert isinstance(env, dict)
+    assert env["HOME"] == str(settings.effective_home_dir)
+    assert env["TZ"] == "Europe/Prague"
+    assert "APP_UPDATE_TOKEN" not in env
+    assert "APP_UPDATE_URL" not in env
+
+    runs = db.list_runs(limit=5)
+    assert len(runs) == 1
+    assert runs[0].source == "script"
+    assert runs[0].success is True
+    assert runs[0].total_tokens == 0
+    assert runs[0].response == "Log zapsan"
+    assert db.get_activity_stats().cron_runs == 1
+
+
+async def test_script_task_failure_notifies_and_logs(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data", language="cs")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    task = db.upsert_scheduled_task(
+        name="Selhávající skript",
+        prompt="python3 scripts/fail_job.py",
+        schedule_type="cron",
+        cron_expr="0 * * * *",
+        action_type="script",
+    )
+
+    notifier = AsyncMock()
+    scheduler = AssistantScheduler(settings, AsyncMock(), notifier=notifier, db=db)
+
+    async def _fake_exec(*_cmd, **_kwargs):
+        proc = AsyncMock()
+        proc.returncode = 2
+        proc.communicate = AsyncMock(return_value=(b"stdout info", b"Traceback: boom"))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        res = await scheduler.run_custom_task(task_id=task.id, notify=True)
+
+    assert res.success is False
+    assert "Exit code 2" in (res.error or "")
+    notifier.assert_awaited_once()
+    alert_msg = notifier.await_args.args[0]
+    assert "Selhávající skript" in alert_msg
+    assert "Traceback: boom" in alert_msg
+
+    runs = db.list_runs(limit=5)
+    assert len(runs) == 1
+    assert runs[0].source == "script"
+    assert runs[0].success is False
+    assert "Traceback: boom" in (runs[0].error or "")
+
+
+async def test_script_task_timeout_and_missing_binary(tmp_path: Path) -> None:
+    import asyncio
+    from unittest.mock import patch
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data", language="en")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    t_timeout = db.upsert_scheduled_task(
+        name="Timeout skript",
+        prompt="python3 scripts/slow.py",
+        schedule_type="cron",
+        cron_expr="0 * * * *",
+        action_type="script",
+    )
+    t_missing = db.upsert_scheduled_task(
+        name="Chybějící binárka",
+        prompt="/nonexistent/bin/tool --check",
+        schedule_type="cron",
+        cron_expr="0 * * * *",
+        action_type="script",
+    )
+
+    notifier = AsyncMock()
+    scheduler = AssistantScheduler(settings, AsyncMock(), notifier=notifier, db=db)
+
+    timeout_proc = AsyncMock()
+    timeout_proc.returncode = None
+    timeout_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    timeout_proc.kill = lambda: None
+    timeout_proc.wait = AsyncMock(return_value=-9)
+
+    with patch("asyncio.create_subprocess_exec", return_value=timeout_proc):
+        res_to = await scheduler.run_custom_task(task_id=t_timeout.id, notify=True)
+
+    assert res_to.success is False
+    assert "časový limit" in (res_to.error or "")
+    timeout_proc.wait.assert_awaited_once()
+
+    with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError("no such file")):
+        res_nf = await scheduler.run_custom_task(task_id=t_missing.id, notify=True)
+
+    assert res_nf.success is False
+    assert "nebyl nalezen" in (res_nf.error or "")
+    assert notifier.await_count == 2
+    assert len(db.list_runs(limit=10)) == 2

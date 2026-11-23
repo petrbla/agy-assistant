@@ -21,7 +21,7 @@ from app.agy_runner import AgyRunner, QuotaSnapshot, is_version_up_to_date, quot
 from app.auth_session import AgyAuthManager, AgyTerminalManager
 from app.chat_commands import execute_web_slash_command
 from app.config import ContextMode, Settings, normalize_chat_channel, normalize_language
-from app.db import AssistantDB, McpServerRecord, OwnerConfig
+from app.db import AssistantDB, McpServerRecord, OwnerConfig, parse_script_command
 from app.github_backup import (
     build_scheduler_backup_payload,
     normalize_github_repo_url,
@@ -222,7 +222,7 @@ class ScheduledTaskUpsertRequest(BaseModel):
     schedule_type: Literal["cron", "once"] = "cron"
     cron_expr: str = Field(default="", max_length=120)
     run_at: str = Field(default="", max_length=64)
-    action_type: Literal["message", "agent"] = "message"
+    action_type: Literal["message", "agent", "script"] = "message"
     enabled: bool = True
 
 
@@ -1801,6 +1801,12 @@ def create_app(
                 datetime.fromisoformat(payload.run_at.strip())
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=f"Neplatný formát data: {exc}") from exc
+
+        if payload.action_type == "script":
+            try:
+                parse_script_command(payload.prompt)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Neplatný příkaz skriptu: {exc}") from exc
 
         task = db.upsert_scheduled_task(
             name=payload.name,

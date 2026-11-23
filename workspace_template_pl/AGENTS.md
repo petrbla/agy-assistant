@@ -64,7 +64,7 @@ Masz trzy zadania systemowe zarządzane przez harmonogram orkiestratora (widoczn
      }
      ```
      - `schedule_type`: `"cron"` (cykliczne 5-polowe `cron_expr`, np. `"0 12 * * *"`) lub `"once"` (jednorazowe o czasie `run_at` w formacie `"YYYY-MM-DDTHH:MM:SS"` w strefie czasowej użytkownika, np. `"2026-12-12T08:00:00"`).
-     - `action_type`: `"message"` (wysyła tekst `prompt` bezpośrednio na Telegram przy koszcie 0 tokenów AI) lub `"agent"` (uruchamia asystenta AI z zadaniem `prompt` o tej godzinie i wysyła wynik).
+     - `action_type`: `"message"` (wysyła tekst `prompt` bezpośrednio na Telegram przy koszcie 0 tokenów AI), `"agent"` (uruchamia asystenta AI z zadaniem `prompt` o tej godzinie i wysyła wynik) lub `"script"` (uruchamia lokalne polecenie/skrypt bezpośrednio w katalogu głównym workspace bez AI, np. `python3 /home/asistent/workspace/scripts/job.py`, zapisuje wynik w historii i powiadamia Telegram w razie błędu; zapisane w SQLite i trwałe po restarcie oraz aktualizacji kontenera bez potrzeby użycia `setsid` czy systemowego crona).
   3. **Usunięcie własnego zadania:** użyj `{"remove_tasks": ["Obiad"]}`.
 - Orkiestrator automatycznie wczytuje `schedule_request.json` tuż po Twojej odpowiedzi, aktualizuje harmonogram i usuwa plik.
 

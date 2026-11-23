@@ -673,4 +673,52 @@ async def test_get_quota_usage_executes_agy_and_caches(tmp_path: Path) -> None:
     assert captured_cmds[0] == ("agy", "-p", "/usage", "--output-format", "json")
 
 
+def test_apply_schedule_request_supports_script_and_validates_quotes(tmp_path: Path) -> None:
+    from app.agy_runner import has_schedule_instructions
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / "AGENTS.md").write_text('{"add_tasks": [{"action_type": "message"}]}', encoding="utf-8")
+    assert has_schedule_instructions(ws) is False
+    (ws / "AGENTS.md").write_text('{"add_tasks": [{"action_type": "script"}]}', encoding="utf-8")
+    assert has_schedule_instructions(ws) is True
+
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    runner = AgyRunner(settings, db)
+
+    (ws / "schedule_request.json").write_text(
+        json.dumps(
+            {
+                "add_tasks": [
+                    {
+                        "name": "Denní skript",
+                        "prompt": "python3 /home/asistent/workspace/scripts/job.py",
+                        "schedule_type": "cron",
+                        "cron_expr": "0 * * * *",
+                        "action_type": "script",
+                    },
+                    {
+                        "name": "Rozbitý skript",
+                        "prompt": 'python3 "neuzavrene',
+                        "schedule_type": "cron",
+                        "cron_expr": "0 * * * *",
+                        "action_type": "script",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner._apply_schedule_request(ws)
+
+    tasks = db.list_scheduled_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].name == "Denní skript"
+    assert tasks[0].action_type == "script"
+    assert tasks[0].prompt == "python3 /home/asistent/workspace/scripts/job.py"
+    assert not (ws / "schedule_request.json").exists()
+
+
 

@@ -1654,6 +1654,66 @@ def test_standalone_mcp_card_tool_discovery_and_permissions(tmp_path: Path, monk
     assert all(item["id"] != srv_id for item in client.get("/api/mcp", headers=hdr).json())
 
 
+def test_scheduled_script_task_api_validation_and_run(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+    from app.scheduler import AssistantScheduler
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    settings = Settings(workspace_dir=ws, data_dir=tmp_path / "data", web_auth_token="task-secret")
+    db = AssistantDB(settings.db_path)
+    db.ensure_owner(settings)
+    memory = WorkspaceMemory(ws)
+    runner = AsyncMock()
+    scheduler = AssistantScheduler(settings, runner, db=db)
+
+    app = create_app(settings, db, memory, runner, scheduler=scheduler)
+    client = TestClient(app)
+    hdr = {"Authorization": "Bearer task-secret"}
+
+    bad_res = client.post(
+        "/api/tasks",
+        headers=hdr,
+        json={
+            "name": "Neplatný skript",
+            "prompt": 'python3 "neuzavrene',
+            "schedule_type": "cron",
+            "cron_expr": "0 * * * *",
+            "action_type": "script",
+        },
+    )
+    assert bad_res.status_code == 400
+
+    ok_res = client.post(
+        "/api/tasks",
+        headers=hdr,
+        json={
+            "name": "Hodinový skript",
+            "prompt": "python3 scripts/demo.py",
+            "schedule_type": "cron",
+            "cron_expr": "0 * * * *",
+            "action_type": "script",
+        },
+    )
+    assert ok_res.status_code == 200
+    created = ok_res.json()
+    assert created["action_type"] == "script"
+    assert created["prompt"] == "python3 scripts/demo.py"
+
+    async def _fake_exec(*_cmd, **_kwargs):
+        proc = AsyncMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"hotovo\n", b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        run_res = client.post(f"/api/tasks/{created['id']}/run", headers=hdr)
+    assert run_res.status_code == 200
+    run_data = run_res.json()
+    assert run_data["success"] is True
+    assert run_data["text"] == "hotovo"
+
+
 
 
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
@@ -15,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app import __version__
 from app.agy_runner import AgyResult, AgyRunner
 from app.config import ContextMode, Settings
-from app.db import AssistantDB
+from app.db import AssistantDB, ScheduledTaskRecord, parse_script_command
 from app.github_backup import GitHubBackupResult, run_github_backup as execute_github_backup
 from app.i18n import t
 from app.memory import WorkspaceMemory
@@ -32,6 +34,8 @@ NIGHTLY_MEMORY_FLUSH_PROMPT = t("prompts.nightly_memory_flush", "en")
 IDLE_RESET_MIN_RUNS = 6
 IDLE_RESET_MIN_TOKENS = 20_000
 IDLE_RESET_CHECK_INTERVAL_MINUTES = 10
+SCRIPT_OUTPUT_MAX_CHARS = 8000
+SCRIPT_ALERT_MAX_CHARS = 1500
 
 
 def is_heartbeat_ok(text: str) -> bool:
@@ -449,6 +453,116 @@ class AssistantScheduler:
             "errors": errors,
         }
 
+    async def _run_script_task(self, task: ScheduledTaskRecord, *, notify: bool = True) -> AgyResult:
+        """Spustí naplánovaný lokální skript nebo příkaz přímo bez volání AI."""
+        owner = self.db.get_owner() if self.db is not None else None
+        lang = self._lang()
+        tz_name = (owner.tz if owner is not None else self.settings.tz) or "Europe/Prague"
+        eff_key = owner.gemini_api_key if owner is not None else self.settings.gemini_api_key
+        started = time.monotonic()
+        prompt_label = f"{task.name}: {task.prompt}"
+
+        def _finish(success: bool, response: str, error: str | None) -> AgyResult:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            if self.db is not None:
+                self.db.log_run(
+                    source="script",
+                    session_key=f"task:{task.id}",
+                    context_mode="auto",
+                    prompt=prompt_label,
+                    response=response,
+                    conversation_id=None,
+                    duration_ms=duration_ms,
+                    success=success,
+                    error=error,
+                )
+            return AgyResult(
+                text=response or (error or ""),
+                conversation_id=None,
+                duration_ms=duration_ms,
+                success=success,
+                error=error,
+            )
+
+        async def _notify_failure(err_text: str) -> None:
+            if notify:
+                await self._send_notification(
+                    t(
+                        "backend.script_task_failed_alert",
+                        lang,
+                        name=task.name,
+                        error=err_text[:SCRIPT_ALERT_MAX_CHARS],
+                    )
+                )
+
+        try:
+            argv = parse_script_command(task.prompt)
+        except ValueError as exc:
+            err_msg = str(exc)
+            logger.warning("Neplatný příkaz naplánovaného skriptu '%s': %s", task.name, err_msg)
+            await _notify_failure(err_msg)
+            return _finish(False, "", err_msg)
+
+        env = self.settings.subprocess_env(gemini_api_key=eff_key)
+        env["TZ"] = tz_name
+        cwd = self.settings.workspace_dir
+        cwd.mkdir(parents=True, exist_ok=True)
+        timeout_s = max(30, int(self.settings.agy_timeout_seconds))
+
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=str(cwd),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            if proc is not None and proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+            err_msg = f"Vypršel časový limit skriptu ({timeout_s} s)."
+            logger.warning("Naplánovaný skript '%s' vypršel (%s s).", task.name, timeout_s)
+            await _notify_failure(err_msg)
+            return _finish(False, "", err_msg)
+        except FileNotFoundError:
+            err_msg = f"Příkaz nebo soubor nebyl nalezen: {argv[0]}"
+            logger.warning("Naplánovaný skript '%s' nenalezen: %s", task.name, argv[0])
+            await _notify_failure(err_msg)
+            return _finish(False, "", err_msg)
+        except OSError as exc:
+            err_msg = f"Spuštění skriptu selhalo: {exc}"
+            logger.warning("Spuštění naplánovaného skriptu '%s' selhalo: %s", task.name, exc)
+            await _notify_failure(err_msg)
+            return _finish(False, "", err_msg)
+
+        stdout_s = stdout_b.decode("utf-8", errors="replace").strip()
+        stderr_s = stderr_b.decode("utf-8", errors="replace").strip()
+        if stdout_s and stderr_s:
+            combined = f"{stdout_s}\n[stderr]\n{stderr_s}"
+        else:
+            combined = stdout_s or stderr_s
+        combined = combined[:SCRIPT_OUTPUT_MAX_CHARS]
+
+        if proc.returncode == 0:
+            logger.info("Naplánovaný skript '%s' dokončen (rc=0).", task.name)
+            return _finish(True, combined or "OK (exit 0)", None)
+
+        err_detail = stderr_s or stdout_s or f"Exit code {proc.returncode}"
+        err_msg = f"Exit code {proc.returncode}: {err_detail}"[:SCRIPT_OUTPUT_MAX_CHARS]
+        logger.warning(
+            "Naplánovaný skript '%s' selhal (rc=%s): %s",
+            task.name,
+            proc.returncode,
+            err_detail[:400],
+        )
+        await _notify_failure(err_msg)
+        return _finish(False, combined, err_msg)
+
     async def run_custom_task(self, *, task_id: int, notify: bool = True) -> AgyResult:
         if self.db is None:
             return AgyResult(
@@ -484,6 +598,8 @@ class AssistantScheduler:
             result = AgyResult(
                 text=task.prompt, conversation_id=None, duration_ms=0, success=True
             )
+        elif task.action_type == "script":
+            result = await self._run_script_task(task, notify=notify)
         else:
             result = await self._run_isolated(
                 task.prompt, source="task", session_key=f"task:{task.id}"

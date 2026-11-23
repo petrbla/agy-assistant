@@ -64,7 +64,7 @@ Máš tři systémové automatické úlohy řízené plánovačem systému (jeji
      }
      ```
      - `schedule_type`: `"cron"` (opakovaně podle 5polového `cron_expr`, např. `"0 12 * * *"`) nebo `"once"` (jednorázově v `run_at` ve formátu `"YYYY-MM-DDTHH:MM:SS"` v časovém pásmu uživatele, např. `"2026-12-12T08:00:00"`).
-     - `action_type`: `"message"` (odešle přímo text `prompt` na Telegram bez volání AI) nebo `"agent"` (spustí v daný čas AI asistenta s úkolem v `prompt` a výsledek pošle uživateli).
+     - `action_type`: `"message"` (odešle přímo text `prompt` na Telegram bez volání AI), `"agent"` (spustí v daný čas AI asistenta s úkolem v `prompt` a výsledek pošle uživateli), nebo `"script"` (spustí lokální příkaz/skript přímo v kořenu workspace bez volání AI, např. `python3 /home/asistent/workspace/scripts/job.py`, zaloguje výstup do historie běhů a při chybě upozorní na Telegram; úloha je uložena v SQLite a přežije restart i aktualizaci kontejneru, není potřeba `setsid` ani systémový cron).
   3. **Zrušení vlastní úlohy:** použij `{"remove_tasks": ["Oběd"]}`.
 - Orchestrátor soubor `schedule_request.json` ihned po odpovědi načte, zaregistruje úlohy do plánovače a soubor smaže.
 

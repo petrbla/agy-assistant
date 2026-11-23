@@ -64,7 +64,7 @@ You have three system jobs managed by the orchestrator's scheduler (visible in t
      }
      ```
      - `schedule_type`: `"cron"` (recurring 5-field `cron_expr`, e.g. `"0 12 * * *"`) or `"once"` (one-shot at `run_at` in `"YYYY-MM-DDTHH:MM:SS"` in user's timezone, e.g. `"2026-12-12T08:00:00"`).
-     - `action_type`: `"message"` (sends `prompt` text directly to Telegram with 0 AI tokens) or `"agent"` (runs the AI assistant with `prompt` at that time and sends the result).
+     - `action_type`: `"message"` (sends `prompt` text directly to Telegram with 0 AI tokens), `"agent"` (runs the AI assistant with `prompt` at that time and sends the result), or `"script"` (runs a local command/script directly in the workspace root without AI, e.g. `python3 /home/asistent/workspace/scripts/job.py`, logs output to runs history, and alerts Telegram on error; persisted in SQLite across container restarts and updates so no `setsid` or system cron is needed).
   3. **Removing a custom task:** use `{"remove_tasks": ["Lunch"]}`.
 - The orchestrator automatically reads `schedule_request.json` right after your reply, updates the scheduler, and deletes the file.
 

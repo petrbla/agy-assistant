@@ -64,7 +64,7 @@ Máš tri systémové úlohy spravované plánovačom orchestrátora (viditeľn�
      }
      ```
      - `schedule_type`: `"cron"` (opakované 5-políčkové `cron_expr`, napr. `"0 12 * * *"`) alebo `"once"` (jednorazové v čase `run_at` v tvare `"YYYY-MM-DDTHH:MM:SS"` v časovom pásme používateľa, napr. `"2026-12-12T08:00:00"`).
-     - `action_type`: `"message"` (pošle text `prompt` priamo na Telegram s 0 AI tokenmi) alebo `"agent"` (spustí AI asistenta s úlohou `prompt` v daný čas a odošle výsledok).
+     - `action_type`: `"message"` (pošle text `prompt` priamo na Telegram s 0 AI tokenmi), `"agent"` (spustí AI asistenta s úlohou `prompt` v daný čas a odošle výsledok) alebo `"script"` (spustí lokálny príkaz/skript priamo v koreni workspace bez AI, napr. `python3 /home/asistent/workspace/scripts/job.py`, uloží výstup do histórie behov a pri chybe upozorní na Telegram; úloha je v SQLite a prežije reštart aj aktualizáciu kontajnera bez potreby `setsid` alebo systémového cronu).
   3. **Odobratie vlastnej úlohy:** použi `{"remove_tasks": ["Obed"]}`.
 - Orchestrátor si súbor `schedule_request.json` hneď po tvojej odpovedi automaticky načíta, aktualizuje plánovač a súbor vymaže.
 

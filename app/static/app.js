@@ -345,6 +345,7 @@
     if (typeof syncMcpEditBanner === "function") syncMcpEditBanner();
     if (typeof syncMcpTokenVisibilityUi === "function") syncMcpTokenVisibilityUi();
     if (typeof rerenderMcpStatuses === "function") rerenderMcpStatuses();
+    if (typeof updateTaskPromptPlaceholder === "function") updateTaskPromptPlaceholder();
     refreshCollapsibleLabels();
   }
 
@@ -2057,16 +2058,19 @@
         const next = task.enabled ? nextByName.get(task.name) : null;
         const typePill = task.action_type === "agent"
           ? `<span class="${badgeCls("primary")}">${escapeHtml(t("task_type_ai"))}</span>`
-          : `<span class="${badgeCls()}">${escapeHtml(t("task_type_msg"))}</span>`;
+          : task.action_type === "script"
+            ? `<span class="${badgeCls("warn")}">${escapeHtml(t("task_type_script"))}</span>`
+            : `<span class="${badgeCls()}">${escapeHtml(t("task_type_msg"))}</span>`;
         const statePill = task.enabled
           ? `<span class="${badgeCls("ok")}">${escapeHtml(t("task_state_active"))}</span>`
           : `<span class="${badgeCls()}">${escapeHtml(t("task_state_paused"))}</span>`;
+        const promptCls = task.action_type === "script" ? "task-prompt font-monospace" : "task-prompt";
         tr.innerHTML =
           `<td class="task-name fw-semibold">${escapeHtml(task.name)}</td>` +
           `<td class="text-nowrap"><div title="${escapeHtml(raw)}">${escapeHtml(humanSchedule(task))}</div>` +
           `<div class="small text-body-secondary">${next ? escapeHtml(t("task_next_prefix", { time: fmtNextRun(next) })) : "—"}</div></td>` +
           `<td>${typePill}</td>` +
-          `<td><div class="task-prompt" title="${escapeHtml(task.prompt)}">${escapeHtml(task.prompt)}</div></td>` +
+          `<td><div class="${promptCls}" title="${escapeHtml(task.prompt)}">${escapeHtml(task.prompt)}</div></td>` +
           `<td>${statePill}</td>`;
         const td = document.createElement("td");
         td.className = "text-nowrap text-end";
@@ -2085,8 +2089,12 @@
         };
         td.append(
           mk("play", "btn-outline-secondary btn-icon-sm", t("task_action_run"), async () => {
-            await api(`/api/tasks/${task.id}/run`, { method: "POST" });
-            toast(t("toast_task_run", { name: task.name }));
+            const res = await api(`/api/tasks/${task.id}/run`, { method: "POST" });
+            if (res && res.success === false) {
+              toast(res.error || res.text || t("toast_task_run_failed", { name: task.name }), "err");
+            } else {
+              toast(t("toast_task_run", { name: task.name }));
+            }
           }),
           mk(task.enabled ? "pause" : "play", "btn-outline-secondary btn-icon-sm", task.enabled ? t("task_action_pause") : t("task_action_resume"), async () => {
             await api(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !task.enabled }) });
@@ -2118,11 +2126,21 @@
     }
   }
 
+  function updateTaskPromptPlaceholder() {
+    const act = $("taskActionType");
+    const inp = $("taskPrompt");
+    if (!act || !inp) return;
+    const key = act.value === "script" ? "task_prompt_placeholder_script" : "task_prompt_placeholder";
+    inp.placeholder = t(key);
+  }
+
   $("taskScheduleType").onchange = () => {
     const isOnce = $("taskScheduleType").value === "once";
     $("taskCron").classList.toggle("d-none", isOnce);
     $("taskRunAt").classList.toggle("d-none", !isOnce);
   };
+
+  $("taskActionType").onchange = updateTaskPromptPlaceholder;
 
   $("taskForm").onsubmit = async (e) => {
     e.preventDefault();

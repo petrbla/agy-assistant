@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
 
-from app.db import AssistantDB, OwnerConfig
+from app.db import VALID_TASK_ACTION_TYPES, AssistantDB, OwnerConfig, parse_script_command
 from app.memory import WorkspaceMemory
 from app.plugins import (
     detect_installed_plugins_from_disk,
@@ -250,8 +250,13 @@ def restore_scheduler_backup_payload(
             raise ValueError(f"Neplatný schedule_type u úlohy {name!r}: {schedule_type!r}")
 
         action_type = str(item.get("action_type") or "message").strip()
-        if action_type not in ("message", "agent"):
+        if action_type not in VALID_TASK_ACTION_TYPES:
             raise ValueError(f"Neplatný action_type u úlohy {name!r}: {action_type!r}")
+        if action_type == "script":
+            try:
+                parse_script_command(prompt)
+            except ValueError as exc:
+                raise ValueError(f"Neplatný příkaz skriptu u úlohy {name!r}: {exc}") from exc
 
         cron_expr = str(item.get("cron_expr") or "").strip()
         run_at = str(item.get("run_at") or "").strip()
