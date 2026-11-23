@@ -3174,10 +3174,237 @@
     const isStdio = $("mcpTransport") && $("mcpTransport").value === "stdio";
     if ($("mcpUrlWrap")) $("mcpUrlWrap").classList.toggle("d-none", isStdio);
     if ($("mcpTokenWrap")) $("mcpTokenWrap").classList.toggle("d-none", isStdio);
+    if ($("mcpHeadersWrap")) $("mcpHeadersWrap").classList.toggle("d-none", isStdio);
     if ($("mcpCmdWrap")) $("mcpCmdWrap").classList.toggle("d-none", !isStdio);
     if ($("mcpArgsWrap")) $("mcpArgsWrap").classList.toggle("d-none", !isStdio);
   }
   if ($("mcpTransport")) $("mcpTransport").onchange = syncMcpTransportUi;
+
+  function formatMcpHeadersTextarea(headersObj) {
+    if (!headersObj || typeof headersObj !== "object" || Array.isArray(headersObj)) return "";
+    return Object.entries(headersObj)
+      .map(([k, v]) => [String(k || "").trim(), String(v ?? "").trim()])
+      .filter(([k]) => Boolean(k))
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
+  }
+
+  function parseMcpHeadersInput(rawText) {
+    const cleaned = String(rawText || "").trim();
+    if (!cleaned) return {};
+    if (cleaned.startsWith("{")) {
+      let parsed;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (_) {
+        throw new Error(t("mcp_headers_invalid_line", { line: cleaned.slice(0, 60) }));
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error(t("mcp_headers_invalid_line", { line: cleaned.slice(0, 60) }));
+      }
+      const out = {};
+      Object.entries(parsed).forEach(([k, v]) => {
+        const ck = String(k || "").trim();
+        const cv = String(v ?? "").trim();
+        if (!ck || ck.includes(":") || /[\r\n]/.test(ck) || /[\r\n]/.test(cv)) {
+          throw new Error(t("mcp_headers_invalid_line", { line: ck || String(k) }));
+        }
+        out[ck] = cv;
+      });
+      return out;
+    }
+    const out = {};
+    cleaned.split(/\r?\n/).forEach((rawLine) => {
+      let line = rawLine.trim();
+      if (!line) return;
+      line = line.replace(/,\s*$/, "").trim();
+      if (line.startsWith('"') && line.endsWith('"') && line.length >= 2) {
+        line = line.slice(1, -1).trim();
+      }
+      const idx = line.indexOf(":");
+      if (idx <= 0) {
+        throw new Error(t("mcp_headers_invalid_line", { line }));
+      }
+      const key = line.slice(0, idx).trim();
+      const val = line.slice(idx + 1).trim();
+      if (!key) {
+        throw new Error(t("mcp_headers_invalid_line", { line }));
+      }
+      out[key] = val;
+    });
+    return out;
+  }
+
+  function parseMcpJsonConfig(rawText) {
+    let text = String(rawText || "").trim();
+    if (!text) throw new Error(t("mcp_import_json_empty"));
+    const fenceMatch = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (fenceMatch) text = fenceMatch[1].trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (_) {
+      throw new Error(t("mcp_import_json_invalid"));
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(t("mcp_import_json_invalid"));
+    }
+
+    let srvName = "";
+    let cfg = null;
+    if (parsed.mcpServers && typeof parsed.mcpServers === "object" && !Array.isArray(parsed.mcpServers)) {
+      const entries = Object.entries(parsed.mcpServers).filter(([, v]) => v && typeof v === "object" && !Array.isArray(v));
+      if (!entries.length) throw new Error(t("mcp_import_json_invalid"));
+      srvName = String(entries[0][0] || "").trim();
+      cfg = entries[0][1];
+    } else if (parsed.url || parsed.serverUrl || parsed.httpUrl || parsed.command) {
+      srvName = typeof parsed.name === "string" ? parsed.name.trim() : "";
+      cfg = parsed;
+    } else {
+      const entries = Object.entries(parsed).filter(
+        ([, v]) => v && typeof v === "object" && !Array.isArray(v) && (v.url || v.serverUrl || v.httpUrl || v.command)
+      );
+      if (!entries.length) throw new Error(t("mcp_import_json_invalid"));
+      srvName = String(entries[0][0] || "").trim();
+      cfg = entries[0][1];
+    }
+
+    const headers = {};
+    let authToken = "";
+    const addHeaderEntry = (k, v) => {
+      const key = String(k || "").trim();
+      const val = String(v ?? "").trim();
+      if (!key) return;
+      if (key.toLowerCase() === "authorization" && val.toLowerCase().startsWith("bearer ")) {
+        authToken = val.slice(7).trim();
+      } else {
+        headers[key] = val;
+      }
+    };
+    const addHeaderPair = (pairStr) => {
+      const s = String(pairStr || "").trim();
+      const idx = s.indexOf(":");
+      if (idx <= 0) return;
+      addHeaderEntry(s.slice(0, idx), s.slice(idx + 1));
+    };
+
+    const argsList = Array.isArray(cfg.args) ? cfg.args.map((a) => String(a)) : [];
+    const hasMcpRemote = argsList.some((a) => a.includes("mcp-remote"));
+    const remoteUrl = hasMcpRemote ? argsList.find((a) => /^https?:\/\//i.test(a.trim())) : "";
+
+    if (remoteUrl) {
+      for (let i = 0; i < argsList.length; i += 1) {
+        const arg = argsList[i].trim();
+        if ((arg === "--header" || arg === "-H") && i + 1 < argsList.length) {
+          addHeaderPair(argsList[i + 1]);
+          i += 1;
+        } else if (arg.startsWith("--header=")) {
+          addHeaderPair(arg.slice(9));
+        } else if (arg.startsWith("-H=")) {
+          addHeaderPair(arg.slice(3));
+        }
+      }
+      if (cfg.headers && typeof cfg.headers === "object" && !Array.isArray(cfg.headers)) {
+        Object.entries(cfg.headers).forEach(([k, v]) => addHeaderEntry(k, v));
+      }
+      return {
+        name: srvName,
+        transport: "http",
+        url: remoteUrl.trim(),
+        auth_token: authToken,
+        headers,
+        command: "",
+        args: [],
+      };
+    }
+
+    const directUrl = String(cfg.url || cfg.serverUrl || cfg.httpUrl || "").trim();
+    if (directUrl) {
+      if (cfg.headers && typeof cfg.headers === "object" && !Array.isArray(cfg.headers)) {
+        Object.entries(cfg.headers).forEach(([k, v]) => addHeaderEntry(k, v));
+      }
+      return {
+        name: srvName,
+        transport: "http",
+        url: directUrl,
+        auth_token: authToken,
+        headers,
+        command: "",
+        args: [],
+      };
+    }
+
+    const cmd = String(cfg.command || "").trim();
+    if (cmd) {
+      return {
+        name: srvName,
+        transport: "stdio",
+        url: "",
+        auth_token: "",
+        headers: {},
+        command: cmd,
+        args: argsList,
+      };
+    }
+
+    throw new Error(t("mcp_import_json_invalid"));
+  }
+
+  if ($("toggleMcpJsonImportBtn")) {
+    $("toggleMcpJsonImportBtn").onclick = () => {
+      const box = $("mcpJsonImportBox");
+      if (!box) return;
+      const willOpen = box.classList.contains("d-none");
+      box.classList.toggle("d-none", !willOpen);
+      if (willOpen && $("mcpJsonImportInput")) {
+        $("mcpJsonImportInput").focus();
+      }
+    };
+  }
+  if ($("closeMcpJsonImportBtn")) {
+    $("closeMcpJsonImportBtn").onclick = () => {
+      if ($("mcpJsonImportBox")) $("mcpJsonImportBox").classList.add("d-none");
+    };
+  }
+  if ($("applyMcpJsonImportBtn")) {
+    $("applyMcpJsonImportBtn").onclick = () => {
+      try {
+        const imported = parseMcpJsonConfig($("mcpJsonImportInput") ? $("mcpJsonImportInput").value : "");
+        if ($("mcpName") && (editingMcpId === null || !$("mcpName").value.trim()) && imported.name) {
+          $("mcpName").value = imported.name;
+        }
+        if ($("mcpTransport")) {
+          $("mcpTransport").value = imported.transport === "stdio" ? "stdio" : "http";
+        }
+        syncMcpTransportUi();
+        if (imported.transport === "stdio") {
+          if ($("mcpCommand")) $("mcpCommand").value = imported.command;
+          if ($("mcpArgs")) $("mcpArgs").value = imported.args.length ? JSON.stringify(imported.args) : "";
+        } else {
+          if ($("mcpUrl")) $("mcpUrl").value = imported.url;
+          if ($("mcpHeaders")) $("mcpHeaders").value = formatMcpHeadersTextarea(imported.headers);
+          if (imported.auth_token) {
+            if ($("mcpToken")) $("mcpToken").value = imported.auth_token;
+            mcpTokenDirty = true;
+            mcpTokenLoaded = true;
+            if ($("mcpClearTokenChk")) $("mcpClearTokenChk").checked = false;
+          } else if (editingMcpId !== null && editingMcpHasToken && Object.keys(imported.headers).length > 0) {
+            if ($("mcpClearTokenChk")) $("mcpClearTokenChk").checked = true;
+          } else if (editingMcpId === null && $("mcpToken")) {
+            $("mcpToken").value = "";
+            mcpTokenDirty = false;
+            mcpTokenLoaded = false;
+          }
+          syncMcpTokenVisibilityUi();
+        }
+        if ($("mcpJsonImportInput")) $("mcpJsonImportInput").value = "";
+        if ($("mcpJsonImportBox")) $("mcpJsonImportBox").classList.add("d-none");
+        toast(t("toast_mcp_json_imported"));
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    };
+  }
 
   function syncMcpEditBanner() {
     const isEdit = editingMcpId !== null;
@@ -3304,6 +3531,9 @@
       $("mcpToken").type = "password";
       $("mcpToken").value = "";
     }
+    if ($("mcpHeaders")) $("mcpHeaders").value = "";
+    if ($("mcpJsonImportInput")) $("mcpJsonImportInput").value = "";
+    if ($("mcpJsonImportBox")) $("mcpJsonImportBox").classList.add("d-none");
     if ($("mcpCommand")) $("mcpCommand").value = "";
     if ($("mcpArgs")) $("mcpArgs").value = "";
     if ($("mcpEnabled")) $("mcpEnabled").checked = true;
@@ -3337,6 +3567,8 @@
       $("mcpToken").type = "password";
       $("mcpToken").value = editingMcpHasToken ? MCP_TOKEN_MASK : "";
     }
+    if ($("mcpHeaders")) $("mcpHeaders").value = formatMcpHeadersTextarea(srv.headers || {});
+    if ($("mcpJsonImportBox")) $("mcpJsonImportBox").classList.add("d-none");
     if ($("mcpCommand")) $("mcpCommand").value = srv.command || "";
     if ($("mcpArgs")) {
       $("mcpArgs").value = Array.isArray(srv.args) && srv.args.length
@@ -3573,6 +3805,7 @@
         body.args = raw ? JSON.parse(raw) : [];
       } else {
         body.url = $("mcpUrl").value.trim();
+        body.headers = parseMcpHeadersInput($("mcpHeaders") ? $("mcpHeaders").value : "");
         const tok = $("mcpToken").value.trim();
         if ($("mcpClearTokenChk") && $("mcpClearTokenChk").checked) {
           body.clear_auth_token = true;

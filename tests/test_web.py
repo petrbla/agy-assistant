@@ -1317,11 +1317,15 @@ def test_mcp_token_reveal_and_connection_status_checks(tmp_path: Path, monkeypat
     client = TestClient(app)
     hdr = {"Authorization": "Bearer mcp-status-tajne"}
 
-    # Web UI musí obsahovat tlačítko zobrazení tokenu a ověření připojení MCP serverů
+    # Web UI musí obsahovat tlačítko zobrazení tokenu, hlavičky, JSON import a ověření připojení MCP serverů
     html_res = client.get("/")
     assert html_res.status_code == 200
     assert 'id="toggleMcpTokenBtn"' in html_res.text
     assert 'id="checkMcpStatusBtn"' in html_res.text
+    assert 'id="mcpHeaders"' in html_res.text
+    assert 'id="toggleMcpJsonImportBtn"' in html_res.text
+    assert 'id="mcpJsonImportInput"' in html_res.text
+    assert 'id="applyMcpJsonImportBtn"' in html_res.text
 
     # 1. Vytvoření testovacích MCP serverů (HTTP aktivní, HTTP s chybou autorizace, HTTP vypnutý, stdio OK, stdio neexistující)
     s_http_ok = client.post(
@@ -1450,6 +1454,95 @@ def test_mcp_token_reveal_and_connection_status_checks(tmp_path: Path, monkeypat
     assert single_res.status_code == 200
     assert single_res.json()["connected"] is True
     assert single_res.json()["tools_count"] == 2
+
+    # 4. Vlastní HTTP hlavičky (např. x-api-key): předání do probe, sanitizace chyby, validace a vymazání
+    captured_headers: list[dict[str, str]] = []
+
+    def _fake_post_with_headers(url: str, payload: dict, **kwargs):
+        captured_headers.append(dict(kwargs.get("headers") or {}))
+        if "reject-hdr.example.invalid" in url:
+            raise RuntimeError("Chyba autorizace pro tajny-x-api-key-999")
+        method = payload.get("method")
+        if method == "initialize":
+            return 200, "sid-h", {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-03-26"}}
+        if method == "notifications/initialized":
+            return 202, "sid-h", {}
+        if method == "tools/list":
+            return 200, "sid-h", {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "list_tables"}]}}
+        raise AssertionError(f"Neočekávaná MCP metoda: {method}")
+
+    monkeypatch.setattr(plugins_mod, "_post_mcp_jsonrpc_sync", _fake_post_with_headers)
+
+    s_hdr_ok = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "nocodb-headers",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://hdr.example.invalid/mcp",
+            "headers": {"x-api-key": "tajny-x-api-key-123"},
+            "enabled": True,
+        },
+    ).json()["id"]
+
+    hdr_check = client.post(f"/api/mcp/{s_hdr_ok}/check", headers=hdr)
+    assert hdr_check.status_code == 200
+    assert hdr_check.json()["connected"] is True
+    assert hdr_check.json()["tools_count"] == 1
+    assert captured_headers and captured_headers[0].get("x-api-key") == "tajny-x-api-key-123"
+
+    s_hdr_err = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "nocodb-headers-err",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://reject-hdr.example.invalid/mcp",
+            "headers": {"x-api-key": "tajny-x-api-key-999"},
+            "enabled": True,
+        },
+    ).json()["id"]
+
+    err_check = client.post(f"/api/mcp/{s_hdr_err}/check", headers=hdr)
+    assert err_check.status_code == 200
+    assert err_check.json()["connected"] is False
+    assert "tajny-x-api-key-999" not in err_check.json()["error"]
+    assert "***" in err_check.json()["error"]
+
+    # Neplatný název hlavičky s dvojtečkou nebo novým řádkem musí vrátit 400
+    bad_hdr = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "bad-hdr-srv",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://hdr.example.invalid/mcp",
+            "headers": {"x-bad:key": "val"},
+            "enabled": True,
+        },
+    )
+    assert bad_hdr.status_code == 400
+
+    # Vymazání hlaviček přes headers={}
+    cleared_hdr = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "id": s_hdr_ok,
+            "name": "nocodb-headers",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://hdr.example.invalid/mcp",
+            "headers": {},
+            "enabled": True,
+        },
+    )
+    assert cleared_hdr.status_code == 200
+    assert cleared_hdr.json()["headers"] == {}
+
 
 
 

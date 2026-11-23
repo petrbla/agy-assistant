@@ -754,6 +754,19 @@
                 <span id="mcpEditBannerText"></span>
                 <button id="cancelMcpEditTopBtn" type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" data-i18n="btn_cancel_edit">Cancel edit</button>
               </div>
+              <div class="mb-3">
+                <button id="toggleMcpJsonImportBtn" type="button" class="btn btn-outline-primary btn-sm">
+                  <i class="bi bi-braces me-1" aria-hidden="true"></i><span data-i18n="mcp_btn_import_json">Paste from JSON config</span>
+                </button>
+                <div id="mcpJsonImportBox" class="mt-2 p-2 rounded border bg-body-tertiary d-none">
+                  <div class="small text-body-secondary mb-2" data-i18n="mcp_import_json_hint">Paste the full JSON config from NocoDB, n8n, or Claude (including { "mcpServers": { ... } } and headers like x-api-key:...). URL, headers, and transport will be filled automatically.</div>
+                  <textarea id="mcpJsonImportInput" class="form-control form-control-sm font-monospace mb-2" rows="5" spellcheck="false" data-i18n-placeholder="mcp_import_json_placeholder" placeholder='{"mcpServers": {"NocoDB": {"command": "npx", "args": ["-y", "mcp-remote", "https://...", "--header", "x-api-key:..."]}}}'></textarea>
+                  <div class="d-flex align-items-center gap-2">
+                    <button id="applyMcpJsonImportBtn" type="button" class="btn btn-primary btn-sm" data-i18n="mcp_btn_apply_json">Fill form from JSON</button>
+                    <button id="closeMcpJsonImportBtn" type="button" class="btn btn-outline-secondary btn-sm" data-i18n="btn_close">Close</button>
+                  </div>
+                </div>
+              </div>
               <div class="row g-2 mb-3">
                 <div class="col-md-4">
                   <label for="mcpName" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_name">Name</label>
@@ -792,6 +805,11 @@
                     <input id="mcpClearTokenChk" class="form-check-input" type="checkbox" />
                     <label for="mcpClearTokenChk" class="form-check-label small text-body-secondary" data-i18n="mcp_clear_token_label">Remove saved Bearer token</label>
                   </div>
+                </div>
+                <div id="mcpHeadersWrap" class="col-12">
+                  <label for="mcpHeaders" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_headers">Custom HTTP headers (optional)</label>
+                  <textarea id="mcpHeaders" class="form-control form-control-sm font-monospace" rows="2" spellcheck="false" autocomplete="off" placeholder="x-api-key: your-api-key" data-i18n-placeholder="placeholder_mcp_headers"></textarea>
+                  <div class="form-text small" data-i18n="help_mcp_headers">Include the header name in the format Name: value (one per line), e.g. x-api-key: your-key (used by NocoDB and similar MCP servers).</div>
                 </div>
                 <div id="mcpCmdWrap" class="col-md-5 d-none">
                   <label for="mcpCommand" class="form-label small fw-semibold text-body-secondary" data-i18n="label_mcp_cmd">Command (stdio)</label>

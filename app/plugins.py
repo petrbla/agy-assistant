@@ -1875,7 +1875,7 @@ def _post_mcp_jsonrpc_sync(
             err_detail = err_raw.decode("utf-8", errors="replace").strip()[:250]
         if int(exc.code) in (401, 403):
             raise RuntimeError(
-                f"MCP server odmítl autorizaci (HTTP {exc.code}). Zkontrolujte Bearer token."
+                f"MCP server odmítl autorizaci (HTTP {exc.code}). Zkontrolujte Bearer token nebo vlastní HTTP hlavičky (např. x-api-key)."
             ) from exc
         new_sid = (
             str(exc.headers.get("Mcp-Session-Id") or session_id or "").strip()
@@ -1984,12 +1984,21 @@ def discover_http_mcp_tools_sync(
     return out
 
 
-def _sanitize_mcp_error(message: str, auth_token: str = "") -> str:
-    """Vyčistí chybovou hlášku MCP serveru a odstraní případný Bearer token."""
+def _sanitize_mcp_error(
+    message: str,
+    auth_token: str = "",
+    headers: dict[str, str] | None = None,
+) -> str:
+    """Vyčistí chybovou hlášku MCP serveru a odstraní případný Bearer token či tajné hlavičky."""
     cleaned = " ".join((message or "").split())
     tok = (auth_token or "").strip()
     if tok and tok in cleaned:
         cleaned = cleaned.replace(tok, "***")
+    if isinstance(headers, dict):
+        for val in headers.values():
+            secret = (val or "").strip()
+            if len(secret) >= 6 and secret in cleaned:
+                cleaned = cleaned.replace(secret, "***")
     if len(cleaned) > 220:
         return cleaned[:217] + "…"
     return cleaned
@@ -2069,7 +2078,7 @@ def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) 
             **base,
             "status": "error",
             "latency_ms": _elapsed_ms(),
-            "error": _sanitize_mcp_error(str(exc), srv.auth_token),
+            "error": _sanitize_mcp_error(str(exc), srv.auth_token, headers),
         }
 
     if 200 <= init_status < 300 and isinstance(init_res.get("result"), dict):
@@ -2110,7 +2119,7 @@ def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) 
                     **base,
                     "status": "error",
                     "latency_ms": _elapsed_ms(),
-                    "error": _sanitize_mcp_error(err_msg, srv.auth_token),
+                    "error": _sanitize_mcp_error(err_msg, srv.auth_token, headers),
                 }
             return {
                 **base,
@@ -2134,7 +2143,7 @@ def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) 
             **base,
             "status": "error",
             "latency_ms": _elapsed_ms(),
-            "error": _sanitize_mcp_error(str(exc), srv.auth_token),
+            "error": _sanitize_mcp_error(str(exc), srv.auth_token, headers),
         }
 
     if 200 <= list_status < 300 and isinstance(list_res.get("result"), dict):
@@ -2158,7 +2167,7 @@ def check_mcp_server_status_sync(srv: McpServerRecord, *, timeout: float = 5.0) 
         **base,
         "status": "error",
         "latency_ms": _elapsed_ms(),
-        "error": _sanitize_mcp_error(err_detail, srv.auth_token),
+        "error": _sanitize_mcp_error(err_detail, srv.auth_token, headers),
     }
 
 

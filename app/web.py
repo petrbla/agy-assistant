@@ -879,11 +879,21 @@ def create_app(
         else:
             effective_token = ""
 
-        headers_json = (
-            json.dumps(payload.headers, ensure_ascii=False)
-            if payload.headers is not None
-            else (existing_srv.headers_json if existing_srv is not None else "{}")
-        )
+        if payload.headers is not None:
+            clean_headers: dict[str, str] = {}
+            for k, v in payload.headers.items():
+                ck = str(k).strip()
+                cv = str(v).strip()
+                if not ck:
+                    continue
+                if any(ch in ck for ch in ("\r", "\n", ":")) or any(ch in cv for ch in ("\r", "\n")):
+                    raise HTTPException(
+                        status_code=400, detail=f"Neplatná HTTP hlavička: {ck}"
+                    )
+                clean_headers[ck] = cv
+            headers_json = json.dumps(clean_headers, ensure_ascii=False)
+        else:
+            headers_json = existing_srv.headers_json if existing_srv is not None else "{}"
         env_json = (
             json.dumps(payload.env, ensure_ascii=False)
             if payload.env is not None
