@@ -124,6 +124,9 @@
   let activeSettingsSubtab = sessionStorage.getItem("agy_settings_subtab") || "general";
   let ghBackupCollapsedInit = false;
   let mcpCollapsedInit = false;
+  let editingMcpId = null;
+  let editingMcpName = "";
+  let editingMcpHasToken = false;
   let isBootstrappingAuth = false;
   const chatLogs = { auto: [], pracovni: [], osobni: [] };
 
@@ -333,6 +336,7 @@
     if (pluginConnectTerm) pluginConnectTerm.refreshStatusLabel();
     if (typeof updateAgyTerminalControls === "function") updateAgyTerminalControls(terminalIsRunning);
     if (isAppUpdating) setAppUpdatingUi(true);
+    if (typeof syncMcpEditBanner === "function") syncMcpEditBanner();
     refreshCollapsibleLabels();
   }
 
@@ -3158,13 +3162,93 @@
   };
 
   // MCP
-  $("mcpTransport").onchange = () => {
-    const isStdio = $("mcpTransport").value === "stdio";
-    $("mcpUrlWrap").classList.toggle("d-none", isStdio);
-    $("mcpTokenWrap").classList.toggle("d-none", isStdio);
-    $("mcpCmdWrap").classList.toggle("d-none", !isStdio);
-    $("mcpArgsWrap").classList.toggle("d-none", !isStdio);
-  };
+  function syncMcpTransportUi() {
+    const isStdio = $("mcpTransport") && $("mcpTransport").value === "stdio";
+    if ($("mcpUrlWrap")) $("mcpUrlWrap").classList.toggle("d-none", isStdio);
+    if ($("mcpTokenWrap")) $("mcpTokenWrap").classList.toggle("d-none", isStdio);
+    if ($("mcpCmdWrap")) $("mcpCmdWrap").classList.toggle("d-none", !isStdio);
+    if ($("mcpArgsWrap")) $("mcpArgsWrap").classList.toggle("d-none", !isStdio);
+  }
+  if ($("mcpTransport")) $("mcpTransport").onchange = syncMcpTransportUi;
+
+  function syncMcpEditBanner() {
+    const isEdit = editingMcpId !== null;
+    if ($("mcpEditBanner")) $("mcpEditBanner").classList.toggle("d-none", !isEdit);
+    if ($("mcpEditBannerText")) {
+      $("mcpEditBannerText").textContent = isEdit
+        ? t("mcp_editing_banner", { name: editingMcpName || "" })
+        : "";
+    }
+    if ($("cancelMcpEditBtn")) $("cancelMcpEditBtn").classList.toggle("d-none", !isEdit);
+    const showClearTok = isEdit && editingMcpHasToken;
+    if ($("mcpClearTokenWrap")) $("mcpClearTokenWrap").classList.toggle("d-none", !showClearTok);
+    if ($("mcpToken")) {
+      $("mcpToken").placeholder = showClearTok
+        ? t("mcp_token_saved_placeholder")
+        : t("placeholder_mcp_token");
+    }
+  }
+
+  function resetMcpForm() {
+    editingMcpId = null;
+    editingMcpName = "";
+    editingMcpHasToken = false;
+    if ($("mcpName")) $("mcpName").value = "";
+    if ($("mcpScope")) $("mcpScope").value = "all";
+    if ($("mcpTransport")) $("mcpTransport").value = "http";
+    if ($("mcpUrl")) $("mcpUrl").value = "";
+    if ($("mcpToken")) $("mcpToken").value = "";
+    if ($("mcpCommand")) $("mcpCommand").value = "";
+    if ($("mcpArgs")) $("mcpArgs").value = "";
+    if ($("mcpEnabled")) $("mcpEnabled").checked = true;
+    if ($("mcpClearTokenChk")) $("mcpClearTokenChk").checked = false;
+    if ($("mcpBody")) {
+      $("mcpBody").querySelectorAll("tr.table-active").forEach((row) => {
+        row.classList.remove("table-active");
+      });
+    }
+    syncMcpTransportUi();
+    syncMcpEditBanner();
+  }
+
+  function startEditMcp(srv) {
+    if (!srv) return;
+    editingMcpId = srv.id;
+    editingMcpName = srv.name || "";
+    editingMcpHasToken = Boolean(srv.has_auth_token);
+    if ($("mcpName")) $("mcpName").value = srv.name || "";
+    if ($("mcpScope")) {
+      $("mcpScope").value = ["pracovni", "osobni"].includes(srv.scope) ? srv.scope : "all";
+    }
+    if ($("mcpTransport")) {
+      $("mcpTransport").value = srv.transport === "stdio" ? "stdio" : "http";
+    }
+    if ($("mcpUrl")) $("mcpUrl").value = srv.url || "";
+    if ($("mcpToken")) $("mcpToken").value = "";
+    if ($("mcpCommand")) $("mcpCommand").value = srv.command || "";
+    if ($("mcpArgs")) {
+      $("mcpArgs").value = Array.isArray(srv.args) && srv.args.length
+        ? JSON.stringify(srv.args)
+        : "";
+    }
+    if ($("mcpEnabled")) $("mcpEnabled").checked = srv.enabled !== false;
+    if ($("mcpClearTokenChk")) $("mcpClearTokenChk").checked = false;
+    setCollapsibleCard("mcpCardBody", "toggleMcpCardBtn", true);
+    syncMcpTransportUi();
+    syncMcpEditBanner();
+    if ($("mcpBody")) {
+      $("mcpBody").querySelectorAll("tr").forEach((row) => {
+        row.classList.toggle("table-active", Number(row.dataset.mcpId) === Number(srv.id));
+      });
+    }
+    if ($("mcpForm")) {
+      $("mcpForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    if ($("mcpName")) $("mcpName").focus();
+  }
+
+  if ($("cancelMcpEditBtn")) $("cancelMcpEditBtn").onclick = resetMcpForm;
+  if ($("cancelMcpEditTopBtn")) $("cancelMcpEditTopBtn").onclick = resetMcpForm;
 
   function createInlineScopeSelect(currentScope, onChange) {
     const sel = document.createElement("select");
@@ -3212,9 +3296,14 @@
       tb.innerHTML = "";
       items.forEach((srv) => {
         const tr = document.createElement("tr");
+        tr.dataset.mcpId = String(srv.id);
+        if (editingMcpId === srv.id) tr.classList.add("table-active");
         const target = srv.transport === "stdio" ? `${srv.command} ${(srv.args || []).join(" ")}` : srv.url;
         const nameTd = document.createElement("td");
-        nameTd.innerHTML = `<strong>${escapeHtml(srv.name)}</strong>`;
+        const disabledBadge = srv.enabled === false
+          ? ` <span class="badge rounded-pill text-bg-secondary ms-1">${escapeHtml(t("mcp_status_disabled"))}</span>`
+          : "";
+        nameTd.innerHTML = `<strong>${escapeHtml(srv.name)}</strong>${disabledBadge}`;
         const scopeTd = document.createElement("td");
         scopeTd.appendChild(
           createInlineScopeSelect(srv.scope, async (nextScope) => {
@@ -3231,16 +3320,27 @@
         targetTd.className = "font-monospace";
         targetTd.textContent = target;
         const td = document.createElement("td");
+        td.className = "text-nowrap";
+        const actionsWrap = document.createElement("div");
+        actionsWrap.className = "d-flex align-items-center gap-1";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "btn btn-outline-secondary btn-sm";
+        editBtn.textContent = t("btn_edit");
+        editBtn.onclick = () => startEditMcp(srv);
         const del = document.createElement("button");
+        del.type = "button";
         del.className = "btn btn-outline-danger btn-sm";
         del.textContent = t("btn_delete");
         del.onclick = async () => {
           await api(`/api/mcp/${srv.id}`, { method: "DELETE" });
+          if (editingMcpId === srv.id) resetMcpForm();
           toast(t("toast_mcp_deleted"));
           loadMcp();
           loadPlugins();
         };
-        td.appendChild(del);
+        actionsWrap.append(editBtn, del);
+        td.appendChild(actionsWrap);
         tr.append(nameTd, scopeTd, targetTd, td);
         tb.appendChild(tr);
       });
@@ -3256,6 +3356,9 @@
       transport: tr,
       enabled: $("mcpEnabled").checked,
     };
+    if (editingMcpId !== null) {
+      body.id = editingMcpId;
+    }
     try {
       if (tr === "stdio") {
         body.command = $("mcpCommand").value.trim();
@@ -3264,12 +3367,17 @@
       } else {
         body.url = $("mcpUrl").value.trim();
         const tok = $("mcpToken").value.trim();
-        if (tok) body.auth_token = tok;
+        if ($("mcpClearTokenChk") && $("mcpClearTokenChk").checked) {
+          body.clear_auth_token = true;
+        } else if (tok) {
+          body.auth_token = tok;
+        }
       }
       await api("/api/mcp", { method: "POST", body: JSON.stringify(body) });
-      $("mcpName").value = ""; $("mcpUrl").value = ""; $("mcpToken").value = ""; $("mcpCommand").value = ""; $("mcpArgs").value = "";
+      resetMcpForm();
       toast(t("toast_mcp_saved"));
-      loadMcp();
+      await loadMcp();
+      await loadPlugins();
     } catch (err) {
       toast(err.message, "err");
     }

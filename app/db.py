@@ -1023,65 +1023,68 @@ class AssistantDB:
         clean_scope = scope if scope in ("all", "pracovni", "osobni") else "all"
         clean_transport = "stdio" if transport == "stdio" else "http"
 
-        with self._connect() as conn:
-            if server_id is not None:
-                conn.execute(
-                    """
-                    UPDATE mcp_servers
-                    SET name = ?, scope = ?, transport = ?, url = ?, auth_token = ?,
-                        headers_json = ?, command = ?, args_json = ?, env_json = ?, enabled = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        clean_name,
-                        clean_scope,
-                        clean_transport,
-                        url.strip(),
-                        auth_token.strip(),
-                        headers_json or "{}",
-                        command.strip(),
-                        args_json or "[]",
-                        env_json or "{}",
-                        1 if enabled else 0,
-                        server_id,
-                    ),
-                )
-                row = conn.execute("SELECT * FROM mcp_servers WHERE id = ?", (server_id,)).fetchone()
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO mcp_servers (
-                        name, scope, transport, url, auth_token, headers_json,
-                        command, args_json, env_json, enabled, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(name) DO UPDATE SET
-                        scope = excluded.scope,
-                        transport = excluded.transport,
-                        url = excluded.url,
-                        auth_token = excluded.auth_token,
-                        headers_json = excluded.headers_json,
-                        command = excluded.command,
-                        args_json = excluded.args_json,
-                        env_json = excluded.env_json,
-                        enabled = excluded.enabled
-                    """,
-                    (
-                        clean_name,
-                        clean_scope,
-                        clean_transport,
-                        url.strip(),
-                        auth_token.strip(),
-                        headers_json or "{}",
-                        command.strip(),
-                        args_json or "[]",
-                        env_json or "{}",
-                        1 if enabled else 0,
-                        self._now_iso(),
-                    ),
-                )
-                row = conn.execute(
-                    "SELECT * FROM mcp_servers WHERE name = ?", (clean_name,)
-                ).fetchone()
+        try:
+            with self._connect() as conn:
+                if server_id is not None:
+                    conn.execute(
+                        """
+                        UPDATE mcp_servers
+                        SET name = ?, scope = ?, transport = ?, url = ?, auth_token = ?,
+                            headers_json = ?, command = ?, args_json = ?, env_json = ?, enabled = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            clean_name,
+                            clean_scope,
+                            clean_transport,
+                            url.strip(),
+                            auth_token.strip(),
+                            headers_json or "{}",
+                            command.strip(),
+                            args_json or "[]",
+                            env_json or "{}",
+                            1 if enabled else 0,
+                            server_id,
+                        ),
+                    )
+                    row = conn.execute("SELECT * FROM mcp_servers WHERE id = ?", (server_id,)).fetchone()
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO mcp_servers (
+                            name, scope, transport, url, auth_token, headers_json,
+                            command, args_json, env_json, enabled, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(name) DO UPDATE SET
+                            scope = excluded.scope,
+                            transport = excluded.transport,
+                            url = excluded.url,
+                            auth_token = excluded.auth_token,
+                            headers_json = excluded.headers_json,
+                            command = excluded.command,
+                            args_json = excluded.args_json,
+                            env_json = excluded.env_json,
+                            enabled = excluded.enabled
+                        """,
+                        (
+                            clean_name,
+                            clean_scope,
+                            clean_transport,
+                            url.strip(),
+                            auth_token.strip(),
+                            headers_json or "{}",
+                            command.strip(),
+                            args_json or "[]",
+                            env_json or "{}",
+                            1 if enabled else 0,
+                            self._now_iso(),
+                        ),
+                    )
+                    row = conn.execute(
+                        "SELECT * FROM mcp_servers WHERE name = ?", (clean_name,)
+                    ).fetchone()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("MCP server s tímto názvem již existuje.") from exc
         if row is None:
             raise KeyError("MCP server nebyl nalezen.")
         return self._row_to_mcp(row)

@@ -126,6 +126,7 @@ class McpServerUpsertRequest(BaseModel):
     transport: Literal["http", "stdio"] = "http"
     url: str = Field(default="", max_length=1000)
     auth_token: str | None = Field(default=None, max_length=2000)
+    clear_auth_token: bool = False
     headers: dict[str, str] | None = None
     command: str = Field(default="", max_length=300)
     args: list[str] | None = None
@@ -859,13 +860,35 @@ def create_app(
         payload: McpServerUpsertRequest,
         _: OwnerConfig = Depends(require_auth),
     ) -> dict[str, object]:
-        existing_token = ""
-        if payload.id is not None:
-            for item in db.list_mcp_servers():
-                if item.id == payload.id:
-                    existing_token = item.auth_token
-                    break
-        effective_token = payload.auth_token if payload.auth_token is not None else existing_token
+        existing_srv: McpServerRecord | None = None
+        clean_name = payload.name.strip()
+        for item in db.list_mcp_servers():
+            if payload.id is not None and item.id == payload.id:
+                existing_srv = item
+                break
+            if payload.id is None and item.name == clean_name:
+                existing_srv = item
+                break
+
+        if payload.clear_auth_token:
+            effective_token = ""
+        elif payload.auth_token is not None:
+            effective_token = payload.auth_token
+        elif existing_srv is not None:
+            effective_token = existing_srv.auth_token
+        else:
+            effective_token = ""
+
+        headers_json = (
+            json.dumps(payload.headers, ensure_ascii=False)
+            if payload.headers is not None
+            else (existing_srv.headers_json if existing_srv is not None else "{}")
+        )
+        env_json = (
+            json.dumps(payload.env, ensure_ascii=False)
+            if payload.env is not None
+            else (existing_srv.env_json if existing_srv is not None else "{}")
+        )
         try:
             saved = db.upsert_mcp_server(
                 server_id=payload.id,
@@ -874,10 +897,10 @@ def create_app(
                 transport=payload.transport,
                 url=payload.url,
                 auth_token=effective_token,
-                headers_json=json.dumps(payload.headers or {}, ensure_ascii=False),
+                headers_json=headers_json,
                 command=payload.command,
                 args_json=json.dumps(payload.args or [], ensure_ascii=False),
-                env_json=json.dumps(payload.env or {}, ensure_ascii=False),
+                env_json=env_json,
                 enabled=payload.enabled,
             )
         except (ValueError, KeyError) as exc:

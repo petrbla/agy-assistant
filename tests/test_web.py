@@ -71,6 +71,9 @@ def test_health_is_public_and_api_requires_token(tmp_path: Path) -> None:
     assert "appUpdateBanner" in home_res.text
     assert "updateAppBannerBtn" in home_res.text
     assert "updateAppBtn" in home_res.text
+    assert "mcpEditBanner" in home_res.text
+    assert "cancelMcpEditBtn" in home_res.text
+    assert "mcpClearTokenChk" in home_res.text
     compose_txt = (root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "updater:" in compose_txt
     assert "nickfedor/watchtower" in compose_txt
@@ -1186,6 +1189,112 @@ def test_app_self_update_api_and_security(tmp_path: Path, monkeypatch) -> None:
     upd_fail = conf_client.post("/api/app/update", headers=hdr_conf)
     assert upd_fail.status_code == 502
     assert "updater" in upd_fail.json()["detail"].lower()
+
+
+def test_mcp_edit_preserves_token_headers_and_validates_duplicate_name(tmp_path: Path) -> None:
+    ws_dir = tmp_path / "ws_mcp"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings(workspace_dir=ws_dir, data_dir=tmp_path / "data_mcp", web_auth_token="mcp-tajne")
+    db = AssistantDB(settings.db_path)
+    runner = AsyncMock()
+    runner.check_version = AsyncMock(return_value="1.5.14")
+    runner.close_all = AsyncMock()
+
+    app = create_app(settings, db, WorkspaceMemory(ws_dir), runner)
+    client = TestClient(app)
+    hdr = {"Authorization": "Bearer mcp-tajne"}
+
+    # 1. Vytvoření MCP serveru s Bearer tokenem a vlastními hlavičkami
+    res1 = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "nocodb-test",
+            "scope": "all",
+            "transport": "http",
+            "url": "https://example.invalid/mcp/1",
+            "auth_token": "tajny-mcp-token",
+            "headers": {"X-Custom": "abc"},
+            "enabled": True,
+        },
+    )
+    assert res1.status_code == 200
+    srv1 = res1.json()
+    srv1_id = srv1["id"]
+    assert srv1["has_auth_token"] is True
+    assert srv1["headers"] == {"X-Custom": "abc"}
+
+    # 2. Úprava podle id bez předání auth_token a headers -> zachová token i hlavičky
+    res2 = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "id": srv1_id,
+            "name": "nocodb-prejmenovany",
+            "scope": "pracovni",
+            "transport": "http",
+            "url": "https://example.invalid/mcp/2",
+            "enabled": False,
+        },
+    )
+    assert res2.status_code == 200
+    srv2 = res2.json()
+    assert srv2["id"] == srv1_id
+    assert srv2["name"] == "nocodb-prejmenovany"
+    assert srv2["scope"] == "pracovni"
+    assert srv2["url"] == "https://example.invalid/mcp/2"
+    assert srv2["enabled"] is False
+    assert srv2["has_auth_token"] is True
+    assert srv2["headers"] == {"X-Custom": "abc"}
+    stored = db.get_mcp_server(srv1_id)
+    assert stored is not None and stored.auth_token == "tajny-mcp-token"
+
+    # 3. Smazání tokenu pomocí clear_auth_token=True
+    res3 = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "id": srv1_id,
+            "name": "nocodb-prejmenovany",
+            "scope": "pracovni",
+            "transport": "http",
+            "url": "https://example.invalid/mcp/2",
+            "clear_auth_token": True,
+            "enabled": True,
+        },
+    )
+    assert res3.status_code == 200
+    assert res3.json()["has_auth_token"] is False
+    stored_after = db.get_mcp_server(srv1_id)
+    assert stored_after is not None and stored_after.auth_token == ""
+
+    # 4. Kolize názvu při přejmenování na jiný existující MCP server -> 400
+    res_other = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "name": "druhy-server",
+            "scope": "osobni",
+            "transport": "http",
+            "url": "https://example.invalid/mcp/3",
+            "enabled": True,
+        },
+    )
+    assert res_other.status_code == 200
+
+    res_dup = client.post(
+        "/api/mcp",
+        headers=hdr,
+        json={
+            "id": srv1_id,
+            "name": "druhy-server",
+            "scope": "pracovni",
+            "transport": "http",
+            "url": "https://example.invalid/mcp/2",
+            "enabled": True,
+        },
+    )
+    assert res_dup.status_code == 400
 
 
 
